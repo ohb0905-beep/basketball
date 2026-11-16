@@ -2,12 +2,13 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { rollSeasonEvent } from '../data/events';
+import { rollMidSeasonCrossroadsEvent, rollSeasonEvent } from '../data/events';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import {
   ALL_TEAMS,
   evolveLeagueTeamRatings,
   getTeamById,
+   getTeamsByLeague,
   HIGH_SCHOOL_TEAMS,
   SANGMU_TEAM,
   selectBestFitTeamForPlayer,
@@ -15,9 +16,11 @@ import {
 import {
   calculateProjectedNbaPick,
   createInitialCombineState,
+  determineTeamRolePromise,
   evaluateHighSchoolProspect,
   executeDraftResolution,
   generateOffseasonOptions,
+  ROLE_PROMISE_LABELS,
 } from '../engine/draftEngine';
 import {
   buildHallOfFameEntry,
@@ -26,15 +29,20 @@ import {
 } from '../engine/retirementEngine';
 import {
   calculateRoleAndMpg,
+  generateDraftRivals,
   getContractDefaultSalary,
   simulateSeason,
 } from '../engine/seasonSimulator';
 import {
+  applySpecialCampProgram,
   calculateOvr,
   createInitialStats,
   evaluatePlayerBadges,
   getGrowthDnaInfo,
   getPlaystyleInfo,
+  getTraitInfo,
+  rollInitialPotential,
+  rollInnateTrait,
   rollPlayerDnaAndPlaystyle,
 } from '../engine/statCalculator';
 import {
@@ -46,6 +54,7 @@ import {
   PlayerStats,
   Position,
   RetirementReason,
+  SpecialCampType,
   TeamInfo,
   TrainingFocus,
   ViewState,
@@ -83,6 +92,9 @@ interface CareerStoreState {
   setTrainingFocus: (focus: TrainingFocus) => void;
   switchPrimaryPosition: (newPos: Position) => void;
   unlockSecondaryPosition: (secPos: Position) => void;
+  runSpecialCamp: (campType: SpecialCampType) => void;
+  requestTrade: () => void;
+  triggerMidSeasonCrossroads: () => void;
 
   playSeason: () => void;
   resolveEventChoice: (choice: CareerEventChoice) => void;
@@ -130,27 +142,40 @@ export const useCareerStore = create<CareerStoreState>()(
           espnApiConnected: Object.keys(logos).length > 0,
         })),
 
-      startNewCareer: ({ name, jerseyNumber, heightCm, primaryPos, highSchoolTeamId }) => {
+      startNewCareer: ({
+        name,
+        jerseyNumber,
+        heightCm,
+        primaryPos,
+        highSchoolTeamId,
+      }) => {
         const hsTeam: TeamInfo =
-          HIGH_SCHOOL_TEAMS.find((t) => t.id === highSchoolTeamId) || HIGH_SCHOOL_TEAMS[0];
+          HIGH_SCHOOL_TEAMS.find((t) => t.id === highSchoolTeamId) ||
+          HIGH_SCHOOL_TEAMS[0];
 
-        // 등번호가 비어있으면 '0' ~ '99' 사이 무작위 번호 배정
         const trimmedNum = jerseyNumber.trim();
         const assignedJersey =
           trimmedNum.length > 0
             ? trimmedNum
             : String(Math.floor(Math.random() * 100));
 
-        // 개체별 무작위 편차(-4 ~ +5)와 초기 재능 편차가 반영된 랜덤 초기 능력치 + 고유 DNA/성향 생성
         const initialStats = createInitialStats(primaryPos, heightCm);
         const initialOvr = calculateOvr(initialStats, primaryPos);
         const { growthDna, playstyle } = rollPlayerDnaAndPlaystyle(
           initialStats,
           primaryPos
         );
+        const innateTrait = rollInnateTrait(growthDna);
+        const traitInfo = getTraitInfo(innateTrait);
         const dnaInfo = getGrowthDnaInfo(growthDna);
         const styleInfo = getPlaystyleInfo(playstyle);
-        const potential = Math.min(96, Math.max(82, 83 + Math.floor(Math.random() * 13)));
+
+        // 잠재력(Potential) 스펙트럼 전면 개방 (68 ~ 96 연속 분포)
+        const potential = rollInitialPotential(
+          initialOvr,
+          growthDna,
+          innateTrait
+        );
 
         const initialRatingsMap: Record<string, number> = {};
         for (const t of ALL_TEAMS) {
@@ -167,6 +192,7 @@ export const useCareerStore = create<CareerStoreState>()(
           stats: initialStats,
           primaryPos,
           growthDna,
+          traits: [innateTrait],
         };
         const { role } = calculateRoleAndMpg(tempCareer);
 
@@ -179,6 +205,7 @@ export const useCareerStore = create<CareerStoreState>()(
           secondaryPos: null,
           growthDna,
           playstyle,
+          traits: [innateTrait],
           age: 17,
           seasonYear: 2026,
           seasonsPlayed: 0,
@@ -186,6 +213,7 @@ export const useCareerStore = create<CareerStoreState>()(
           peakOvr: initialOvr,
           ovrHistory: [initialOvr],
           potential,
+          potentialBreakthroughCount: 0,
           stats: initialStats,
           lastSeasonDelta: { ins: 0, out: 0, ply: 0, def: 0, reb: 0, phy: 0 },
           league: 'HIGH_SCHOOL',
@@ -193,23 +221,35 @@ export const useCareerStore = create<CareerStoreState>()(
           contractType: 'AMATEUR',
           contractYearsLeft: 3,
           annualSalary: 0,
-          careerEarnings: 0,
+          careerEarnings: 20000, // 고교 유망주 기본 훈련 장학금($20K) 지원으로 첫 캠프 체험 가능
           twoWaySeasonsUsed: 0,
           draftPedigreePick: null,
           draftPedigreeRound: null,
           draftPedigreeSeasonsLeft: 0,
+          promisedRole: 'PROSPECT_DEVELOPMENT',
+          brokenRolePromise: false,
           role,
           coachTrust: 32,
           draftStock: 20,
           trainingFocus: 'BALANCED',
+          lastCampYear: 0,
           militaryExempt: false,
           militaryServiceSeasonsLeft: 0,
           previousTeamBeforeMilitary: null,
           isFarewellTour: false,
           farewellTourCompleted: false,
           isOutOfLeagueWarning: false,
+          agentAdviceShown: false,
+          midSeasonEventTriggeredThisYear: false,
+          rivals: [],
           teamRatingsMap: initialRatingsMap,
-          badges: evaluatePlayerBadges(initialStats, null, growthDna, playstyle),
+          badges: evaluatePlayerBadges(
+            initialStats,
+            null,
+            growthDna,
+            playstyle,
+            [innateTrait]
+          ),
           seasonLogs: [],
           milestones: [
             {
@@ -217,7 +257,7 @@ export const useCareerStore = create<CareerStoreState>()(
               year: 2026,
               age: 17,
               title: `${hsTeam.name} 농구부 입부 (초기 OVR ${initialOvr} · ${dnaInfo.label})`,
-              description: `등번호 #${assignedJersey}번 · [${dnaInfo.label} / ${styleInfo.label}] DNA를 지닌 유망주로 농구 인생의 첫발을 내디뎠어요.`,
+              description: `등번호 #${assignedJersey}번 · [${dnaInfo.label} / ${styleInfo.label} / ${traitInfo.name}] 특성을 지닌 유망주로 농구 인생의 첫발을 내디뎠어요.`,
               type: 'DEBUT',
               teamName: hsTeam.name,
             },
@@ -266,7 +306,7 @@ export const useCareerStore = create<CareerStoreState>()(
           toast: {
             id: `TOAST_${Date.now()}`,
             title: `${hsTeam.name} 입학 완료! (확정 초기 OVR ${initialOvr})`,
-            description: `등번호 #${assignedJersey}번 · ${dnaInfo.badge} · ${styleInfo.badge} 성향이 부여되었어요!`,
+            description: `등번호 #${assignedJersey}번 · ${dnaInfo.badge} · ${styleInfo.badge} · ${traitInfo.badge} 부여!`,
             tone: 'orange',
           },
         });
@@ -339,7 +379,8 @@ export const useCareerStore = create<CareerStoreState>()(
           career.stats,
           secPos,
           career.growthDna,
-          career.playstyle
+          career.playstyle,
+          career.traits
         );
         const { role } = calculateRoleAndMpg({
           ...career,
@@ -375,6 +416,153 @@ export const useCareerStore = create<CareerStoreState>()(
         });
       },
 
+      runSpecialCamp: (campType) => {
+        const { career } = get();
+        if (!career) return;
+        if (career.lastCampYear === career.seasonYear) {
+          get().showToast(
+            '이번 시즌에는 이미 특별 훈련 캠프를 수료했어요!',
+            '특별 캠프 및 신체 개조는 시즌당 1회만 진행할 수 있어요.',
+            'amber'
+          );
+          return;
+        }
+
+        const result = applySpecialCampProgram(career, campType);
+        if ((career.careerEarnings || 0) < result.costUsd) {
+          get().showToast(
+            '보유 자금(누적 연봉)이 부족해요!',
+            `해당 캠프에는 $${(result.costUsd / 1000).toFixed(0)}K의 투자 비용이 필요해요.`,
+            'amber'
+          );
+          return;
+        }
+
+        const nextOvr = calculateOvr(result.nextStats, career.primaryPos);
+        const nextBadges = evaluatePlayerBadges(
+          result.nextStats,
+          career.secondaryPos,
+          career.growthDna,
+          career.playstyle,
+          career.traits
+        );
+        const { role } = calculateRoleAndMpg({
+          ...career,
+          stats: result.nextStats,
+          ovr: nextOvr,
+        });
+
+        set({
+          career: {
+            ...career,
+            stats: result.nextStats,
+            ovr: nextOvr,
+            peakOvr: Math.max(career.peakOvr, nextOvr),
+            potential: result.nextPotential,
+            careerEarnings: Math.max(0, (career.careerEarnings || 0) - result.costUsd),
+            draftStock: Math.min(100, career.draftStock + 4),
+            lastCampYear: career.seasonYear,
+            badges: nextBadges,
+            role,
+            milestones: [
+              ...career.milestones,
+              {
+                id: `MS_CAMP_${Date.now()}`,
+                year: career.seasonYear,
+                age: career.age,
+                title: `🏋️ 비시즌 특별 캠프 수료 (${
+                  campType === 'LEGEND_SKILL_CAMP'
+                    ? '레전드 스킬 캠프'
+                    : campType === 'BULK_UP'
+                    ? '벌크업 신체 개조'
+                    : '린매스업 신체 개조'
+                })`,
+                description: result.summary,
+                type: 'SPECIAL',
+                teamName: career.team.name,
+              },
+            ],
+          },
+          toast: {
+            id: `TOAST_${Date.now()}`,
+            title: '🏋️ 특별 훈련 캠프 & 신체 개조 완료!',
+            description: result.summary,
+            tone: 'emerald',
+          },
+        });
+      },
+
+      requestTrade: () => {
+        const { career } = get();
+        if (!career) return;
+
+        const pool = getTeamsByLeague(career.league, career.teamRatingsMap).filter(
+          (t) => t.id !== career.team.id
+        );
+        if (pool.length === 0) return;
+
+        // 포지션 니즈와 출전 시간이 보장되는 구단으로 트레이드
+        const target =
+          pool.find((t) => t.neededPositions?.includes(career.primaryPos)) ||
+          pool[Math.floor(Math.random() * pool.length)];
+
+        const promise = determineTeamRolePromise(
+          career,
+          target,
+          career.contractType
+        );
+        const { role } = calculateRoleAndMpg({
+          ...career,
+          team: target,
+          coachTrust: 58,
+          promisedRole: promise.promisedRole,
+        });
+
+        set({
+          career: {
+            ...career,
+            team: target,
+            coachTrust: 58,
+            promisedRole: promise.promisedRole,
+            brokenRolePromise: false,
+            role,
+            milestones: [
+              ...career.milestones,
+              {
+                id: `MS_TRADE_${Date.now()}`,
+                year: career.seasonYear,
+                age: career.age,
+                title: `✈️ 공식 트레이드 단행: ${target.name} 이적`,
+                description: `출전 시간과 새로운 역할을 찾아 ${target.name} 구단으로 트레이드 이적했어요 (${promise.promisedRoleLabel}).`,
+                type: 'SPECIAL',
+                teamName: target.name,
+              },
+            ],
+          },
+          toast: {
+            id: `TOAST_${Date.now()}`,
+            title: `✈️ ${target.name}(으)로 트레이드 이적 완료!`,
+            description: `새로운 약속 역할: ${promise.promisedRoleLabel} · 입지: ${role}`,
+            tone: 'orange',
+          },
+        });
+      },
+
+      triggerMidSeasonCrossroads: () => {
+        const { career } = get();
+        if (!career || career.pendingEvent || career.midSeasonEventTriggeredThisYear) {
+          return;
+        }
+        const midEvt = rollMidSeasonCrossroadsEvent(career);
+        set({
+          career: {
+            ...career,
+            midSeasonEventTriggeredThisYear: true,
+            pendingEvent: midEvt,
+          },
+        });
+      },
+
       playSeason: () => {
         const { career } = get();
         if (!career || career.offseasonLocked) return;
@@ -398,20 +586,25 @@ export const useCareerStore = create<CareerStoreState>()(
           blocks: career.totals.blocks + seasonBlk,
           nbaGp: career.totals.nbaGp + (isNba ? bs.gp : 0),
           nbaPoints: career.totals.nbaPoints + (isNba ? seasonPts : 0),
-          championships: career.totals.championships + (bs.wonChampionship ? 1 : 0),
+          championships:
+            career.totals.championships + (bs.wonChampionship ? 1 : 0),
           nbaChampionships:
-            career.totals.nbaChampionships + (isNba && bs.wonChampionship ? 1 : 0),
+            career.totals.nbaChampionships +
+            (isNba && bs.wonChampionship ? 1 : 0),
           mvps: career.totals.mvps + (bs.wonMvp ? 1 : 0),
           nbaMvps: career.totals.nbaMvps + (isNba && bs.wonMvp ? 1 : 0),
-          finalsMvps: (career.totals.finalsMvps || 0) + (bs.wonFinalsMvp ? 1 : 0),
+          finalsMvps:
+            (career.totals.finalsMvps || 0) + (bs.wonFinalsMvp ? 1 : 0),
           dpoys: (career.totals.dpoys || 0) + (bs.wonDpoy ? 1 : 0),
           sixthManAwards:
             (career.totals.sixthManAwards || 0) + (bs.wonSixthMan ? 1 : 0),
           mips: (career.totals.mips || 0) + (bs.wonMip ? 1 : 0),
           allLeagueSelections:
-            (career.totals.allLeagueSelections || 0) + (bs.allLeagueTeam ? 1 : 0),
+            (career.totals.allLeagueSelections || 0) +
+            (bs.allLeagueTeam ? 1 : 0),
           allStars: career.totals.allStars + (bs.allStarSelected ? 1 : 0),
-          nbaAllStars: career.totals.nbaAllStars + (isNba && bs.allStarSelected ? 1 : 0),
+          nbaAllStars:
+            career.totals.nbaAllStars + (isNba && bs.allStarSelected ? 1 : 0),
         };
 
         const nextHighs = { ...career.careerHighs };
@@ -419,10 +612,22 @@ export const useCareerStore = create<CareerStoreState>()(
           nextHighs.points = bs.singleGameHighPts;
           nextHighs.pointsContext = `${bs.year}시즌 ${bs.teamShortName} (${bs.leagueName})`;
         }
-        nextHighs.rebounds = Math.max(nextHighs.rebounds, Math.round(bs.rpg * 1.85 + 2));
-        nextHighs.assists = Math.max(nextHighs.assists, Math.round(bs.apg * 1.9 + 2));
-        nextHighs.steals = Math.max(nextHighs.steals, Math.min(10, Math.round(bs.spg * 2.8 + 1)));
-        nextHighs.blocks = Math.max(nextHighs.blocks, Math.min(11, Math.round(bs.bpg * 2.9 + 1)));
+        nextHighs.rebounds = Math.max(
+          nextHighs.rebounds,
+          Math.round(bs.rpg * 1.85 + 2)
+        );
+        nextHighs.assists = Math.max(
+          nextHighs.assists,
+          Math.round(bs.apg * 1.9 + 2)
+        );
+        nextHighs.steals = Math.max(
+          nextHighs.steals,
+          Math.min(10, Math.round(bs.spg * 2.8 + 1))
+        );
+        nextHighs.blocks = Math.max(
+          nextHighs.blocks,
+          Math.min(11, Math.round(bs.bpg * 2.9 + 1))
+        );
 
         const newMilestones = [...career.milestones];
         if (bs.wonChampionship) {
@@ -430,7 +635,9 @@ export const useCareerStore = create<CareerStoreState>()(
             id: `MS_CHAMP_${bs.year}`,
             year: bs.year,
             age: bs.age,
-            title: `💍 ${bs.leagueName} 챔피언십 우승${bs.wonFinalsMvp ? ' & 파이널 MVP!' : '!'}`,
+            title: `💍 ${bs.leagueName} 챔피언십 우승${
+              bs.wonFinalsMvp ? ' & 파이널 MVP!' : '!'
+            }`,
             description: `${bs.teamName} 소속으로 평균 ${bs.ppg}점을 기록하며 정상에 등극했어요!`,
             type: 'CHAMPIONSHIP',
             teamName: bs.teamName,
@@ -480,6 +687,17 @@ export const useCareerStore = create<CareerStoreState>()(
             teamName: bs.teamName,
           });
         }
+        if (sim.potentialBreakthroughReason) {
+          newMilestones.push({
+            id: `MS_BREAKTHROUGH_${bs.year}`,
+            year: bs.year,
+            age: bs.age,
+            title: `🚀 잠재력 한계 돌파! (POT ${career.potential} → ${sim.nextPotential})`,
+            description: sim.potentialBreakthroughReason,
+            type: 'SPECIAL',
+            teamName: bs.teamName,
+          });
+        }
         if (bs.singleGameHighPts >= 40) {
           newMilestones.push({
             id: `MS_40PTS_${bs.year}`,
@@ -505,8 +723,9 @@ export const useCareerStore = create<CareerStoreState>()(
           (career.draftPedigreeSeasonsLeft ?? 0) - 1
         );
 
-        // 매 오프시즌 구단 전력 동적 변화 (±3 범위)
-        const nextRatingsMap = evolveLeagueTeamRatings(career.teamRatingsMap || {});
+        const nextRatingsMap = evolveLeagueTeamRatings(
+          career.teamRatingsMap || {}
+        );
         let nextTeam =
           getTeamById(career.team.id, nextRatingsMap) || career.team;
         let nextLeague = career.league;
@@ -516,7 +735,6 @@ export const useCareerStore = create<CareerStoreState>()(
         let nextMilitaryLeft = career.militaryServiceSeasonsLeft;
         let nextPrevTeam = career.previousTeamBeforeMilitary;
 
-        // 상무 복무 기간 차감 및 전역 처리 (특정 팀 하드코딩 없이 원소속팀 또는 동적 최적 구단 복귀)
         if (nextMilitaryLeft > 0) {
           nextMilitaryLeft -= 1;
           if (nextMilitaryLeft === 0) {
@@ -531,9 +749,13 @@ export const useCareerStore = create<CareerStoreState>()(
               );
             nextTeam = returnTeam;
             nextLeague = returnTeam.league;
-            nextContractType = returnTeam.league === 'KBL' ? 'KBL_MAX' : 'OVERSEAS_CONTRACT';
+            nextContractType =
+              returnTeam.league === 'KBL' ? 'KBL_MAX' : 'OVERSEAS_CONTRACT';
             nextContractYearsLeft = 0;
-            nextAnnualSalary = getContractDefaultSalary(nextContractType, sim.nextOvr);
+            nextAnnualSalary = getContractDefaultSalary(
+              nextContractType,
+              sim.nextOvr
+            );
             nextPrevTeam = null;
 
             newMilestones.push({
@@ -541,7 +763,8 @@ export const useCareerStore = create<CareerStoreState>()(
               year: nextSeasonYear,
               age: nextAge,
               title: '🎖️ 국군체육부대(상무) 만기 전역!',
-              description: '2시즌 동안의 상무 복무를 마치고 당당히 프로 코트로 복귀했어요!',
+              description:
+                '2시즌 동안의 상무 복무를 마치고 당당히 프로 코트로 복귀했어요!',
               type: 'MILITARY',
               teamName: SANGMU_TEAM.name,
             });
@@ -556,8 +779,13 @@ export const useCareerStore = create<CareerStoreState>()(
           ovr: sim.nextOvr,
           peakOvr: Math.max(career.peakOvr, sim.nextOvr),
           ovrHistory: [...(career.ovrHistory || [career.ovr]), sim.nextOvr],
+          potential: sim.nextPotential,
+          potentialBreakthroughCount:
+            (career.potentialBreakthroughCount || 0) +
+            (sim.potentialBreakthroughReason ? 1 : 0),
           stats: sim.nextStats,
           lastSeasonDelta: sim.statDelta,
+          traits: sim.nextTraits,
           league: nextLeague,
           team: nextTeam,
           contractType: nextContractType,
@@ -566,12 +794,15 @@ export const useCareerStore = create<CareerStoreState>()(
           careerEarnings: (career.careerEarnings || 0) + bs.salaryEarned,
           twoWaySeasonsUsed: nextTwoWaySeasonsUsed,
           draftPedigreeSeasonsLeft: nextPedigreeSeasonsLeft,
+          brokenRolePromise: sim.brokenRolePromise,
           role: bs.role,
           coachTrust: sim.nextCoachTrust,
           draftStock: sim.nextDraftStock,
           militaryExempt: nextMilitaryExempt,
           militaryServiceSeasonsLeft: nextMilitaryLeft,
           previousTeamBeforeMilitary: nextPrevTeam,
+          midSeasonEventTriggeredThisYear: false,
+          rivals: sim.updatedRivals,
           teamRatingsMap: nextRatingsMap,
           badges: sim.nextBadges,
           seasonLogs: [...career.seasonLogs, bs],
@@ -583,13 +814,14 @@ export const useCareerStore = create<CareerStoreState>()(
           pendingEvent: null,
         };
 
-        // 고교 졸업(만 20세) 도달 시 유망주 등급(1~5성) 산출 기록
-        if (updatedCareerBase.league === 'HIGH_SCHOOL' && updatedCareerBase.age >= 20) {
+        if (
+          updatedCareerBase.league === 'HIGH_SCHOOL' &&
+          updatedCareerBase.age >= 20
+        ) {
           const hsEval = evaluateHighSchoolProspect(updatedCareerBase);
           updatedCareerBase.prospectStars = hsEval.stars;
         }
 
-        // 1) 만약 레전드 은퇴 투어 시즌이었다면 시즌 종료와 동시에 자동 은퇴식 진행 (시나리오 ②)
         if (career.isFarewellTour) {
           const legacyEval = evaluateCareerLegacy(updatedCareerBase);
           set({
@@ -604,7 +836,6 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
-        // 2) 만 40세 정년 은퇴 도달 시 의무 은퇴식 진행 (시나리오 ⑤)
         if (nextAge >= 40) {
           const legacyEval = evaluateCareerLegacy(updatedCareerBase);
           set({
@@ -618,7 +849,6 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
-        // 3) 시즌 이벤트 롤링 (만 27세 상무 입대 / 노장 부상 / 기량하락 은퇴제안 / 아시안게임 / 포지션 분기)
         const rolledEvent = rollSeasonEvent(updatedCareerBase);
         const offseasonOptions = generateOffseasonOptions(updatedCareerBase);
         const { isOutOfLeague } = checkRetirementEligibility(updatedCareerBase);
@@ -629,6 +859,9 @@ export const useCareerStore = create<CareerStoreState>()(
         set({
           career: {
             ...updatedCareerBase,
+            agentAdviceShown:
+              updatedCareerBase.agentAdviceShown ||
+              rolledEvent?.id === 'EVT_AGENT_RETIREMENT_ADVICE',
             isOutOfLeagueWarning: isOutOfLeague || hasNoActiveOffers,
             offseasonOptions,
             pendingEvent: rolledEvent,
@@ -640,7 +873,6 @@ export const useCareerStore = create<CareerStoreState>()(
         const { career } = get();
         if (!career) return;
 
-        // 노장 치명적 부상 또는 에이전트 은퇴 권유에서 현역 은퇴를 선택한 경우
         if (choice.triggerRetirement) {
           const legacyEval = evaluateCareerLegacy(career);
           set({
@@ -657,7 +889,9 @@ export const useCareerStore = create<CareerStoreState>()(
 
         const nextStats: PlayerStats = { ...career.stats };
         if (choice.statChanges) {
-          for (const k of Object.keys(choice.statChanges) as (keyof PlayerStats)[]) {
+          for (const k of Object.keys(
+            choice.statChanges
+          ) as (keyof PlayerStats)[]) {
             const diff = choice.statChanges[k] || 0;
             nextStats[k] = clampStat(nextStats[k] + diff);
           }
@@ -666,6 +900,10 @@ export const useCareerStore = create<CareerStoreState>()(
         const nextPrimary = choice.switchPrimaryPos || career.primaryPos;
         const nextSecondary = choice.unlockSecondaryPos || career.secondaryPos;
         const nextOvr = calculateOvr(nextStats, nextPrimary);
+        const nextPotential = Math.min(
+          98,
+          career.potential + (choice.potentialDelta || 0)
+        );
         const nextTrust = Math.max(
           10,
           Math.min(100, career.coachTrust + (choice.trustDelta || 0))
@@ -674,7 +912,8 @@ export const useCareerStore = create<CareerStoreState>()(
           10,
           Math.min(100, career.draftStock + (choice.draftStockDelta || 0))
         );
-        const nextMilitaryExempt = career.militaryExempt || Boolean(choice.grantMilitaryExemption);
+        const nextMilitaryExempt =
+          career.militaryExempt || Boolean(choice.grantMilitaryExemption);
         const nextMilestones = [...career.milestones];
 
         let nextLeague = career.league;
@@ -684,6 +923,7 @@ export const useCareerStore = create<CareerStoreState>()(
         let nextAnnualSalary = career.annualSalary;
         let nextMilitaryServiceLeft = career.militaryServiceSeasonsLeft;
         let nextPrevTeam = career.previousTeamBeforeMilitary;
+        let nextPromisedRole = career.promisedRole;
 
         if (choice.grantMilitaryExemption && !career.militaryExempt) {
           nextMilestones.push({
@@ -698,7 +938,6 @@ export const useCareerStore = create<CareerStoreState>()(
           });
         }
 
-        // 만 27세 상무 입대 처리 (2시즌 복무)
         if (choice.enlistSangmu) {
           nextPrevTeam = career.team;
           nextLeague = 'KBL';
@@ -720,6 +959,41 @@ export const useCareerStore = create<CareerStoreState>()(
           });
         }
 
+        // 시즌 중반 트레이드 데드라인 이적 실행
+        if (choice.executeTradeToContender) {
+          const sameLeagueTeams = getTeamsByLeague(
+            career.league,
+            career.teamRatingsMap
+          ).filter((t) => t.id !== career.team.id);
+          const contenders = sameLeagueTeams.filter(
+            (t) =>
+              t.direction === 'CONTENDER' || t.direction === 'PLAYOFF_HUNT'
+          );
+          const pickedContender =
+            contenders.find((t) =>
+              t.neededPositions?.includes(career.primaryPos)
+            ) ||
+            contenders[0] ||
+            sameLeagueTeams[0];
+
+          if (pickedContender) {
+            nextTeam = pickedContender;
+            nextPromisedRole =
+              career.ovr >= pickedContender.rating - 1
+                ? 'STARTER_GUARANTEE'
+                : 'SIXTH_MAN_CORE';
+            nextMilestones.push({
+              id: `MS_MID_TRADE_${Date.now()}`,
+              year: career.seasonYear,
+              age: career.age,
+              title: `✈️ 트레이드 데드라인 전격 이적: ${pickedContender.name}`,
+              description: `시즌 중반 우승 반지와 새로운 기회를 찾아 ${pickedContender.name}(으)로 유니폼을 갈아입었어요!`,
+              type: 'SPECIAL',
+              teamName: pickedContender.name,
+            });
+          }
+        }
+
         const updatedBase: CareerState = {
           ...career,
           primaryPos: nextPrimary,
@@ -727,6 +1001,7 @@ export const useCareerStore = create<CareerStoreState>()(
           stats: nextStats,
           ovr: nextOvr,
           peakOvr: Math.max(career.peakOvr, nextOvr),
+          potential: nextPotential,
           coachTrust: nextTrust,
           draftStock: nextStock,
           league: nextLeague,
@@ -734,6 +1009,12 @@ export const useCareerStore = create<CareerStoreState>()(
           contractType: nextContractType,
           contractYearsLeft: nextContractYearsLeft,
           annualSalary: nextAnnualSalary,
+          promisedRole: nextPromisedRole,
+          brokenRolePromise: choice.executeTradeToContender
+            ? false
+            : career.brokenRolePromise,
+          agentAdviceShown:
+            career.agentAdviceShown || Boolean(choice.markAgentAdviceDismissed),
           militaryExempt: nextMilitaryExempt,
           militaryServiceSeasonsLeft: nextMilitaryServiceLeft,
           previousTeamBeforeMilitary: nextPrevTeam,
@@ -741,13 +1022,16 @@ export const useCareerStore = create<CareerStoreState>()(
             nextStats,
             nextSecondary,
             career.growthDna,
-            career.playstyle
+            career.playstyle,
+            career.traits
           ),
           milestones: nextMilestones,
           pendingEvent: null,
         };
 
-        const refreshedOptions = generateOffseasonOptions(updatedBase);
+        const refreshedOptions = updatedBase.offseasonLocked
+          ? generateOffseasonOptions(updatedBase)
+          : [];
 
         set({
           career: {
@@ -758,6 +1042,8 @@ export const useCareerStore = create<CareerStoreState>()(
             id: `TOAST_${Date.now()}`,
             title: choice.enlistSangmu
               ? '🫡 국군체육부대(상무)에 입대했어요!'
+              : choice.executeTradeToContender
+              ? `✈️ ${nextTeam.name}(으)로 트레이드 이적 완료!`
               : '선택 결과가 선수에게 반영되었어요!',
             description: choice.effectSummary,
             tone: 'emerald',
@@ -769,7 +1055,6 @@ export const useCareerStore = create<CareerStoreState>()(
         const { career } = get();
         if (!career || option.locked) return;
 
-        // 1) 자율 명예 은퇴 또는 미계약/방출 은퇴 선택 시
         if (option.actionType === 'RETIRE_VOLUNTARY') {
           get().triggerRetirement('VOLUNTARY_HONOR');
           return;
@@ -779,7 +1064,6 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
-        // 2) 레전드 은퇴 투어 선언 시
         if (option.actionType === 'START_FAREWELL_TOUR') {
           set({
             career: {
@@ -811,7 +1095,6 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
-        // 3) 고국 KBL 복귀 후 국내 팬 앞 마지막 1년 은퇴 투어
         if (option.actionType === 'RETURN_KBL_FAREWELL' && option.targetTeam) {
           const { role } = calculateRoleAndMpg({
             ...career,
@@ -839,7 +1122,8 @@ export const useCareerStore = create<CareerStoreState>()(
                   year: career.seasonYear,
                   age: career.age,
                   title: `🇰🇷 ${option.targetTeam.name} 복귀 & 고별 투어 선언`,
-                  description: '국내 팬들 앞에서 현역 마지막 시즌을 불태우기로 결정했어요!',
+                  description:
+                    '국내 팬들 앞에서 현역 마지막 시즌을 불태우기로 결정했어요!',
                   type: 'TOUR',
                   teamName: option.targetTeam.name,
                 },
@@ -855,7 +1139,6 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
-        // 4) NBA 드래프트 참가 신청 -> 시카고 컴바인 화면으로 이동
         if (option.actionType === 'ENTER_NBA_DRAFT') {
           const combineState = createInitialCombineState(career);
           set({
@@ -869,7 +1152,6 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
-        // 5) KBL 신인드래프트 참가 신청 -> 즉시 드래프트 지명 무대로 이동
         if (option.actionType === 'ENTER_KBL_DRAFT') {
           const draftResult = executeDraftResolution(career, 'KBL');
           set({
@@ -882,22 +1164,39 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
-        // 6) 소속팀 잔류 또는 신규 구단 계약
         const rawNextTeam = option.targetTeam || career.team;
         const nextTeam =
           getTeamById(rawNextTeam.id, career.teamRatingsMap) || rawNextTeam;
         const nextLeague = option.targetLeague;
         const isTeamChanged = nextTeam.id !== career.team.id;
-        const nextTrust = isTeamChanged ? 52 : career.coachTrust;
+        const nextTrust = isTeamChanged ? 54 : career.coachTrust;
         const nextSalary =
           option.annualSalary !== undefined
             ? option.annualSalary
             : getContractDefaultSalary(option.contractType, career.ovr);
 
-        // 이적 시 드래프트 위상 보정 초기화 (단, 동일 구단 잔류 시 유지)
+        const nextPromisedRole =
+          option.promisedRole ||
+          determineTeamRolePromise(career, nextTeam, option.contractType)
+            .promisedRole;
+
         const nextPedigreeSeasons = isTeamChanged
           ? 0
           : career.draftPedigreeSeasonsLeft ?? 0;
+
+        // 만약 KBL 또는 NBA에 최초 입단했는데 아직 해당 리그 라이벌이 없다면 절차적 라이벌 생성
+        let nextRivals = career.rivals || [];
+        if (
+          (nextLeague === 'KBL' || nextLeague === 'NBA') &&
+          !nextRivals.some((r) => r.league === nextLeague)
+        ) {
+          const created = generateDraftRivals(
+            career,
+            nextLeague,
+            nextTeam.id
+          );
+          nextRivals = [...nextRivals, ...created];
+        }
 
         const { role } = calculateRoleAndMpg({
           ovr: career.ovr,
@@ -909,6 +1208,8 @@ export const useCareerStore = create<CareerStoreState>()(
           stats: career.stats,
           primaryPos: career.primaryPos,
           growthDna: career.growthDna,
+          traits: career.traits,
+          promisedRole: nextPromisedRole,
           draftPedigreePick: isTeamChanged ? null : career.draftPedigreePick,
           draftPedigreeRound: isTeamChanged ? null : career.draftPedigreeRound,
           draftPedigreeSeasonsLeft: nextPedigreeSeasons,
@@ -921,8 +1222,8 @@ export const useCareerStore = create<CareerStoreState>()(
             id: `MS_SIGN_${Date.now()}`,
             year: career.seasonYear,
             age: career.age,
-            title: `${nextTeam.name} (${LEAGUE_CONFIG[nextLeague].shortName}) 입단`,
-            description: `'${role}' 입지로 새로운 도전을 시작했어요.`,
+            title: `${nextTeam.name} (${LEAGUE_CONFIG[nextLeague].shortName}) 계약 체결`,
+            description: `약속 역할 [${ROLE_PROMISE_LABELS[nextPromisedRole]}] · '${role}' 입지로 새로운 도전을 시작했어요.`,
             type: 'SPECIAL',
             teamName: nextTeam.name,
           });
@@ -943,6 +1244,9 @@ export const useCareerStore = create<CareerStoreState>()(
             draftPedigreePick: isTeamChanged ? null : career.draftPedigreePick,
             draftPedigreeRound: isTeamChanged ? null : career.draftPedigreeRound,
             draftPedigreeSeasonsLeft: nextPedigreeSeasons,
+            promisedRole: nextPromisedRole,
+            brokenRolePromise: false,
+            rivals: nextRivals,
             coachTrust: nextTrust,
             role,
             isOutOfLeagueWarning: false,
@@ -955,7 +1259,7 @@ export const useCareerStore = create<CareerStoreState>()(
             title: isTeamChanged
               ? `${nextTeam.name} 계약을 완료했어요!`
               : `${nextTeam.name}에서 새 시즌을 준비해요!`,
-            description: `현재 팀 내 입지: ${role}`,
+            description: `구단 약속 역할: ${ROLE_PROMISE_LABELS[nextPromisedRole]}`,
             tone: 'orange',
           },
         });
@@ -1006,12 +1310,24 @@ export const useCareerStore = create<CareerStoreState>()(
 
       completeCombineInterview: (answerType) => {
         const { career } = get();
-        if (!career || !career.combineState || career.combineState.interviewCompleted) return;
+        if (
+          !career ||
+          !career.combineState ||
+          career.combineState.interviewCompleted
+        )
+          return;
 
         const interviewBonus =
-          answerType === 'CONFIDENT' ? 4.5 : answerType === 'TEAM_FIRST' ? 3.5 : 4.0;
+          answerType === 'CONFIDENT'
+            ? 4.5
+            : answerType === 'TEAM_FIRST'
+            ? 3.5
+            : 4.0;
         const newBonus = career.combineState.combineBonusScore + interviewBonus;
-        const { projectedPick, undraftedRisk } = calculateProjectedNbaPick(career, newBonus);
+        const { projectedPick, undraftedRisk } = calculateProjectedNbaPick(
+          career,
+          newBonus
+        );
 
         set({
           career: {
@@ -1053,7 +1369,8 @@ export const useCareerStore = create<CareerStoreState>()(
           toast: {
             id: `TOAST_${Date.now()}`,
             title: '↩️ NBA 드래프트 참가를 철회하고 소속팀으로 복귀했어요.',
-            description: '한 시즌 더 주전으로 활약하며 실전 성적과 스카우트 주가를 끌어올려 봐요!',
+            description:
+              '한 시즌 더 주전으로 활약하며 실전 성적과 스카우트 주가를 끌어올려 봐요!',
             tone: 'amber',
           },
         });
@@ -1096,7 +1413,6 @@ export const useCareerStore = create<CareerStoreState>()(
           nextPedigreePick = dr.pickNumber;
           nextPedigreeRound = dr.round;
           nextPedigreeSeasons = dr.round === 1 ? 2 : 1;
-          // KBL 1라운드 지명 신인(특히 1~3순위)은 구단 핵심 유망주 신뢰도 부여
           nextInitialTrust =
             dr.pickNumber && dr.pickNumber <= 3
               ? 70
@@ -1113,12 +1429,14 @@ export const useCareerStore = create<CareerStoreState>()(
           nextPedigreePick = dr.pickNumber;
           nextPedigreeRound = 1;
           nextPedigreeSeasons = 3;
-          // NBA 1라운드 지명 신인(특히 로터리 픽)은 구단 핵심 육성 신뢰도 부여
           nextInitialTrust =
             dr.pickNumber && dr.pickNumber <= 14 ? 72 : 64;
           milestoneTitle = `🏀 NBA 드래프트 1라운드 ${dr.pickNumber}순위 지명 (${nextTeam.shortName})`;
           milestoneDesc = `브루클린 바클레이스 센터에서 ${nextTeam.name} 모자를 쓰고 꿈의 NBA 정식 루키 계약을 체결했어요!`;
-        } else if (choice === 'TWO_WAY' && (dr.draftedTeam || dr.twoWayOfferTeam)) {
+        } else if (
+          choice === 'TWO_WAY' &&
+          (dr.draftedTeam || dr.twoWayOfferTeam)
+        ) {
           const targetNbaTeam = (dr.draftedTeam || dr.twoWayOfferTeam)!;
           nextLeague = 'NBA';
           nextTeam = targetNbaTeam;
@@ -1144,9 +1462,9 @@ export const useCareerStore = create<CareerStoreState>()(
           nextYears = 1;
           nextInitialTrust = 54;
           milestoneTitle = `🇺🇸 ${nextTeam.name} 트라이아웃 합류`;
-          milestoneDesc = '드래프트 아쉬움을 삼키고 G리그 쇼케이스에서 실력으로 증명하기로 했어요.';
+          milestoneDesc =
+            '드래프트 아쉬움을 삼키고 G리그 쇼케이스에서 실력으로 증명하기로 했어요.';
         } else {
-          // KBL 복귀 (특정 팀 하드코딩 없이 포지션 니즈 최적 구단 선정)
           nextLeague = 'KBL';
           nextTeam = selectBestFitTeamForPlayer(
             'KBL',
@@ -1158,12 +1476,35 @@ export const useCareerStore = create<CareerStoreState>()(
           nextYears = 2;
           nextInitialTrust = 55;
           milestoneTitle = `🇰🇷 ${nextTeam.name} 입단`;
-          milestoneDesc = 'KBL 무대에서 먼저 실전 경쟁력을 증명한 뒤 다시 도전하기로 했어요.';
+          milestoneDesc =
+            'KBL 무대에서 먼저 실전 경쟁력을 증명한 뒤 다시 도전하기로 했어요.';
         }
 
         const syncedTeam =
           getTeamById(nextTeam.id, career.teamRatingsMap) || nextTeam;
-        const nextSalary = getContractDefaultSalary(nextContractType, career.ovr);
+        const nextSalary = getContractDefaultSalary(
+          nextContractType,
+          career.ovr
+        );
+        const promise = determineTeamRolePromise(
+          career,
+          syncedTeam,
+          nextContractType
+        );
+
+        // 프로 드래프트 입단 시 동기 라이벌(1~2명) 절차적 생성
+        let nextRivals = career.rivals || [];
+        if (
+          (nextLeague === 'KBL' || nextLeague === 'NBA') &&
+          !nextRivals.some((r) => r.league === nextLeague)
+        ) {
+          const createdRivals = generateDraftRivals(
+            career,
+            nextLeague,
+            syncedTeam.id
+          );
+          nextRivals = [...nextRivals, ...createdRivals];
+        }
 
         const { role } = calculateRoleAndMpg({
           ovr: career.ovr,
@@ -1175,6 +1516,8 @@ export const useCareerStore = create<CareerStoreState>()(
           stats: career.stats,
           primaryPos: career.primaryPos,
           growthDna: career.growthDna,
+          traits: career.traits,
+          promisedRole: promise.promisedRole,
           draftPedigreePick: nextPedigreePick,
           draftPedigreeRound: nextPedigreeRound,
           draftPedigreeSeasonsLeft: nextPedigreeSeasons,
@@ -1189,10 +1532,14 @@ export const useCareerStore = create<CareerStoreState>()(
             contractType: nextContractType,
             contractYearsLeft: nextYears,
             annualSalary: nextSalary,
-            twoWaySeasonsUsed: nextContractType === 'TWO_WAY' ? 0 : career.twoWaySeasonsUsed,
+            twoWaySeasonsUsed:
+              nextContractType === 'TWO_WAY' ? 0 : career.twoWaySeasonsUsed,
             draftPedigreePick: nextPedigreePick,
             draftPedigreeRound: nextPedigreeRound,
             draftPedigreeSeasonsLeft: nextPedigreeSeasons,
+            promisedRole: promise.promisedRole,
+            brokenRolePromise: false,
+            rivals: nextRivals,
             coachTrust: nextInitialTrust,
             role,
             combineState: null,
@@ -1244,7 +1591,8 @@ export const useCareerStore = create<CareerStoreState>()(
         }
 
         const reason = career.retirementReason || 'VOLUNTARY_HONOR';
-        const evaluation = career.legacyEvaluation || evaluateCareerLegacy(career);
+        const evaluation =
+          career.legacyEvaluation || evaluateCareerLegacy(career);
         const newEntry = buildHallOfFameEntry(career, reason, evaluation);
 
         const updatedHof = [newEntry, ...hofList].sort(
@@ -1258,7 +1606,8 @@ export const useCareerStore = create<CareerStoreState>()(
           toast: {
             id: `TOAST_${Date.now()}`,
             title: `🏛️ #${newEntry.jerseyNumber} ${newEntry.name} 선수가 명예의 전당에 헌액되었어요!`,
-            description: '메인 화면의 올타임 베스트 5 하프코트와 명예의 전당 보드를 확인해 보세요.',
+            description:
+              '메인 화면의 올타임 베스트 5 하프코트와 명예의 전당 보드를 확인해 보세요.',
             tone: 'amber',
           },
         });

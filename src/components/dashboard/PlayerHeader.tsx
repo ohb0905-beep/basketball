@@ -2,7 +2,12 @@
 
 import React from 'react';
 import { LEAGUE_CONFIG } from '../../data/leagues';
-import { getGrowthDnaInfo, getPlaystyleInfo } from '../../engine/statCalculator';
+import { ROLE_PROMISE_LABELS } from '../../engine/draftEngine';
+import {
+  getGrowthDnaInfo,
+  getPlaystyleInfo,
+  getTraitInfo,
+} from '../../engine/statCalculator';
 import { CareerState, ContractType } from '../../types/game';
 import { TeamEmblem } from '../common/TeamEmblem';
 
@@ -22,12 +27,15 @@ const CONTRACT_LABELS: Record<ContractType, string> = {
   FREE_AGENT: '자유계약 (FA)',
 };
 
-function formatCurrencyK(amountK: number): string {
-  if (amountK <= 0) return '$0';
-  if (amountK >= 1000) {
-    return `$${(amountK / 1000).toFixed(2)}M`;
+function formatCurrencyK(amountUsd: number): string {
+  if (!amountUsd || amountUsd <= 0) return '$0';
+  if (amountUsd >= 1000000) {
+    return `$${(amountUsd / 1000000).toFixed(2)}M`;
   }
-  return `$${amountK.toLocaleString()}K`;
+  if (amountUsd >= 1000) {
+    return `$${Math.round(amountUsd / 1000).toLocaleString()}K`;
+  }
+  return `$${amountUsd.toLocaleString()}`;
 }
 
 export function PlayerHeader({ career }: { career: CareerState }) {
@@ -35,6 +43,7 @@ export function PlayerHeader({ career }: { career: CareerState }) {
   const isAtGrowthCap = career.ovr >= leagueInfo.growthCap && career.age <= 28;
   const dnaInfo = getGrowthDnaInfo(career.growthDna || 'STANDARD');
   const playstyleInfo = getPlaystyleInfo(career.playstyle || 'ALL_ROUNDER');
+  const traits = career.traits || [];
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-xs">
@@ -43,7 +52,7 @@ export function PlayerHeader({ career }: { career: CareerState }) {
         <div className="flex items-center gap-4 min-w-0">
           <TeamEmblem team={career.team} size="xl" />
 
-          <div className="min-w-0 space-y-1">
+          <div className="min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
               <span className="font-bold text-slate-800">{leagueInfo.name}</span>
               <span aria-hidden="true">·</span>
@@ -108,11 +117,45 @@ export function PlayerHeader({ career }: { career: CareerState }) {
               <span>만 {career.age}세 ({career.seasonYear}시즌)</span>
               <span aria-hidden="true">·</span>
               <span className="font-semibold text-slate-800">역할: {career.role}</span>
+              {career.promisedRole && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-semibold text-indigo-700">
+                    계약 보장: {ROLE_PROMISE_LABELS[career.promisedRole]}
+                  </span>
+                </>
+              )}
+              {career.brokenRolePromise && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-extrabold text-rose-600">
+                    🚨 구단 역할 약속 위반 (트레이드 요청 가능)
+                  </span>
+                </>
+              )}
               <span aria-hidden="true">·</span>
               <span className="font-semibold text-emerald-700">
                 연봉 {formatCurrencyK(career.annualSalary)} (누적 {formatCurrencyK(career.careerEarnings)})
               </span>
             </div>
+
+            {traits.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-0.5 text-xs">
+                <span className="text-slate-400 font-semibold">보유 특성:</span>
+                {traits.map((tId) => {
+                  const tInfo = getTraitInfo(tId);
+                  return (
+                    <span
+                      key={tId}
+                      title={tInfo.description}
+                      className="font-bold text-slate-700"
+                    >
+                      [{tInfo.badge}]
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -124,7 +167,7 @@ export function PlayerHeader({ career }: { career: CareerState }) {
               {career.ovr}
             </span>
             <span className="block text-[10px] text-slate-400 tabular-nums">
-              최고 {career.peakOvr}
+              최고 {career.peakOvr} · 잠재 {career.potential}
             </span>
           </div>
 

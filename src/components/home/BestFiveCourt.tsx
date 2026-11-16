@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Award, Crown, UserCheck } from 'lucide-react';
+import { getTraitInfo } from '../../engine/statCalculator';
 import { useCareerStore } from '../../store/useCareerStore';
 import { HallOfFameEntry, Position } from '../../types/game';
 import { TeamEmblem } from '../common/TeamEmblem';
@@ -298,6 +299,17 @@ export function BestFiveCourt() {
               </div>
             </div>
 
+            {selectedEntry.traits && selectedEntry.traits.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-slate-400 font-semibold">생애 보유 특성:</span>
+                {selectedEntry.traits.map((tId) => (
+                  <span key={tId} className="font-bold text-slate-700">
+                    [{getTraitInfo(tId).badge}]
+                  </span>
+                ))}
+              </div>
+            )}
+
             <p className="text-sm text-slate-600 leading-relaxed">
               {selectedEntry.epitaph}
             </p>
@@ -326,7 +338,9 @@ export function BestFiveCourt() {
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="block text-xs text-slate-500">통산 누적 연봉</span>
                 <span className="text-xs font-bold text-emerald-700 tabular-nums">
-                  ${(selectedEntry.careerEarnings || 0).toLocaleString()}K
+                  {(selectedEntry.careerEarnings || 0) >= 1000000
+                    ? `$${((selectedEntry.careerEarnings || 0) / 1000000).toFixed(2)}M`
+                    : `$${Math.round((selectedEntry.careerEarnings || 0) / 1000).toLocaleString()}K`}
                 </span>
               </div>
             </div>

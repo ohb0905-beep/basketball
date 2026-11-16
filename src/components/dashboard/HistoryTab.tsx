@@ -1,15 +1,18 @@
 'use client';
 
 import React from 'react';
-import { Award, Flame, History, Trophy } from 'lucide-react';
+import { Award, Flame, History, Swords, Trophy } from 'lucide-react';
 import { useCareerStore } from '../../store/useCareerStore';
 
-function formatMoney(amountK: number): string {
-  if (amountK <= 0) return '$0';
-  if (amountK >= 1000) {
-    return `$${(amountK / 1000).toFixed(2)}M`;
+function formatMoney(amountUsd: number): string {
+  if (!amountUsd || amountUsd <= 0) return '$0';
+  if (amountUsd >= 1000000) {
+    return `$${(amountUsd / 1000000).toFixed(2)}M`;
   }
-  return `$${amountK.toLocaleString()}K`;
+  if (amountUsd >= 1000) {
+    return `$${Math.round(amountUsd / 1000).toLocaleString()}K`;
+  }
+  return `$${amountUsd.toLocaleString()}`;
 }
 
 export function HistoryTab() {
@@ -21,6 +24,7 @@ export function HistoryTab() {
   const careerRpg = (career.totals.rebounds / gp).toFixed(1);
   const careerApg = (career.totals.assists / gp).toFixed(1);
   const allLeagueCount = career.totals.allLeagueSelections || 0;
+  const rivals = career.rivals || [];
 
   return (
     <div className="space-y-6">
@@ -128,7 +132,87 @@ export function HistoryTab() {
         </section>
       </div>
 
-      {/* 2. 연도별 시즌 기록 테이블 */}
+      {/* 2. 드래프트 동기 & 리그 라이벌 매치업 보드 */}
+      <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <Swords className="w-5 h-5 text-orange-600" />
+              드래프트 동기 & 리그 라이벌 매치업 보드
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              프로 무대(KBL·NBA) 입단 동기와 포지션 경쟁자들의 실시간 시즌 성적과 수상 레이스를 비교해요.
+            </p>
+          </div>
+          <span className="text-xs font-semibold text-slate-500 tabular-nums">
+            등록 라이벌 {rivals.length}명
+          </span>
+        </div>
+
+        {rivals.length === 0 ? (
+          <p className="text-xs text-slate-500 py-4 text-center bg-slate-50 rounded-xl border border-slate-200">
+            프로 리그(KBL 또는 NBA)에 진입하면 드래프트 동기 라이벌 2명이 자동 생성되어 매 시즌 성적과 MVP 레이스를 경쟁해요.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {rivals.map((rv) => (
+              <div
+                key={rv.id}
+                className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-xs font-bold text-orange-600">
+                      {rv.draftYear}년 {rv.league} 입단 동기 · {rv.pos}
+                    </span>
+                    <h3 className="text-base font-black text-slate-900">
+                      {rv.name}{' '}
+                      <span className="text-xs font-semibold text-slate-500">
+                        ({rv.teamName})
+                      </span>
+                    </h3>
+                  </div>
+                  <div className="text-right tabular-nums">
+                    <span className="block text-lg font-black text-slate-900">
+                      OVR {rv.ovr}
+                    </span>
+                    <span className="block text-[11px] text-slate-400">
+                      잠재 {rv.potential}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2 text-center text-xs tabular-nums">
+                  <div className="p-2 rounded-lg bg-white border border-slate-200">
+                    <span className="block text-[10px] text-slate-400">평균 득점</span>
+                    <span className="font-extrabold text-orange-600">{rv.ppg.toFixed(1)}점</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-slate-200">
+                    <span className="block text-[10px] text-slate-400">리바운드</span>
+                    <span className="font-bold text-slate-800">{rv.rpg.toFixed(1)}개</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-slate-200">
+                    <span className="block text-[10px] text-slate-400">어시스트</span>
+                    <span className="font-bold text-slate-800">{rv.apg.toFixed(1)}개</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-slate-200">
+                    <span className="block text-[10px] text-slate-400">MVP / 올스타</span>
+                    <span className="font-bold text-amber-600">
+                      {rv.mvps} / {rv.allStars}
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  📰 {rv.lastHeadline}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 3. 연도별 시즌 기록 테이블 */}
       <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
         <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
           <History className="w-5 h-5 text-orange-600" />
@@ -216,7 +300,7 @@ export function HistoryTab() {
         )}
       </section>
 
-      {/* 3. 하이라이트 연대기 */}
+      {/* 4. 하이라이트 연대기 */}
       <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
         <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
           <Award className="w-5 h-5 text-orange-600" />

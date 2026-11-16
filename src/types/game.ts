@@ -39,6 +39,69 @@ export type PlaystyleArchetype =
   | 'RIM_PROTECTOR' // 림 프로텍터 & 보드 장악 빅맨
   | 'ALL_ROUNDER';  // 공수겸장 올라운더
 
+/**
+ * 선수 고유 특성 (선천적 1개 + 후천적 조건 달성 시 최대 3개 보유)
+ */
+export type PlayerTraitId =
+  | 'IRON_STAMINA'         // [선천] 강철 체력: 부상 확률 대폭 감소 및 체력 유지
+  | 'SLOW_STARTER'         // [선천] 슬로우 스타터: 20대 중후반 성장 가속 및 한계 돌파 확률 상승
+  | 'GLASS_BODY'           // [선천] 유리몸: 성장 잠재력 상한 보너스가 높으나 잔부상 위험 증가
+  | 'CLUTCH_PERFORMER'     // [선천] 승부사: 강팀 상대 및 플레이오프/우승 경쟁 시 스탯·승률 보정
+  | 'CONTRACT_YEAR_BOOST'  // [후천] FA 로이드: 계약 마지막 해 맹활약 시 획득, 계약 만료 시즌 효율 상승
+  | 'FRANCHISE_HEART'      // [후천] 프랜차이즈의 심장: 단일 구단 6시즌 이상 헌신 시 획득
+  | 'BENCH_ACE'            // [후천] 벤치의 에이스: 식스맨상 수상 시 획득, 벤치/식스맨 출전 시 효율 상승
+  | 'SNIPER';              // [후천] 스나이퍼: 시즌 3점 성공률 40%+ 달성 시 획득
+
+export interface PlayerTraitInfo {
+  id: PlayerTraitId;
+  name: string;
+  badge: string;
+  kind: 'INNATE' | 'ACQUIRED';
+  description: string;
+}
+
+/**
+ * FA / 이적 계약 시 구단이 약속하는 역할 (Role Promise)
+ */
+export type RolePromiseType =
+  | 'ACE_FIRST_OPTION'     // 1옵션 에이스 보장
+  | 'STARTER_GUARANTEE'    // 주전 스타터 보장
+  | 'SIXTH_MAN_CORE'       // 핵심 식스맨 & 클러치조
+  | 'PROSPECT_DEVELOPMENT' // 핵심 유망주 육성 로테이션
+  | 'VETERAN_MENTOR';      // 베테랑 라커룸 리더 & 스페셜리스트
+
+/**
+ * 비시즌 특별 훈련 캠프 & 신체 개조 프로그램
+ */
+export type SpecialCampType =
+  | 'LEGEND_SKILL_CAMP' // 레전드 스킬 멘토링 캠프 (핵심 능력치 집중 강화 + 잠재력 돌파 기회)
+  | 'BULK_UP'           // 벌크업 신체 개조 (INS, REB, PHY 상승 / PLY, OUT 소폭 감소)
+  | 'LEAN_MASS';        // 린매스업 신체 개조 (PLY, OUT, DEF 상승 / REB, INS 소폭 감소)
+
+/**
+ * 프로 입단 동기 & 리그 라이벌 선수 인터페이스
+ */
+export interface RivalPlayer {
+  id: string;
+  name: string;
+  draftYear: number;
+  league: LeagueId;
+  teamId: string;
+  teamName: string;
+  teamShortName: string;
+  pos: Position;
+  ovr: number;
+  potential: number;
+  ppg: number;
+  rpg: number;
+  apg: number;
+  championships: number;
+  mvps: number;
+  allStars: number;
+  roys: number;
+  lastHeadline: string;
+}
+
 export type ViewState =
   | 'HOME'
   | 'CREATE'
@@ -182,12 +245,15 @@ export interface CareerEventChoice {
   statChanges?: Partial<PlayerStats>;
   trustDelta?: number;
   draftStockDelta?: number;
+  potentialDelta?: number;
   unlockSecondaryPos?: Position;
   switchPrimaryPos?: Position;
   triggerRetirement?: RetirementReason;
   grantMilitaryExemption?: boolean;
   enlistSangmu?: boolean;
   startFarewellTour?: boolean;
+  executeTradeToContender?: boolean;
+  markAgentAdviceDismissed?: boolean;
 }
 
 export interface CareerEvent {
@@ -202,7 +268,8 @@ export interface CareerEvent {
     | 'COACH'
     | 'FAREWELL'
     | 'CLUTCH'
-    | 'RETIREMENT_ADVICE';
+    | 'RETIREMENT_ADVICE'
+    | 'MID_SEASON_CROSSROADS';
   choices: CareerEventChoice[];
 }
 
@@ -217,6 +284,8 @@ export interface OffseasonOption {
   contractYears: number;
   annualSalary?: number;
   scoutingScore?: number;
+  promisedRole?: RolePromiseType;
+  promisedRoleLabel?: string;
   actionType:
     | 'SIGN_TEAM'
     | 'ENTER_KBL_DRAFT'
@@ -280,6 +349,7 @@ export interface HallOfFameEntry {
   jerseyRetired: boolean;
   iconicTeam: TeamInfo;
   careerEarnings: number;
+  traits?: PlayerTraitId[];
   totals: {
     gp: number;
     points: number;
@@ -326,6 +396,7 @@ export interface CareerState {
   secondaryPos: Position | null;
   growthDna?: GrowthDna;
   playstyle?: PlaystyleArchetype;
+  traits?: PlayerTraitId[];
   age: number;
   seasonYear: number;
   seasonsPlayed: number;
@@ -333,6 +404,7 @@ export interface CareerState {
   peakOvr: number;
   ovrHistory: number[];
   potential: number;
+  potentialBreakthroughCount?: number;
   stats: PlayerStats;
   lastSeasonDelta: StatDelta;
   league: LeagueId;
@@ -345,17 +417,23 @@ export interface CareerState {
   draftPedigreePick?: number | null;
   draftPedigreeRound?: 1 | 2 | null;
   draftPedigreeSeasonsLeft?: number;
+  promisedRole?: RolePromiseType;
+  brokenRolePromise?: boolean;
   role: string;
   coachTrust: number; // 0 ~ 100
   draftStock: number; // 0 ~ 100
   prospectStars?: number; // 고교 졸업 시 산출된 유망주 등급 (1~5성)
   trainingFocus: TrainingFocus;
+  lastCampYear?: number;
   militaryExempt: boolean;
   militaryServiceSeasonsLeft: number;
   previousTeamBeforeMilitary: TeamInfo | null;
   isFarewellTour: boolean;
   farewellTourCompleted: boolean;
   isOutOfLeagueWarning: boolean;
+  agentAdviceShown?: boolean;
+  midSeasonEventTriggeredThisYear?: boolean;
+  rivals?: RivalPlayer[];
   teamRatingsMap: Record<string, number>; // 동적 구단 전력 저장소
   badges: string[];
   seasonLogs: SeasonBoxScore[];

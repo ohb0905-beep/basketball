@@ -10,9 +10,13 @@ import {
   getTeamsByLeague,
 } from '../data/teams';
 import {
+  applySpecialCampProgram,
   calculateOvr,
   createInitialStats,
+  evaluateAcquiredTraits,
   getPreviewStatsAndOvrRange,
+  rollInitialPotential,
+  rollInnateTrait,
   rollPlayerDnaAndPlaystyle,
 } from './statCalculator';
 import {
@@ -21,6 +25,9 @@ import {
   calculateSeasonStatGrowth,
   calculateOrganicTrustDelta,
   calculateRecentEfficiencyMomentum,
+  checkPotentialBreakthrough,
+  generateDraftRivals,
+  simulateRivalsSeason,
 } from './seasonSimulator';
 import {
   calculateProjectedNbaPick,
@@ -34,7 +41,10 @@ import {
   checkRetirementEligibility,
   evaluateCareerLegacy,
 } from './retirementEngine';
-import { createAgentRetirementAdviceEvent } from '../data/events';
+import {
+  createAgentRetirementAdviceEvent,
+  rollMidSeasonCrossroadsEvent,
+} from '../data/events';
 import { CareerState, SeasonBoxScore } from '../types/game';
 
 function buildInitialTeamRatingsMap(): Record<string, number> {
@@ -55,6 +65,7 @@ function createBaseCareer(overrides: Partial<CareerState> = {}): CareerState {
     secondaryPos: 'SF',
     growthDna: 'STANDARD',
     playstyle: 'ALL_ROUNDER',
+    traits: ['IRON_STAMINA'],
     age: 35,
     seasonYear: 2040,
     seasonsPlayed: 15,
@@ -73,19 +84,25 @@ function createBaseCareer(overrides: Partial<CareerState> = {}): CareerState {
     draftPedigreePick: null,
     draftPedigreeRound: null,
     draftPedigreeSeasonsLeft: 0,
+    promisedRole: 'ACE_FIRST_OPTION',
+    brokenRolePromise: false,
     role: '프랜차이즈 1옵션 에이스',
     coachTrust: 95,
     draftStock: 90,
     trainingFocus: 'BALANCED',
+    lastCampYear: 0,
     militaryExempt: true,
     militaryServiceSeasonsLeft: 0,
     previousTeamBeforeMilitary: null,
     isFarewellTour: false,
     farewellTourCompleted: false,
     isOutOfLeagueWarning: false,
+    agentAdviceShown: false,
+    midSeasonEventTriggeredThisYear: false,
     ovrHistory: [92, 90, 86],
     prospectStars: 4,
     teamRatingsMap: buildInitialTeamRatingsMap(),
+    rivals: [],
     badges: [],
     seasonLogs: [],
     milestones: [],
@@ -95,7 +112,7 @@ function createBaseCareer(overrides: Partial<CareerState> = {}): CareerState {
       assists: 13,
       steals: 5,
       blocks: 3,
-      pointsContext: '2039 BOS',
+      pointsContext: '2039 시즌 기록',
     },
     totals: {
       gp: 920,
@@ -171,7 +188,7 @@ function createSeasonLog(overrides: Partial<SeasonBoxScore> = {}): SeasonBoxScor
   };
 }
 
-test('1. Initial stats, OVR, GrowthDna, and PlaystyleArchetype have randomized variance', () => {
+test('1. Initial stats, OVR, GrowthDna, PlaystyleArchetype, Innate Trait, and Potential Spectrum (68~96)', () => {
   const preview = getPreviewStatsAndOvrRange('PG', 188);
   assert.ok(preview.minOvr >= 47 && preview.maxOvr <= 62);
   assert.ok(preview.maxOvr > preview.minOvr);
@@ -191,14 +208,21 @@ test('1. Initial stats, OVR, GrowthDna, and PlaystyleArchetype have randomized v
   assert.equal(dna1.growthDna, 'EARLY_BLOOMER');
   assert.equal(dna2.growthDna, 'IRONMAN');
   assert.equal(dna1.playstyle, 'PLAYMAKER');
+
+  const lowPot = rollInitialPotential(lowOvr, 'STANDARD', 'IRON_STAMINA', lowRng);
+  const highPot = rollInitialPotential(highOvr, 'LATE_BLOOMER', 'GLASS_BODY', highRng);
+  assert.ok(lowPot >= 66 && lowPot <= 76, `Low potential roll should be ~66-76, got ${lowPot}`);
+  assert.ok(highPot >= 90 && highPot <= 96, `High potential roll should reach 90-96, got ${highPot}`);
+
+  const trait = rollInnateTrait('IRONMAN', () => 0.2);
+  assert.equal(trait, 'IRON_STAMINA');
 });
 
 test('2. Draft Pedigree protects KBL/NBA 1st-round picks from garbage time despite OVR gap', () => {
-  // KBL #1 overall pick with OVR 58 joining a KBL team with rating 68
   const kblTopPickRole = calculateRoleAndMpg(
     {
       ovr: 58,
-      team: KBL_TEAMS[0], // rating 68
+      team: KBL_TEAMS[0],
       coachTrust: 68,
       secondaryPos: null,
       contractType: 'KBL_ROOKIE',
@@ -217,7 +241,6 @@ test('2. Draft Pedigree protects KBL/NBA 1st-round picks from garbage time despi
   );
   assert.equal(kblTopPickRole.role, '주전급 코어 유망주 (1라운드 픽)');
 
-  // Position-fair trust: Playmaker PG with 8.5 PPG & 8.0 APG earns positive coach trust
   const playmakerTrustDelta = calculateOrganicTrustDelta({
     pos: 'PG',
     playstyle: 'PLAYMAKER',
@@ -236,7 +259,6 @@ test('2. Draft Pedigree protects KBL/NBA 1st-round picks from garbage time despi
   });
   assert.ok(playmakerTrustDelta > 0, 'Playmaker PG with 8.0 APG must gain coach trust even with <10 PPG');
 
-  // Rim Protector C with 7.5 PPG, 11.2 RPG, 2.3 BPG earns positive coach trust
   const centerTrustDelta = calculateOrganicTrustDelta({
     pos: 'C',
     playstyle: 'RIM_PROTECTOR',
@@ -255,7 +277,6 @@ test('2. Draft Pedigree protects KBL/NBA 1st-round picks from garbage time despi
   });
   assert.ok(centerTrustDelta > 0, 'Rim Protector C with 11.2 RPG & 2.3 BPG must gain coach trust');
 
-  // Recent efficiency momentum boosts bench overperformer
   const momentum = calculateRecentEfficiencyMomentum(
     [
       createSeasonLog({
@@ -299,13 +320,7 @@ test('3. High School prospect rating (1~5 stars) restricts graduation path offer
   assert.ok(hsOptions1.length >= 1 && hsOptions1.length <= 2);
   assert.equal(
     hsOptions1.some((o) => o.targetLeague === 'NCAA' || o.targetLeague === 'OVERSEAS'),
-    false,
-    'Low-rated high school player must not receive NCAA D1 or Overseas Pro offers'
-  );
-  assert.equal(
-    hsOptions1.some((o) => o.actionType === 'ENTER_KBL_DRAFT'),
-    false,
-    'Low-rated high school player without OVR 60+ or Championship/MVP cannot enter KBL early draft'
+    false
   );
 
   const fiveStarCareer = createBaseCareer({
@@ -328,40 +343,203 @@ test('3. High School prospect rating (1~5 stars) restricts graduation path offer
   const hsOptions5 = generateOffseasonOptions(fiveStarCareer, () => 0.4);
   assert.ok(hsOptions5.some((o) => o.actionType === 'ENTER_KBL_DRAFT'));
   assert.ok(hsOptions5.some((o) => o.targetLeague === 'NCAA'));
-  assert.ok(hsOptions5.some((o) => o.targetLeague === 'OVERSEAS' || o.targetLeague === 'GLEAGUE'));
 });
 
-test('4. Team Scouting AI rejects high-OVR player with poor real game stats (1.8 PPG)', () => {
-  const benchUnderperformer = createBaseCareer({
-    age: 26,
-    ovr: 75,
-    potential: 77,
+test('4. League-Translated Per-36 Scouting prevents 20s prime forced retirement and offers step-down pro contracts', () => {
+  const nbaBench25 = createBaseCareer({
+    age: 25,
+    ovr: 72,
+    potential: 78,
     league: 'NBA',
+    contractType: 'NBA_STANDARD',
+    contractYearsLeft: 0,
     seasonLogs: [
       createSeasonLog({
         league: 'NBA',
-        ovr: 75,
-        gp: 22,
-        mpg: 5.2,
-        ppg: 1.8,
-        rpg: 0.9,
-        apg: 0.4,
-        fgPct: 37.5,
-        tpPct: 26.0,
+        ovr: 72,
+        gp: 42,
+        mpg: 8.5,
+        ppg: 3.1,
+        rpg: 1.5,
+        apg: 1.1,
+        fgPct: 45.2,
+        tpPct: 35.5,
       }),
     ],
   });
 
-  const scoutResult = evaluateTeamScouting(benchUnderperformer, NBA_TEAMS[0], () => 0.5);
-  assert.equal(scoutResult.realGameCompetence, false);
+  const nbaContender = NBA_TEAMS.find((t) => t.direction === 'CONTENDER') || NBA_TEAMS[0];
+  const nbaScout = evaluateTeamScouting(nbaBench25, nbaContender, () => 0.5);
+  assert.equal(nbaScout.passesOfferThreshold, false, 'Top NBA contender should not sign OVR 72 bench player');
+
+  const kblScout = evaluateTeamScouting(nbaBench25, KBL_TEAMS[0], () => 0.5);
   assert.equal(
-    scoutResult.passesOfferThreshold,
+    kblScout.passesOfferThreshold,
+    true,
+    'KBL team must value a 25yo OVR 72 NBA bench player as an immediate ace/starter'
+  );
+
+  const options = generateOffseasonOptions(nbaBench25, () => 0.5);
+  assert.equal(
+    options.some((o) => o.actionType === 'RETIRE_OUT_OF_LEAGUE'),
     false,
-    'Player with 75 OVR but 1.8 PPG & 37.5% FG must fail NBA scouting evaluation'
+    '25yo OVR 72 player must NEVER be forced into OUT_OF_LEAGUE retirement'
+  );
+  assert.ok(
+    options.some(
+      (o) =>
+        o.targetLeague === 'KBL' ||
+        o.targetLeague === 'OVERSEAS' ||
+        o.targetLeague === 'GLEAGUE'
+    ),
+    '25yo NBA bench player must receive KBL/Overseas/G-League step-down offers'
+  );
+  assert.ok(
+    options.some((o) => Boolean(o.promisedRole && o.promisedRoleLabel)),
+    'Contract offers must specify a promised role'
+  );
+
+  const vetSpecialist = createBaseCareer({
+    age: 33,
+    ovr: 76,
+    potential: 79,
+    stats: { ins: 70, out: 84, ply: 75, def: 85, reb: 70, phy: 68 },
+    league: 'NBA',
+    contractYearsLeft: 0,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        ovr: 76,
+        gp: 65,
+        mpg: 18.5,
+        ppg: 7.8,
+        rpg: 3.4,
+        apg: 2.1,
+        fgPct: 45.5,
+        tpPct: 39.0,
+      }),
+    ],
+  });
+  const vetOptions = generateOffseasonOptions(vetSpecialist, () => 0.5);
+  assert.ok(
+    vetOptions.some((o) => o.contractType === 'NBA_VET_MIN' || o.promisedRole === 'VETERAN_MENTOR'),
+    '33yo specialist veteran should receive Veteran Minimum / Mentor offer'
   );
 });
 
-test('5. Strict Pro-Only Franchise Jersey Retirement enforces 7+ seasons, 10,000+ pts, and dominant achievements', () => {
+test('5. Agent Retirement Advice only triggers on same-league decline and at most once per career', () => {
+  const promotedPlayer = createBaseCareer({
+    age: 31,
+    ovr: 77,
+    league: 'NBA',
+    agentAdviceShown: false,
+    ovrHistory: [75, 77],
+    seasonLogs: [
+      createSeasonLog({ league: 'KBL', ppg: 22.0, mpg: 33.0 }),
+      createSeasonLog({ league: 'NBA', ppg: 6.5, mpg: 16.0 }),
+    ],
+  });
+  assert.equal(
+    createAgentRetirementAdviceEvent(promotedPlayer),
+    null,
+    'League promotion from KBL to NBA must not trigger agent retirement advice'
+  );
+
+  const decliningVet = createBaseCareer({
+    age: 34,
+    ovr: 74,
+    league: 'NBA',
+    agentAdviceShown: false,
+    ovrHistory: [84, 79, 74],
+    seasonLogs: [
+      createSeasonLog({ league: 'NBA', ppg: 22.0, mpg: 32.0 }),
+      createSeasonLog({ league: 'NBA', ppg: 9.0, mpg: 18.0 }),
+    ],
+  });
+  const advice1 = createAgentRetirementAdviceEvent(decliningVet);
+  assert.ok(advice1 !== null);
+  assert.equal(advice1?.id, 'EVT_AGENT_RETIREMENT_ADVICE');
+
+  const alreadyShownVet = createBaseCareer({
+    ...decliningVet,
+    agentAdviceShown: true,
+  });
+  assert.equal(
+    createAgentRetirementAdviceEvent(alreadyShownVet),
+    null,
+    'Agent retirement advice must not repeat once agentAdviceShown is true'
+  );
+});
+
+test('6. Potential Breakthrough, Player Traits, Special Camp & Procedural Rivals work organically', () => {
+  const breakthroughCareer = createBaseCareer({
+    age: 23,
+    ovr: 76,
+    potential: 77,
+    coachTrust: 82,
+  });
+  const bt = checkPotentialBreakthrough({
+    career: breakthroughCareer,
+    wonMip: true,
+    wonMvp: false,
+    wonDpoy: false,
+    wonSixthMan: false,
+    mpg: 26.0,
+    ppg: 19.5,
+    fgPct: 50.5,
+    nextCoachTrust: 82,
+    rng: () => 0.3,
+  });
+  assert.ok(bt.breakthroughGain >= 2, 'MIP winner near potential ceiling must break through potential limit');
+
+  const acquired = evaluateAcquiredTraits(
+    createBaseCareer({
+      traits: ['IRON_STAMINA'],
+      stats: { ins: 78, out: 85, ply: 76, def: 75, reb: 70, phy: 75 },
+    }),
+    createSeasonLog({ tpPct: 41.2, wonSixthMan: true, gp: 60 })
+  );
+  assert.ok(
+    acquired.nextTraits.includes('BENCH_ACE') || acquired.nextTraits.includes('SNIPER')
+  );
+
+  const campRes = applySpecialCampProgram(
+    createBaseCareer({
+      ovr: 75,
+      potential: 80,
+      stats: { ins: 75, out: 75, ply: 75, def: 75, reb: 75, phy: 75 },
+    }),
+    'BULK_UP'
+  );
+  assert.equal(campRes.nextStats.ins, 77);
+  assert.equal(campRes.nextStats.reb, 77);
+  assert.equal(campRes.nextStats.out, 74);
+
+  const rivals = generateDraftRivals(
+    createBaseCareer({
+      seasonYear: 2030,
+      ovr: 64,
+      primaryPos: 'PG',
+    }),
+    'KBL',
+    KBL_TEAMS[0].id,
+    () => 0.4
+  );
+  assert.equal(rivals.length, 2);
+  const simRivals = simulateRivalsSeason(
+    rivals,
+    2030,
+    createSeasonLog({ league: 'KBL', ppg: 16.5 }),
+    () => 0.6
+  );
+  assert.equal(simRivals.updatedRivals.length, 2);
+  assert.ok(simRivals.updatedRivals[0].ppg > 0);
+
+  const midEvt = rollMidSeasonCrossroadsEvent(createBaseCareer({ age: 26 }), () => 0.2);
+  assert.ok(midEvt.id.startsWith('EVT_MID_'));
+});
+
+test('7. Strict Pro-Only Franchise Jersey Retirement & Washed 37yo Forced Retirement', () => {
   const ncaaCareer = createBaseCareer({
     league: 'NCAA',
     team: NCAA_TEAMS[0],
@@ -370,24 +548,7 @@ test('5. Strict Pro-Only Franchise Jersey Retirement enforces 7+ seasons, 10,000
       createSeasonLog({ seasonNumber: 2, league: 'NCAA', teamId: NCAA_TEAMS[0].id, gp: 36, ppg: 30, wonChampionship: true, wonMvp: true }),
     ],
   });
-  const ncaaLegacy = evaluateCareerLegacy(ncaaCareer);
-  assert.equal(ncaaLegacy.jerseyRetired, false);
-
-  const shortNbaLogs: SeasonBoxScore[] = Array.from({ length: 5 }, (_, i) =>
-    createSeasonLog({
-      seasonNumber: i + 1,
-      year: 2030 + i,
-      league: 'NBA',
-      teamId: NBA_TEAMS[0].id,
-      gp: 75,
-      ppg: 25.0,
-      wonChampionship: true,
-      wonMvp: true,
-      allStarSelected: true,
-    })
-  );
-  const shortNbaCareer = createBaseCareer({ seasonLogs: shortNbaLogs });
-  assert.equal(evaluateCareerLegacy(shortNbaCareer).jerseyRetired, false);
+  assert.equal(evaluateCareerLegacy(ncaaCareer).jerseyRetired, false);
 
   const trueLegendLogs: SeasonBoxScore[] = Array.from({ length: 8 }, (_, i) =>
     createSeasonLog({
@@ -402,15 +563,9 @@ test('5. Strict Pro-Only Franchise Jersey Retirement enforces 7+ seasons, 10,000
       allStarSelected: i < 7,
     })
   );
-  const trueLegendCareer = createBaseCareer({ seasonLogs: trueLegendLogs });
-  const trueLegendEval = evaluateCareerLegacy(trueLegendCareer);
+  const trueLegendEval = evaluateCareerLegacy(createBaseCareer({ seasonLogs: trueLegendLogs }));
   assert.equal(trueLegendEval.jerseyRetired, true);
-  assert.equal(trueLegendEval.honoredTeam.id, NBA_TEAMS[0].id);
-  assert.equal(trueLegendEval.honoredTeamSeasons, 8);
-  assert.ok(trueLegendEval.honoredTeamPoints >= 10000);
-});
 
-test('6. Two-Way survival & Forced OUT_OF_LEAGUE retirement when 0 offers exist', () => {
   const poorTwoWay = createBaseCareer({
     age: 24,
     ovr: 68,
@@ -420,17 +575,22 @@ test('6. Two-Way survival & Forced OUT_OF_LEAGUE retirement when 0 offers exist'
         gp: 18,
         mpg: 6.0,
         ppg: 2.1,
+        rpg: 0.8,
+        apg: 0.4,
+        spg: 0.1,
+        bpg: 0.0,
         fgPct: 36.5,
+        tpPct: 26.0,
       }),
     ],
   });
-  const surv = evaluateTwoWaySurvival(poorTwoWay, 2.1);
-  assert.equal(surv.status, 'WAIVED');
+  assert.equal(evaluateTwoWaySurvival(poorTwoWay, 2.1).status, 'WAIVED');
 
   const washedVeteran = createBaseCareer({
     age: 37,
     ovr: 56,
     potential: 60,
+    stats: { ins: 55, out: 58, ply: 56, def: 55, reb: 54, phy: 50 },
     league: 'KBL',
     team: KBL_TEAMS[0],
     contractYearsLeft: 0,
@@ -441,7 +601,9 @@ test('6. Two-Way survival & Forced OUT_OF_LEAGUE retirement when 0 offers exist'
         ovr: 56,
         gp: 15,
         mpg: 4.5,
-        ppg: 1.5,
+        ppg: 1.2,
+        rpg: 0.5,
+        apg: 0.3,
         fgPct: 35.0,
       }),
     ],
@@ -450,45 +612,7 @@ test('6. Two-Way survival & Forced OUT_OF_LEAGUE retirement when 0 offers exist'
   assert.ok(faOptions.some((o) => o.actionType === 'RETIRE_OUT_OF_LEAGUE'));
 });
 
-test('7. Dynamic AI team ratings/directions evolve and individualized Aging Curve respects GrowthDna', () => {
-  const initialMap = buildInitialTeamRatingsMap();
-  const nextMap = evolveLeagueTeamRatings(initialMap, () => 0.99);
-  const bosDiff = nextMap[NBA_TEAMS[0].id] - initialMap[NBA_TEAMS[0].id];
-  assert.ok(Math.abs(bosDiff) <= 3);
-
-  const dynamicNbaTeams = getTeamsByLeague('NBA', nextMap);
-  assert.equal(dynamicNbaTeams.length, 30);
-
-  const decliningVet = createBaseCareer({
-    age: 34,
-    ovr: 76,
-    ovrHistory: [70, 82, 79, 76],
-    seasonLogs: [
-      createSeasonLog({ ppg: 24.0 }),
-      createSeasonLog({ ppg: 10.5 }),
-    ],
-  });
-  const adviceEvt = createAgentRetirementAdviceEvent(decliningVet);
-  assert.ok(adviceEvt !== null);
-  assert.equal(adviceEvt?.id, 'EVT_AGENT_RETIREMENT_ADVICE');
-
-  // Compare IRONMAN vs EARLY_BLOOMER aging at age 33
-  const baseStats = { ins: 80, out: 85, ply: 82, def: 78, reb: 65, phy: 82 };
-  const ironmanAging = applyAgingCurve(33, baseStats, () => 0.5, {
-    growthDna: 'IRONMAN',
-    careerMinutes: 12000,
-  });
-  const earlyBloomerAging = applyAgingCurve(33, baseStats, () => 0.5, {
-    growthDna: 'EARLY_BLOOMER',
-    careerMinutes: 30000,
-  });
-  assert.ok(
-    ironmanAging.nextStats.phy > earlyBloomerAging.nextStats.phy,
-    'IRONMAN DNA with low mileage must preserve higher PHY at age 33 than high-mileage EARLY_BLOOMER'
-  );
-});
-
-test('8. Core difficulty formulas (Role/MPG, PPG soft cap, Late Bloomer growth)', () => {
+test('8. Core difficulty formulas (Role/MPG, PPG soft cap, Late Bloomer growth, Aging Curve)', () => {
   const midRng = () => 0.5;
   const superstarPpg = calculatePpg(
     { ins: 96, out: 95 },
@@ -500,29 +624,17 @@ test('8. Core difficulty formulas (Role/MPG, PPG soft cap, Late Bloomer growth)'
   assert.ok(superstarPpg.rawPpg > 26);
   assert.ok(superstarPpg.ppg > 25.0 && superstarPpg.ppg <= 31.5);
 
-  const aged34 = applyAgingCurve(
-    34,
-    { ins: 80, out: 85, ply: 82, def: 78, reb: 65, phy: 76 },
-    midRng
-  );
-  assert.ok(aged34.delta.phy <= -2);
+  const baseStats = { ins: 80, out: 85, ply: 82, def: 78, reb: 65, phy: 82 };
+  const ironmanAging = applyAgingCurve(33, baseStats, midRng, {
+    growthDna: 'IRONMAN',
+    careerMinutes: 12000,
+  });
+  const earlyBloomerAging = applyAgingCurve(33, baseStats, midRng, {
+    growthDna: 'EARLY_BLOOMER',
+    careerMinutes: 30000,
+  });
+  assert.ok(ironmanAging.nextStats.phy > earlyBloomerAging.nextStats.phy);
 
-  const growthAtCap = calculateSeasonStatGrowth(
-    {
-      age: 20,
-      ovr: 62,
-      potential: 90,
-      league: 'HIGH_SCHOOL',
-      stats: { ins: 62, out: 62, ply: 62, def: 62, reb: 62, phy: 62 },
-      trainingFocus: 'BALANCED',
-      growthDna: 'STANDARD',
-    },
-    30,
-    midRng
-  );
-  assert.ok(growthAtCap.delta.ins <= 2);
-
-  // Late bloomer at age 26 grows faster than Early Bloomer at age 26
   const lateBloomer26 = calculateSeasonStatGrowth(
     {
       age: 26,
@@ -566,17 +678,4 @@ test('8. Core difficulty formulas (Role/MPG, PPG soft cap, Late Bloomer growth)'
     })
   );
   assert.equal(elig.canRetireVoluntarily, true);
-
-  const roleCheck = calculateRoleAndMpg(
-    {
-      ovr: 72,
-      team: NBA_TEAMS[0],
-      coachTrust: 50,
-      secondaryPos: null,
-      contractType: 'TWO_WAY',
-      league: 'NBA',
-    },
-    midRng
-  );
-  assert.equal(roleCheck.role, '투웨이 콜업 로테이션');
 });

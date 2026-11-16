@@ -90,7 +90,7 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
         {
           label: '볼핸들링과 픽앤롤 리딩 적극 수행',
           description: '득점뿐 아니라 동료의 찬스까지 살려주는 듀얼 가드로 거듭나요.',
-          effectSummary: 'PLY +2, OUT +1 · 감독 신뢰도 +7',
+          effectSummary: 'PLY +2, OUT +1 · 부포지션 PG 해금 & 감독 신뢰도 +7',
           statChanges: { ply: 2, out: 1 },
           trustDelta: 7,
           unlockSecondaryPos: 'PG',
@@ -334,12 +334,75 @@ export const VETERAN_CRITICAL_INJURY_EVENT: CareerEvent = {
   ],
 };
 
-export function createAgentRetirementAdviceEvent(reasonText: string): CareerEvent {
+/**
+ * 에이전트 은퇴 권유 리포트 생성
+ * - 동일 리그 내 최근 2~3시즌 연속 기량 하락 또는 만 35세 이상 고령화 시에만 단 1회 발생
+ * - 리그 승격(예: 대학/KBL -> NBA)으로 인한 볼륨 감소를 기량 하락으로 오인하지 않음!
+ */
+export function createAgentRetirementAdviceEvent(
+  input: string | CareerState
+): CareerEvent | null {
+  let reasonText = '';
+
+  if (typeof input === 'string') {
+    reasonText = input;
+  } else {
+    const career = input;
+    if (career.agentAdviceShown) return null;
+
+    // 동일 리그 내 최근 기록만 추출해 비교 (리그 승격/이적 시 볼륨 착시 방지)
+    const sameLeagueLogs = career.seasonLogs.filter(
+      (l) => l.league === career.league
+    );
+    const ovrHist = career.ovrHistory || [];
+    const twoYearOvrDrop =
+      ovrHist.length >= 3 ? ovrHist[ovrHist.length - 3] - career.ovr : 0;
+
+    let sameLeagueDecline = false;
+    let peakSameLeaguePpg = 0;
+    let lastSameLeaguePpg = 0;
+
+    if (sameLeagueLogs.length >= 2) {
+      const prevInLeague = sameLeagueLogs[sameLeagueLogs.length - 2];
+      const lastInLeague = sameLeagueLogs[sameLeagueLogs.length - 1];
+      peakSameLeaguePpg = Math.max(...sameLeagueLogs.map((l) => l.ppg));
+      lastSameLeaguePpg = lastInLeague.ppg;
+
+      const significantPpgDrop =
+        prevInLeague.ppg >= 12.0 && lastInLeague.ppg <= prevInLeague.ppg * 0.58;
+      const lostStarterMinutes =
+        prevInLeague.mpg >= 24.0 && lastInLeague.mpg <= 13.5;
+
+      if (
+        career.age >= 31 &&
+        ((twoYearOvrDrop >= 4 && (significantPpgDrop || lostStarterMinutes)) ||
+          (twoYearOvrDrop >= 5 && lastInLeague.ppg < 8.0))
+      ) {
+        sameLeagueDecline = true;
+      }
+    }
+
+    const advancedVeteranDecline =
+      career.age >= 35 && (twoYearOvrDrop >= 3 || career.stats.phy <= 62);
+
+    if (!sameLeagueDecline && !advancedVeteranDecline) {
+      return null;
+    }
+
+    if (sameLeagueDecline && peakSameLeaguePpg > 0) {
+      reasonText = `동일 리그 내에서 최근 종합 능력치(OVR -${twoYearOvrDrop})와 평균 득점(${peakSameLeaguePpg.toFixed(
+        1
+      )}점 → ${lastSameLeaguePpg.toFixed(1)}점)이 뚜렷하게 하락하며 베테랑의 기로에 섰어요.`;
+    } else {
+      reasonText = `어느덧 만 ${career.age}세 고령 베테랑 구간에 접어들며 체력과 기량 유지가 쉽지 않은 시점이 찾아왔어요.`;
+    }
+  }
+
   return {
     id: 'EVT_AGENT_RETIREMENT_ADVICE',
-    title: '📋 에이전트의 진지한 면담: 현역 은퇴 권유 리포트',
-    subtitle: '기량 하락 및 베테랑 은퇴 적령기 도달',
-    description: `${reasonText} 에이전트가 조심스럽게 다가와 박수칠 때 명예롭게 코트를 떠나는 선택지와, 냉정한 FA 스카우팅 평가를 감수하며 현역 연장에 도전하는 선택지를 함께 제시했어요.`,
+    title: '📋 에이전트의 진지한 면담: 현역 은퇴 권유 리포트 (커리어 1회)',
+    subtitle: '동일 리그 내 기량 하락 또는 고령 베테랑 은퇴 기로',
+    description: `${reasonText} 에이전트가 조심스럽게 다가와 박수칠 때 명예롭게 코트를 떠나는 선택지와, 현역 연장에 도전하는 선택지를 함께 제시했어요. (현역 연장을 선택하면 앞으로 에이전트가 다시 은퇴를 권유하지 않아요)`,
     category: 'RETIREMENT_ADVICE',
     choices: [
       {
@@ -349,10 +412,112 @@ export function createAgentRetirementAdviceEvent(reasonText: string): CareerEven
         triggerRetirement: 'VOLUNTARY_HONOR',
       },
       {
-        label: '🔥 현역 연장에 도전 (FA 시장 및 구단 스카우팅 평가 대기)',
-        description: '아직 코트를 떠날 수 없어요! 오프시즌 에이전트 데스크에서 구단들의 평가를 직접 확인해요.',
-        effectSummary: '오프시즌 에이전트 데스크 진입 (구단 오퍼가 0개일 경우 미계약 은퇴 처리)',
+        label: '🔥 현역 연장에 도전 (더 이상 은퇴 권유 받지 않음)',
+        description: '아직 코트를 떠날 수 없어요! 에이전트의 권유를 정중히 거절하고 현역 도전을 이어가요.',
+        effectSummary: '현역 연장 확정 · 이후 에이전트 은퇴 권유 영구 비활성화',
         trustDelta: 0,
+        markAgentAdviceDismissed: true,
+      },
+    ],
+  };
+}
+
+/**
+ * 시즌 중반(50% 진행 시점) '커리어 분기점(Mid-Season Crossroads)' 이벤트 생성
+ */
+export function rollMidSeasonCrossroadsEvent(
+  career: CareerState,
+  rng: () => number = Math.random
+): CareerEvent {
+  const isProLeague =
+    career.league === 'NBA' ||
+    career.league === 'KBL' ||
+    career.league === 'OVERSEAS';
+  const isAceOrStarter =
+    career.role.includes('에이스') || career.role.includes('스타터');
+  const isRebuildingOrBrokenPromise =
+    career.team.direction === 'REBUILDING' || Boolean(career.brokenRolePromise);
+
+  // 시나리오 1: 트레이드 데드라인 루머 (프로 리그에서 리빌딩 팀 에이스이거나 역할 약속이 깨졌을 때)
+  if (isProLeague && (isRebuildingOrBrokenPromise || (isAceOrStarter && rng() < 0.45))) {
+    return {
+      id: `EVT_MID_TRADE_DEADLINE_${career.seasonYear}`,
+      title: '🚨 [시즌 중반 분기점] 트레이드 데드라인 빅딜 루머!',
+      subtitle: '정규시즌 반환점(50%) · 프랜차이즈 의리 vs 우승 컨텐더 이적',
+      description: career.brokenRolePromise
+        ? `계약 당시 약속받았던 출전 시간이 지켜지지 않자, 플레이오프 우승권을 노리는 타 구단 단장이 즉시 전력감으로 영입하겠다는 트레이드 오퍼를 보냈어요!`
+        : `하위권에서 고군분투하는 나의 활약을 눈여겨본 우승 컨텐더 구단이 트레이드 데드라인 직전 영입 제안을 보내왔어요! 어떤 결단을 내릴까요?`,
+      category: 'MID_SEASON_CROSSROADS',
+      choices: [
+        {
+          label: '🤝 팀에 남아 프랜차이즈 충성 선언',
+          description: '이적 루머를 일축하고 현재 동료들과 끝까지 시즌을 완주하겠다고 선언해요.',
+          effectSummary: '감독 신뢰도 +9 · INS +1, DEF +1 상승',
+          statChanges: { ins: 1, def: 1 },
+          trustDelta: 9,
+        },
+        {
+          label: '✈️ 우승 반지와 새로운 기회를 위해 트레이드 요청 단행!',
+          description: '단장에게 공식 트레이드를 요청해 포지션 니즈가 맞는 상위 전력 구단으로 즉시 이적해요!',
+          effectSummary: '즉시 타 구단으로 트레이드 이적 · 스카우트 주목도 +5 · 승률 상승 기대',
+          draftStockDelta: 5,
+          executeTradeToContender: true,
+        },
+      ],
+    };
+  }
+
+  // 시나리오 2: 주전 부상으로 찾아온 3주간의 임시 선발 쇼케이스 기회 (벤치/식스맨/유망주 역할일 때)
+  if (!isAceOrStarter) {
+    return {
+      id: `EVT_MID_STARTER_SHOWCASE_${career.seasonYear}`,
+      title: '⚡ [시즌 중반 분기점] 주전 선수 부상! 3주간의 임시 선발 기회',
+      subtitle: '정규시즌 반환점(50%) · 식스맨에서 주전으로 도약할 결정적 찬스',
+      description:
+        '팀 내 주전 선수가 발목 염좌로 3주간 결장하게 되면서 감독님이 나에게 임시 선발 출전 기회를 부여했어요! 코트 위에서 어떤 인상을 남길까요?',
+      category: 'MID_SEASON_CROSSROADS',
+      choices: [
+        {
+          label: '🔥 공격적인 득점 쇼케이스로 스카우트들에게 강렬한 어필!',
+          description: '과감한 1대1 돌파와 외곽슛으로 내 공격 재능과 잠재력을 만천하에 증명해요.',
+          effectSummary: 'INS +1, OUT +1 · 잠재력(POT) +1 확장 · 스카우트 주가 +7',
+          statChanges: { ins: 1, out: 1 },
+          draftStockDelta: 7,
+          potentialDelta: 1,
+        },
+        {
+          label: '🛡️ 팀 전술에 맞춘 궂은일과 이타적 패스로 감독 신뢰 독차지!',
+          description: '수비 로테이션과 찬스 메이킹에 집중해 감독님의 눈도장을 확실하게 찍어요.',
+          effectSummary: 'PLY +1, DEF +1 · 감독 신뢰도 +11 대폭 상승 (출전시간 증가)',
+          statChanges: { ply: 1, def: 1 },
+          trustDelta: 11,
+        },
+      ],
+    };
+  }
+
+  // 시나리오 3: 시즌 중반 상대 집중 견제 & 슈팅 밸런스 조정
+  return {
+    id: `EVT_MID_TACTICAL_ADJUST_${career.seasonYear}`,
+    title: '🏀 [시즌 중반 분기점] 상대 수비의 집중 견제와 전술 해법',
+    subtitle: '정규시즌 반환점(50%) · 후반기 퍼포먼스를 좌우할 훈련 선택',
+    description:
+      '시즌 중반에 접어들자 상대 팀들이 스카우팅 리포트를 바탕으로 집요한 더블팀과 함정 수비를 펼치고 있어요. 후반기 돌파구를 어떻게 마련할까요?',
+    category: 'MID_SEASON_CROSSROADS',
+    choices: [
+      {
+        label: '🎯 릴리스 속도를 높이는 야간 슈팅 & 볼핸들링 특훈',
+        description: '수비가 붙기 전에 한 박자 빠르게 올라가는 풀업 점퍼와 패스 타이밍을 연마해요.',
+        effectSummary: 'OUT +2, PLY +1 · 스카우트 주가 +5',
+        statChanges: { out: 2, ply: 1 },
+        draftStockDelta: 5,
+      },
+      {
+        label: '💪 웨이트와 압박 수비 에너지로 공수 밸런스 재정비',
+        description: '강한 체력과 대인 방어로 상대 에이스를 먼저 지치게 만들어요.',
+        effectSummary: 'DEF +1, REB +1, PHY +1 · 감독 신뢰도 +7',
+        statChanges: { def: 1, reb: 1, phy: 1 },
+        trustDelta: 7,
       },
     ],
   };
@@ -384,30 +549,12 @@ export function rollSeasonEvent(
     return VETERAN_CRITICAL_INJURY_EVENT;
   }
 
-  // 2) 기량 급감 또는 평균 은퇴 연령(만 33~35세) 도달 시 에이전트 은퇴 제안 이벤트
-  const ovrHist = career.ovrHistory || [];
-  let twoYearDrop = 0;
-  if (ovrHist.length >= 3) {
-    twoYearDrop = ovrHist[ovrHist.length - 3] - career.ovr;
-  }
-  const peakPpg =
-    career.seasonLogs.length > 0
-      ? Math.max(...career.seasonLogs.map((l) => l.ppg))
-      : 0;
-  const lastLog = career.seasonLogs[career.seasonLogs.length - 1];
-  const lastPpg = lastLog ? lastLog.ppg : 0;
-  const sharpPpgDecline = peakPpg >= 10 && lastPpg <= peakPpg * 0.5 && career.age >= 30;
-  const consecutiveOvrDecline = twoYearDrop >= 4 && career.age >= 30;
-  const reachedAvgRetirementAge = career.age >= 33 && career.age <= 35;
-
-  if (consecutiveOvrDecline || sharpPpgDecline || (reachedAvgRetirementAge && rng() < 0.55)) {
-    let reasonText = `어느덧 농구선수 평균 은퇴 연령인 만 ${career.age}세에 접어들었어요.`;
-    if (consecutiveOvrDecline) {
-      reasonText = `최근 2시즌 동안 종합 능력치(OVR)가 ${twoYearDrop}만큼 하락하며 노쇠화 징후가 뚜렷해졌어요.`;
-    } else if (sharpPpgDecline) {
-      reasonText = `직전 시즌 평균 득점(${lastPpg.toFixed(1)}점)이 전성기(${peakPpg.toFixed(1)}점) 대비 절반 이하로 급감했어요.`;
+  // 2) 에이전트 은퇴 권유 리포트 (커리어 중 단 1회만, 동일 리그 내 뚜렷한 기량 하락 또는 만 35세+ 노쇠화 시)
+  if (!career.agentAdviceShown) {
+    const adviceEvent = createAgentRetirementAdviceEvent(career);
+    if (adviceEvent) {
+      return adviceEvent;
     }
-    return createAgentRetirementAdviceEvent(reasonText);
   }
 
   // 3) 아시안게임 병역특례 이벤트: 미필 상태 & OVR >= 66 & 21~26세 사이일 때 제한적 확률(28%)로 발생

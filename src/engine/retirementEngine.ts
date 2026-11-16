@@ -394,6 +394,7 @@ export function buildHallOfFameEntry(
     jerseyRetired: evaluation.jerseyRetired,
     iconicTeam: evaluation.honoredTeam,
     careerEarnings: career.careerEarnings || 0,
+    traits: career.traits || [],
     totals: {
       gp: career.totals.gp,
       points: career.totals.points,

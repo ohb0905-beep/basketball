@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowRightLeft,
   Briefcase,
   Lock,
   Newspaper,
@@ -16,16 +17,49 @@ import { useCareerStore } from '../../store/useCareerStore';
 import { OffseasonOption } from '../../types/game';
 import { TeamEmblem } from '../common/TeamEmblem';
 
+function formatSalaryOffer(amountUsd?: number): string | null {
+  if (!amountUsd || amountUsd <= 0) return null;
+  if (amountUsd >= 1000000) {
+    return `연봉 $${(amountUsd / 1000000).toFixed(2)}M`;
+  }
+  if (amountUsd >= 1000) {
+    return `연봉 $${Math.round(amountUsd / 1000).toLocaleString()}K`;
+  }
+  return `연봉 $${amountUsd.toLocaleString()}`;
+}
+
 export function SeasonTab() {
   const career = useCareerStore((s) => s.career);
   const playSeason = useCareerStore((s) => s.playSeason);
   const selectOffseasonOption = useCareerStore((s) => s.selectOffseasonOption);
+  const triggerMidSeasonCrossroads = useCareerStore((s) => s.triggerMidSeasonCrossroads);
+  const requestTrade = useCareerStore((s) => s.requestTrade);
 
   const [isSimulating, setIsSimulating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState(
     '시즌 개막 준비가 완료되었어요. 버튼을 눌러 이번 시즌을 진행해 보세요!'
   );
+
+  const midSeasonDone = career?.midSeasonEventTriggeredThisYear ?? false;
+  const hasPendingEvent = career?.pendingEvent !== null;
+  const offseasonLocked = career?.offseasonLocked ?? false;
+
+  // 전반기 50% 반환점 모달 선택 완료 후 자동으로 후반기(50% -> 100%) 재개
+  useEffect(() => {
+    if (
+      !isSimulating &&
+      progress === 50 &&
+      midSeasonDone &&
+      !hasPendingEvent &&
+      !offseasonLocked
+    ) {
+      const timer = setTimeout(() => {
+        setIsSimulating(true);
+      }, 80);
+      return () => clearTimeout(timer);
+    }
+  }, [isSimulating, progress, midSeasonDone, hasPendingEvent, offseasonLocked]);
 
   useEffect(() => {
     if (!isSimulating) return;
@@ -42,6 +76,17 @@ export function SeasonTab() {
         const next = prev + 25;
         const msgIdx = Math.min(messages.length - 1, Math.floor(next / 30));
         setStatusMessage(messages[msgIdx]);
+
+        // 시즌 반환점(50%) 도달 시: 아직 이번 시즌 중반 분기점이 발생하지 않았다면 일시 정지 후 발동
+        if (next === 50 && !midSeasonDone) {
+          clearInterval(interval);
+          setTimeout(() => {
+            setIsSimulating(false);
+            triggerMidSeasonCrossroads();
+          }, 80);
+          return 50;
+        }
+
         if (next >= 100) {
           clearInterval(interval);
           setTimeout(() => {
@@ -56,7 +101,7 @@ export function SeasonTab() {
     }, 90);
 
     return () => clearInterval(interval);
-  }, [isSimulating, playSeason]);
+  }, [isSimulating, midSeasonDone, playSeason, triggerMidSeasonCrossroads]);
 
   if (!career) return null;
 
@@ -68,7 +113,7 @@ export function SeasonTab() {
 
   const handleStartSeason = () => {
     if (isSimulating || career.offseasonLocked) return;
-    setProgress(10);
+    setProgress(25);
     setIsSimulating(true);
   };
 
@@ -112,7 +157,7 @@ export function SeasonTab() {
         {/* 게이지 바 (0% ~ 100%) */}
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs text-slate-500 tabular-nums">
-            <span>시즌 진행도</span>
+            <span>시즌 진행도 (50% 반환점 이벤트 포함)</span>
             <span className="font-bold text-slate-800">
               {career.offseasonLocked ? '100% (오프시즌)' : `${progress}%`}
             </span>
@@ -126,6 +171,28 @@ export function SeasonTab() {
             />
           </div>
         </div>
+
+        {/* 구단 역할 약속 위반 시 공식 트레이드 요청 배너 */}
+        {career.brokenRolePromise && (
+          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <p className="text-xs font-extrabold text-rose-700">
+                🚨 구단 역할 보장 약속 위반 감지
+              </p>
+              <p className="text-xs text-rose-900">
+                계약 당시 약속받은 주전/에이스 출전 시간이 지켜지지 않았어요. 프런트에 공식 트레이드를 요청해 주전 자리가 비어 있는 새 구단으로 이적할 수 있어요.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={requestTrade}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shrink-0 cursor-pointer transition-colors"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              공식 트레이드 요청하기
+            </button>
+          </div>
+        )}
       </section>
 
       {/* 2. 오프시즌 에이전트 데스크 (시즌 종료 직후에만 활성화) */}
@@ -166,61 +233,79 @@ export function SeasonTab() {
               <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-900 leading-relaxed">
                 직전 시즌 실전 퍼포먼스(득점·효율·출전시간)와 현재 나이(만 {career.age}세)·능력치(OVR{' '}
-                {career.ovr})를 종합한 구단 스카우팅 AI 심사 결과, 리그 내 재계약 또는 영입 오퍼를 제시한
+                {career.ovr})를 종합한 구단 스카우팅 AI 심사 결과, 국내외 프로 리그에서 영입 오퍼를 제시한
                 구단이 없어요. 정든 코트를 떠나 공식 은퇴식을 진행해야 해요.
               </p>
             </div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {career.offseasonOptions.map((option: OffseasonOption) => (
-              <button
-                key={option.id}
-                type="button"
-                disabled={option.locked}
-                onClick={() => selectOffseasonOption(option)}
-                className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3.5 ${
-                  option.locked
-                    ? 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
-                    : 'border-slate-200 bg-white hover:border-orange-500 hover:bg-orange-50/30 cursor-pointer'
-                }`}
-              >
-                {option.targetTeam ? (
-                  <TeamEmblem team={option.targetTeam} size="md" />
-                ) : (
-                  <div className="w-12 h-12 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center shrink-0">
-                    <Sparkles className="w-6 h-6 text-orange-600" />
-                  </div>
-                )}
-
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-orange-600">
-                      {option.badgeText}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {typeof option.scoutingScore === 'number' && (
-                        <span className="text-[11px] font-bold text-slate-500 tabular-nums">
-                          스카우트 {option.scoutingScore}점
-                        </span>
-                      )}
-                      {option.locked && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-                          <Lock className="w-3 h-3" />
-                          잠김
-                        </span>
-                      )}
+            {career.offseasonOptions.map((option: OffseasonOption) => {
+              const salaryText = formatSalaryOffer(option.annualSalary);
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  disabled={option.locked}
+                  onClick={() => selectOffseasonOption(option)}
+                  className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3.5 ${
+                    option.locked
+                      ? 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+                      : 'border-slate-200 bg-white hover:border-orange-500 hover:bg-orange-50/30 cursor-pointer'
+                  }`}
+                >
+                  {option.targetTeam ? (
+                    <TeamEmblem team={option.targetTeam} size="md" />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center shrink-0">
+                      <Sparkles className="w-6 h-6 text-orange-600" />
                     </div>
+                  )}
+
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-orange-600">
+                        {option.badgeText}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {typeof option.scoutingScore === 'number' && (
+                          <span className="text-[11px] font-bold text-slate-500 tabular-nums">
+                            스카우트 {option.scoutingScore}점
+                          </span>
+                        )}
+                        {option.locked && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                            <Lock className="w-3 h-3" />
+                            잠김
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-sm font-extrabold text-slate-900">
+                      {option.title}
+                    </p>
+                    {(option.promisedRoleLabel || salaryText) && (
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold">
+                        {option.promisedRoleLabel && (
+                          <span className="text-indigo-700">
+                            약속 역할: {option.promisedRoleLabel}
+                          </span>
+                        )}
+                        {salaryText && (
+                          <span className="text-emerald-700 tabular-nums">
+                            {salaryText}
+                            {option.contractYears ? ` (${option.contractYears}년)` : ''}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {option.subtitle}
+                    </p>
                   </div>
-                  <p className="text-sm font-extrabold text-slate-900">
-                    {option.title}
-                  </p>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    {option.subtitle}
-                  </p>
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         </section>
       )}

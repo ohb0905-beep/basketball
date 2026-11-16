@@ -1,10 +1,23 @@
 'use client';
 
 import React from 'react';
-import { Award, Check, Dumbbell, MessageSquare, RefreshCw } from 'lucide-react';
+import {
+  ArrowRightLeft,
+  Award,
+  Check,
+  Dumbbell,
+  Flame,
+  MessageSquare,
+  RefreshCw,
+  Sparkles,
+} from 'lucide-react';
 import { POSITION_ARCHETYPES } from '../../data/archetypes';
 import { LEAGUE_CONFIG } from '../../data/leagues';
-import { analyzePositionFit } from '../../engine/statCalculator';
+import {
+  analyzePositionFit,
+  getSpecialCampOptions,
+  getTraitInfo,
+} from '../../engine/statCalculator';
 import { useCareerStore } from '../../store/useCareerStore';
 import { Position, TrainingFocus } from '../../types/game';
 
@@ -58,11 +71,20 @@ const TRAINING_PROGRAMS: {
   },
 ];
 
+function formatUsdAmount(amount: number): string {
+  if (amount <= 0) return '무료';
+  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(2)}M`;
+  if (amount >= 1000) return `$${Math.round(amount / 1000).toLocaleString()}K`;
+  return `$${amount.toLocaleString()}`;
+}
+
 export function TrainingTab() {
   const career = useCareerStore((s) => s.career);
   const setTrainingFocus = useCareerStore((s) => s.setTrainingFocus);
   const switchPrimaryPosition = useCareerStore((s) => s.switchPrimaryPosition);
   const unlockSecondaryPosition = useCareerStore((s) => s.unlockSecondaryPosition);
+  const runSpecialCamp = useCareerStore((s) => s.runSpecialCamp);
+  const requestTrade = useCareerStore((s) => s.requestTrade);
 
   if (!career) return null;
 
@@ -74,6 +96,9 @@ export function TrainingTab() {
     career.secondaryPos,
     career.coachTrust
   );
+  const specialCamps = getSpecialCampOptions(career);
+  const traits = career.traits || [];
+  const campCompletedThisYear = career.lastCampYear === career.seasonYear;
 
   const statItems = [
     { key: 'ins', label: '인사이드 득점 (INS)', val: career.stats.ins, delta: career.lastSeasonDelta.ins },
@@ -86,7 +111,7 @@ export function TrainingTab() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-      {/* 좌측: 6대 세부 능력치 증감 바 & 보유 배지 */}
+      {/* 좌측: 6대 세부 능력치, 고유 특성(Traits), 감독 전술 면담 */}
       <div className="lg:col-span-6 space-y-6">
         <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
@@ -96,7 +121,7 @@ export function TrainingTab() {
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {career.age <= 28
-                  ? `현재 리그 성장 상한선: OVR ${leagueInfo.growthCap} (초과 시 성장 효율 둔화)`
+                  ? `현재 리그 성장 상한선: OVR ${leagueInfo.growthCap} · 선수 잠재력 상한: ${career.potential}`
                   : `만 ${career.age}세 베테랑 에이징 커브 구간 (노련미 유지 및 체력 관리 중요)`}
               </p>
             </div>
@@ -139,6 +164,43 @@ export function TrainingTab() {
             ))}
           </div>
 
+          {/* 선수 고유 특성 (선천적 1개 + 후천적 최대 2개, 총 3개) */}
+          <div className="pt-4 border-t border-slate-100 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <Flame className="w-4 h-4 text-orange-600" />
+                선수 고유 특성 (Traits: {traits.length} / 3)
+              </h3>
+              <span className="text-[11px] text-slate-400">
+                선천 특성 1개 + 커리어 업적 후천 특성 최대 2개
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {traits.map((tId) => {
+                const tInfo = getTraitInfo(tId);
+                return (
+                  <div
+                    key={tId}
+                    className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-start justify-between gap-3"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-extrabold text-slate-900">
+                          {tInfo.badge}
+                        </span>
+                        <span className="text-[11px] font-semibold text-orange-600">
+                          {tInfo.kind === 'INNATE' ? '선천적 기질' : '후천적 각성'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600">{tInfo.description}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {/* 획득한 특성 배지 */}
           <div className="pt-4 border-t border-slate-100 space-y-2">
             <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
@@ -177,6 +239,22 @@ export function TrainingTab() {
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 leading-relaxed">
             “{fit.coachAdvice}”
           </div>
+
+          {career.brokenRolePromise && (
+            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between gap-3">
+              <span className="text-xs font-bold text-rose-800">
+                구단이 약속한 출전 시간을 어겼어요. 공식 트레이드를 요청할 수 있어요.
+              </span>
+              <button
+                type="button"
+                onClick={requestTrade}
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shrink-0 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5 inline mr-1" />
+                트레이드 요청
+              </button>
+            </div>
+          )}
 
           {/* 부포지션 해금 또는 변경 */}
           <div className="space-y-2">
@@ -241,8 +319,8 @@ export function TrainingTab() {
         </section>
       </div>
 
-      {/* 우측: 중점 훈련 선택 */}
-      <div className="lg:col-span-6">
+      {/* 우측: 중점 훈련 선택 & 비시즌 특별 캠프 / 신체 개조 */}
+      <div className="lg:col-span-6 space-y-6">
         <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
           <div>
             <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
@@ -284,6 +362,68 @@ export function TrainingTab() {
                   ) : (
                     <RefreshCw className="w-4 h-4 text-slate-300 shrink-0 mt-1" />
                   )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 비시즌 특별 캠프 & 신체 개조 */}
+        <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-orange-600" />
+                특별 스킬 캠프 & 신체 개조 (시즌당 1회)
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                누적 자금을 투자해 은퇴 레전드의 과외를 받거나 체형을 포지션에 맞게 개조해요.
+              </p>
+            </div>
+            <span className="text-xs font-extrabold text-emerald-700 tabular-nums">
+              보유 자금: {formatUsdAmount(career.careerEarnings || 0)}
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {specialCamps.map((camp) => {
+              const affordable = (career.careerEarnings || 0) >= camp.costUsd;
+              const disabled = campCompletedThisYear || !affordable;
+              return (
+                <button
+                  key={camp.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => runSpecialCamp(camp.id)}
+                  className={`w-full p-4 rounded-xl border text-left transition-all flex items-start justify-between gap-3 ${
+                    disabled
+                      ? 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+                      : 'border-slate-200 bg-white hover:border-orange-500 hover:bg-orange-50/30 cursor-pointer'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-extrabold text-slate-900">
+                        {camp.title}
+                      </span>
+                      <span className="text-xs font-bold text-orange-600">
+                        [{camp.effectText}]
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600">{camp.subtitle}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="block text-xs font-extrabold text-emerald-700 tabular-nums">
+                      {formatUsdAmount(camp.costUsd)}
+                    </span>
+                    <span className="block text-[11px] text-slate-400">
+                      {campCompletedThisYear
+                        ? '금시즌 완료'
+                        : affordable
+                        ? '참가 가능'
+                        : '자금 부족'}
+                    </span>
+                  </div>
                 </button>
               );
             })}
