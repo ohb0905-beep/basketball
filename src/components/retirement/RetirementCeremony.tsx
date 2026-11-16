@@ -10,7 +10,7 @@ import { TeamEmblem } from '../common/TeamEmblem';
 const REASON_LABELS: Record<RetirementReason, string> = {
   VOLUNTARY_HONOR: '① 박수칠 때 떠나기 (자율 명예 은퇴)',
   LEGEND_FAREWELL_TOUR: '② 전 구단 기립박수 속 공식 레전드 은퇴 투어 완주',
-  OUT_OF_LEAGUE: '③ 세월의 무게를 받아들인 베테랑의 아름다운 작별',
+  OUT_OF_LEAGUE: '③ 소속팀 부재(구단 오퍼 0건)로 인한 현역 은퇴',
   CRITICAL_INJURY: '④ 부상 투혼 끝에 내려놓은 정든 유니폼',
   AGE_40_MANDATORY: '⑤ 만 40세 불혹의 나이까지 코트를 지킨 철인의 정년 은퇴',
 };
@@ -29,6 +29,7 @@ export function RetirementCeremony() {
   const avgPpg = (career.totals.points / gp).toFixed(1);
   const avgRpg = (career.totals.rebounds / gp).toFixed(1);
   const avgApg = (career.totals.assists / gp).toFixed(1);
+  const earningsM = ((career.careerEarnings || 0) / 1000).toFixed(2);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -60,7 +61,7 @@ export function RetirementCeremony() {
               </h2>
               <p className="text-xs font-bold text-orange-600 tabular-nums">
                 레거시 총점: {evaluation.legacyScore.toLocaleString()}점 · 전성기 OVR{' '}
-                {career.peakOvr}
+                {career.peakOvr} · 통산 수입 ${earningsM}M
               </p>
             </div>
 
@@ -115,11 +116,13 @@ export function RetirementCeremony() {
                 <div>
                   <span className="text-xs font-extrabold text-amber-600 flex items-center justify-center gap-1">
                     <Sparkles className="w-3.5 h-3.5" />
-                    🎽 구단 영구결번 배너 게양 완료!
+                    🎽 프랜차이즈 구단 영구결번 배너 게양 완료!
                   </span>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {evaluation.honoredTeam.name} 홈구장 천장에 등번호 #{career.jerseyNumber}번이
-                    영원히 게양되었어요!
+                  <p className="text-xs text-slate-600 mt-1">
+                    {evaluation.honoredTeam.name} 소속 {evaluation.honoredTeamSeasons}시즌 ·{' '}
+                    {evaluation.honoredTeamPoints.toLocaleString()}득점 (우승{' '}
+                    {evaluation.honoredTeamChamps}회 · MVP {evaluation.honoredTeamMvps}회 · 올스타{' '}
+                    {evaluation.honoredTeamAllStars}회)
                   </p>
                 </div>
               </div>
@@ -131,8 +134,10 @@ export function RetirementCeremony() {
                     대표 소속팀: {evaluation.honoredTeam.name}
                   </p>
                   <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                    구단 영구결번 기준(우승+올스타 2회, MVP 수상, 또는 통산 12,000득점)에는 조금
-                    모자랐지만 팬들의 박수 속에 명예롭게 은퇴했어요.
+                    프로 구단 영구결번 기준(단일 프로 구단 7시즌+ &amp; 10,000점+ 및 구단 MVP 2회+ 또는
+                    우승 2회+올스타 5회+)에는 미치지 못했지만(구단 기록: {evaluation.honoredTeamSeasons}
+                    시즌 · {evaluation.honoredTeamPoints.toLocaleString()}점), 팬들의 박수 속에 명예롭게
+                    은퇴했어요.
                   </p>
                 </div>
               </div>

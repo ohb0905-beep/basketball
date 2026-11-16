@@ -1,6 +1,7 @@
 import {
   CareerState,
   HallOfFameEntry,
+  LeagueId,
   LegacyEvaluation,
   LegacyTierId,
   PlayerStats,
@@ -9,6 +10,8 @@ import {
   TeamInfo,
 } from '../types/game';
 import { getTeamById } from '../data/teams';
+
+const PRO_LEAGUES: LeagueId[] = ['NBA', 'KBL', 'OVERSEAS', 'GLEAGUE'];
 
 /**
  * 5. 나이에 따른 에이징 커브 (매 시즌 결산 시 자동 차감)
@@ -30,7 +33,7 @@ export function applyAgingCurve(
 
   if (age >= 30 && age <= 32) {
     const phyDrop = -randInt(1, 2);
-    const plyBoost = rng() < 0.75 ? 1 : 0;
+    const plyBoost = rng() < 0.7 ? 1 : 0;
     nextStats.phy = clamp(prev.phy + phyDrop);
     nextStats.ply = clamp(prev.ply + plyBoost);
     delta.phy = nextStats.phy - prev.phy;
@@ -40,7 +43,7 @@ export function applyAgingCurve(
     const insDrop = -randInt(1, 3);
     const defDrop = -randInt(1, 3);
     const rebDrop = -randInt(1, 3);
-    const outDrop = rng() < 0.35 ? -1 : 0;
+    const outDrop = rng() < 0.4 ? -1 : 0;
 
     nextStats.phy = clamp(prev.phy + phyDrop);
     nextStats.ins = clamp(prev.ins + insDrop);
@@ -66,11 +69,7 @@ export function applyAgingCurve(
 }
 
 /**
- * 5대 은퇴 조건 중 시즌 직후 체크:
- * ① 자율 명예 은퇴 가능 여부 (만 31세 이상 또는 통산 10시즌 이상)
- * ② 레전드 은퇴 투어 선언 가능 여부 (만 34세 이상 & 우승 1회 이상 또는 올스타 3회 이상 또는 MVP 1회 이상)
- * ③ 방출 및 구단 오퍼 부재 (만 32세 이상 & NBA OVR < 73 / KBL·타리그 OVR < 58)
- * ⑤ 만 40세 정년 은퇴
+ * 5대 은퇴 조건 중 시즌 직후 체크
  */
 export function checkRetirementEligibility(career: CareerState): {
   canRetireVoluntarily: boolean;
@@ -107,35 +106,49 @@ export function checkRetirementEligibility(career: CareerState): {
 }
 
 /**
- * 구단 영구결번(Jersey Retirement) 헌액 & 6단계 레거시 등급 심사
+ * 4. 영구 결번(Jersey Retirement) 기준 대폭 상향 및 프로 한정 & 6단계 레거시 등급 심사
+ * - 대학/아마추어 팀(HIGH_SCHOOL, U_LEAGUE, NCAA) 및 상무는 영구 결번 심사 대상에서 완전 제외
+ * - 오직 프로 구단(NBA, KBL, OVERSEAS, GLEAGUE)에서만 심사하며, 해당 단일 프로 구단(honoredTeam) 소속 누적 기록만 기준:
+ *   1) 프랜차이즈 헌신 (필수): 단일 프로 구단 최소 7시즌 이상 활약 AND 해당 구단 누적 득점 10,000점 이상 (KBL/해외/G리그는 6,000점 이상)
+ *   2) 압도적 구단 업적 (다음 중 1개 이상 충족):
+ *      - 해당 구단 소속 정규리그 MVP 2회 이상
+ *      - 해당 구단 소속 우승 2회 이상 + 올스타 5회 이상
+ *      - 해당 구단 10시즌 이상 프랜차이즈 스타 + 우승 1회 이상 + 올스타 6회 이상
  */
 export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
-  // 구단별 누적 기록 집계하여 가장 큰 족적을 남긴 구단 선정
   const teamMap = new Map<
     string,
     {
       teamId: string;
+      league: LeagueId;
       seasons: number;
       points: number;
       championships: number;
       mvps: number;
       allStars: number;
       impactScore: number;
+      isProEligible: boolean;
     }
   >();
 
   for (const log of career.seasonLogs) {
+    const teamObj = getTeamById(log.teamId, career.teamRatingsMap);
+    const isProEligible =
+      PRO_LEAGUES.includes(log.league) && !teamObj?.isMilitaryTeam;
+
     const prev = teamMap.get(log.teamId) || {
       teamId: log.teamId,
+      league: log.league,
       seasons: 0,
       points: 0,
       championships: 0,
       mvps: 0,
       allStars: 0,
       impactScore: 0,
+      isProEligible,
     };
     const seasonPts = Math.round(log.ppg * log.gp);
-    const leagueBonus = log.league === 'NBA' ? 1.5 : 1.0;
+    const leagueBonus = log.league === 'NBA' ? 1.6 : isProEligible ? 1.15 : 0.4;
 
     prev.seasons += 1;
     prev.points += seasonPts;
@@ -153,50 +166,68 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
   }
 
   let honoredTeam: TeamInfo = career.team;
-  let honoredTeamSeasons = Math.max(1, career.seasonLogs.length);
-  let honoredTeamPoints = career.totals.points;
-  let bestTeamRecord = {
-    championships: career.totals.championships,
-    mvps: career.totals.mvps,
-    allStars: career.totals.allStars,
-  };
+  let honoredTeamSeasons = 0;
+  let honoredTeamPoints = 0;
+  let honoredTeamMvps = 0;
+  let honoredTeamChamps = 0;
+  let honoredTeamAllStars = 0;
 
   if (teamMap.size > 0) {
-    const sorted = Array.from(teamMap.values()).sort(
-      (a, b) => b.impactScore - a.impactScore
-    );
+    // 프로 구단 기록이 있다면 프로 구단을 최우선으로 대표 구단 선정
+    const allRecords = Array.from(teamMap.values());
+    const proRecords = allRecords.filter((r) => r.isProEligible);
+    const pool = proRecords.length > 0 ? proRecords : allRecords;
+    const sorted = pool.sort((a, b) => b.impactScore - a.impactScore);
     const top = sorted[0];
-    const foundTeam = getTeamById(top.teamId);
+    const foundTeam = getTeamById(top.teamId, career.teamRatingsMap);
     if (foundTeam) {
       honoredTeam = foundTeam;
     }
     honoredTeamSeasons = top.seasons;
     honoredTeamPoints = top.points;
-    bestTeamRecord = {
-      championships: top.championships,
-      mvps: top.mvps,
-      allStars: top.allStars,
-    };
+    honoredTeamMvps = top.mvps;
+    honoredTeamChamps = top.championships;
+    honoredTeamAllStars = top.allStars;
   }
 
-  // 영구결번 조건: 가장 큰 족적을 남긴 구단에서 (우승 + 올스타 2회 이상) 또는 MVP 수상, 혹은 통산 12,000득점 이상
-  const jerseyRetired =
-    (bestTeamRecord.championships >= 1 && bestTeamRecord.allStars >= 2) ||
-    career.totals.mvps >= 1 ||
-    career.totals.points >= 12000;
+  // 프로 구단 여부 확인 (HIGH_SCHOOL, U_LEAGUE, NCAA 및 군팀 영구결번 절대 불가)
+  const isProFranchise =
+    PRO_LEAGUES.includes(honoredTeam.league) && !honoredTeam.isMilitaryTeam;
 
-  // 레거시 점수 계산
+  const requiredFranchisePoints =
+    honoredTeam.league === 'NBA' ? 10000 : 6000;
+
+  const meetsCommitment =
+    isProFranchise &&
+    honoredTeamSeasons >= 7 &&
+    honoredTeamPoints >= requiredFranchisePoints;
+
+  const meetsDominantAchievement =
+    honoredTeamMvps >= 2 ||
+    (honoredTeamChamps >= 2 && honoredTeamAllStars >= 5) ||
+    (honoredTeamSeasons >= 10 &&
+      honoredTeamChamps >= 1 &&
+      honoredTeamAllStars >= 6);
+
+  const jerseyRetired = meetsCommitment && meetsDominantAchievement;
+
+  // 레거시 점수 계산 (신규 어워드 파이널 MVP, DPOY, 식스맨, MIP, 올-리그 팀 모두 반영)
   const legacyScore = Math.round(
     career.totals.points * 0.12 +
       career.totals.nbaPoints * 0.18 +
       career.totals.rebounds * 0.08 +
       career.totals.assists * 0.12 +
       career.totals.nbaChampionships * 850 +
-      (career.totals.championships - career.totals.nbaChampionships) * 280 +
+      (career.totals.championships - career.totals.nbaChampionships) * 260 +
       career.totals.nbaMvps * 1100 +
-      (career.totals.mvps - career.totals.nbaMvps) * 320 +
-      career.totals.nbaAllStars * 320 +
-      (career.totals.allStars - career.totals.nbaAllStars) * 110 +
+      (career.totals.mvps - career.totals.nbaMvps) * 300 +
+      (career.totals.finalsMvps || 0) * 550 +
+      (career.totals.dpoys || 0) * 420 +
+      (career.totals.sixthManAwards || 0) * 220 +
+      (career.totals.mips || 0) * 200 +
+      (career.totals.allLeagueSelections || 0) * 180 +
+      career.totals.nbaAllStars * 300 +
+      (career.totals.allStars - career.totals.nbaAllStars) * 100 +
       career.peakOvr * 15
   );
 
@@ -265,6 +296,9 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     honoredTeam,
     honoredTeamSeasons,
     honoredTeamPoints,
+    honoredTeamMvps,
+    honoredTeamChamps,
+    honoredTeamAllStars,
   };
 }
 
@@ -292,6 +326,7 @@ export function buildHallOfFameEntry(
     legacyScore: evaluation.legacyScore,
     jerseyRetired: evaluation.jerseyRetired,
     iconicTeam: evaluation.honoredTeam,
+    careerEarnings: career.careerEarnings || 0,
     totals: {
       gp: career.totals.gp,
       points: career.totals.points,
@@ -303,6 +338,11 @@ export function buildHallOfFameEntry(
       nbaChampionships: career.totals.nbaChampionships,
       mvps: career.totals.mvps,
       nbaMvps: career.totals.nbaMvps,
+      finalsMvps: career.totals.finalsMvps || 0,
+      dpoys: career.totals.dpoys || 0,
+      sixthManAwards: career.totals.sixthManAwards || 0,
+      mips: career.totals.mips || 0,
+      allLeagueSelections: career.totals.allLeagueSelections || 0,
       allStars: career.totals.allStars,
       nbaAllStars: career.totals.nbaAllStars,
     },

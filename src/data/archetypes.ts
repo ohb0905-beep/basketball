@@ -25,7 +25,7 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetype> = {
     position: 'PG',
     koreanName: '포인트 가드',
     englishName: 'Point Guard',
-    tagline: '코트 위의 야전사령관해요',
+    tagline: '코트 위의 야전사령관이에요',
     description:
       '빠른 스피드와 넓은 시야로 팀 공격을 조립하고 외곽 픽앤롤을 주도하는 앞선의 핵심 포지션이에요.',
     recommendedHeightRange: [175, 193],
@@ -52,7 +52,7 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetype> = {
     position: 'SG',
     koreanName: '슈팅 가드',
     englishName: 'Shooting Guard',
-    tagline: '순도 높은 외곽의 해결사해요',
+    tagline: '순도 높은 외곽의 해결사예요',
     description:
       '스크린을 타고 돌아 나오는 3점슛과 날카로운 돌파로 상대 수비에 균열을 내는 득점원이에요.',
     recommendedHeightRange: [185, 198],
@@ -79,7 +79,7 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetype> = {
     position: 'SF',
     koreanName: '스몰 포워드',
     englishName: 'Small Forward',
-    tagline: '공수 겸장 올라운더 윙맨해요',
+    tagline: '공수 겸장 올라운더 윙맨이에요',
     description:
       '내외곽 득점과 대인 수비, 리바운드 가담까지 코트 전역을 누비는 전천후 에이스 포지션이에요.',
     recommendedHeightRange: [193, 205],
@@ -106,7 +106,7 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetype> = {
     position: 'PF',
     koreanName: '파워 포워드',
     englishName: 'Power Forward',
-    tagline: '강인한 보드 장악과 스트레치 빅맨해요',
+    tagline: '강인한 보드 장악과 스트레치 빅맨이에요',
     description:
       '페인트존 몸싸움과 리바운드를 책임지면서 외곽 스트레치 슈팅까지 위협하는 현대 농구의 핵심축이에요.',
     recommendedHeightRange: [198, 210],
@@ -133,7 +133,7 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetype> = {
     position: 'C',
     koreanName: '센터',
     englishName: 'Center',
-    tagline: '골밑을 지배하는 최후의 수호신해요',
+    tagline: '골밑을 지배하는 최후의 수호신이에요',
     description:
       '압도적인 높이와 림 프로텍팅, 스크린과 골밑 마무리로 페인트존을 통제하는 빅맨이에요.',
     recommendedHeightRange: [204, 220],

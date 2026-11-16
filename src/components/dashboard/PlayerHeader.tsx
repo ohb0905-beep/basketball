@@ -7,17 +7,27 @@ import { TeamEmblem } from '../common/TeamEmblem';
 
 const CONTRACT_LABELS: Record<ContractType, string> = {
   AMATEUR: '학생 아마추어',
+  MILITARY_SERVICE: '국군체육부대(상무) 복무',
   KBL_ROOKIE: 'KBL 신인 계약',
   KBL_MAX: 'KBL 프랜차이즈 맥스',
   KBL_VET: 'KBL 베테랑 계약',
   OVERSEAS_CONTRACT: '해외 프로 정식 계약',
   GLEAGUE_EXHIBIT: 'G리그 쇼케이스 계약',
+  SUMMER_LEAGUE_INVITE: 'NBA 서머리그 초청 쇼케이스',
   TWO_WAY: 'NBA 투웨이(Two-Way) 계약',
   NBA_STANDARD: 'NBA 정식 보장 계약',
   NBA_MAX: 'NBA 슈퍼맥스 계약',
   NBA_VET_MIN: 'NBA 베테랑 미니멈',
   FREE_AGENT: '자유계약 (FA)',
 };
+
+function formatCurrencyK(amountK: number): string {
+  if (amountK <= 0) return '$0';
+  if (amountK >= 1000) {
+    return `$${(amountK / 1000).toFixed(2)}M`;
+  }
+  return `$${amountK.toLocaleString()}K`;
+}
 
 export function PlayerHeader({ career }: { career: CareerState }) {
   const leagueInfo = LEAGUE_CONFIG[career.league];
@@ -39,10 +49,22 @@ export function PlayerHeader({ career }: { career: CareerState }) {
               <span>
                 {CONTRACT_LABELS[career.contractType]} ({career.contractYearsLeft}년 남음)
               </span>
-              {career.militaryExempt && (
+              {career.militaryServiceSeasonsLeft > 0 ? (
                 <>
                   <span aria-hidden="true">·</span>
-                  <span className="text-emerald-700 font-semibold">🎖️ 병역특례</span>
+                  <span className="text-amber-700 font-bold">
+                    🫡 상무 복무 중 ({career.militaryServiceSeasonsLeft}시즌 남음)
+                  </span>
+                </>
+              ) : career.militaryExempt ? (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-emerald-700 font-semibold">🎖️ 병역필/특례</span>
+                </>
+              ) : (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-slate-400">병역 미필 (만 27세 상무 입대)</span>
                 </>
               )}
               {career.isFarewellTour && (
@@ -69,6 +91,10 @@ export function PlayerHeader({ career }: { career: CareerState }) {
               <span>만 {career.age}세 ({career.seasonYear}시즌)</span>
               <span aria-hidden="true">·</span>
               <span className="font-semibold text-slate-800">역할: {career.role}</span>
+              <span aria-hidden="true">·</span>
+              <span className="font-semibold text-emerald-700">
+                연봉 {formatCurrencyK(career.annualSalary)} (누적 {formatCurrencyK(career.careerEarnings)})
+              </span>
             </div>
           </div>
         </div>

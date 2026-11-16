@@ -16,6 +16,7 @@ export function DraftLiveStage() {
   const isFirstRound = dr.round === 1 && dr.pickNumber !== null && dr.pickNumber <= 30;
   const isSecondRound = dr.round === 2 && dr.pickNumber !== null && dr.pickNumber > 30;
   const isUndrafted = dr.pickNumber === null;
+  const twoWayTargetTeam = dr.draftedTeam || dr.twoWayOfferTeam;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -54,21 +55,32 @@ export function DraftLiveStage() {
                 ? `“KBL 신인드래프트 전체 ${dr.pickNumber}순위로 ${dr.draftedTeam.name} 구단이 #${career.jerseyNumber} ${career.name} 선수를 지명했어요!”`
                 : isFirstRound
                 ? `“With the #${dr.pickNumber} pick in the NBA Draft, the ${dr.draftedTeam.name} select ${career.name}!” (1라운드 정식 루키 스케일 보장 계약)`
-                : `2라운드 전체 ${dr.pickNumber}순위로 ${dr.draftedTeam.name}에 지명되었어요! 서머리그 쇼케이스를 통해 투웨이(Two-Way) 계약부터 시작하거나 해외/G리그 진로를 선택할 수 있어요.`}
+                : `2라운드 전체 ${dr.pickNumber}순위로 ${dr.draftedTeam.name}에 지명되었어요! 구단과 투웨이(Two-Way) 계약을 체결해 콜업을 노리거나 G리그·KBL 진로를 선택할 수 있어요.`}
             </div>
           </div>
-        ) : (
+        ) : dr.twoWayOfferTeam ? (
           <div className="max-w-xl mx-auto p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
             <p className="text-sm font-bold text-slate-800">
               아쉽게도 드래프트 1·2라운드 60명 안에 호명되지 못했어요.
             </p>
             <p className="text-xs text-slate-600 leading-relaxed">
-              하지만 지명식 직후 에이전트의 전화기가 불이 나고 있어요!{' '}
+              하지만 직전 시즌 실전 퍼포먼스와 잠재력을 눈여겨본{' '}
               <strong className="text-slate-900">
-                {dr.twoWayOfferTeam?.name}
+                {dr.twoWayOfferTeam.name}
               </strong>{' '}
-              구단에서 라스베이거스 서머리그 초청과 함께{' '}
-              <strong className="text-orange-600">투웨이(Two-Way) 계약</strong>을 제안했어요!
+              스카우팅 팀에서 라스베이거스 서머리그 초청과 함께{' '}
+              <strong className="text-orange-600">투웨이(Two-Way) 계약</strong>을 공식 제안했어요!
+            </p>
+          </div>
+        ) : (
+          <div className="max-w-xl mx-auto p-6 rounded-2xl bg-amber-50 border border-amber-200 space-y-3">
+            <p className="text-sm font-bold text-amber-900">
+              드래프트 미지명(Undrafted) 및 NBA 구단 투웨이 오퍼 부재
+            </p>
+            <p className="text-xs text-amber-800 leading-relaxed">
+              구단 스카우팅 AI 심사 결과(직전 시즌 실전 기록·효율·리그 수비저항 환산치), 아쉽게도 NBA 30개
+              구단으로부터 투웨이(Two-Way) 계약을 제안받지 못했어요. NBA G리그 공개 트라이아웃에 참가해
+              밑바닥부터 실력을 증명하거나, 국내 KBL 무대로 복귀해 기량을 끌어올려 보세요!
             </p>
           </div>
         )}
@@ -99,14 +111,16 @@ export function DraftLiveStage() {
 
           {!isKbl && (isSecondRound || isUndrafted) && (
             <>
-              <button
-                type="button"
-                onClick={() => finalizeDraftSigning('TWO_WAY')}
-                className="w-full py-4 px-6 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-sm inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-5 h-5" />
-                {(dr.draftedTeam || dr.twoWayOfferTeam)?.name} NBA 투웨이(Two-Way) 계약 수락하기
-              </button>
+              {twoWayTargetTeam && (
+                <button
+                  type="button"
+                  onClick={() => finalizeDraftSigning('TWO_WAY')}
+                  className="w-full py-4 px-6 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-sm inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-5 h-5" />
+                  {twoWayTargetTeam.name} NBA 투웨이(Two-Way) 계약 수락하기
+                </button>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
@@ -114,7 +128,7 @@ export function DraftLiveStage() {
                   onClick={() => finalizeDraftSigning('GLEAGUE')}
                   className="py-3.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition-colors cursor-pointer"
                 >
-                  🇺🇸 NBA G리그 유나이티드 주전 입단
+                  🇺🇸 NBA G리그 공개 트라이아웃 입단
                 </button>
                 <button
                   type="button"

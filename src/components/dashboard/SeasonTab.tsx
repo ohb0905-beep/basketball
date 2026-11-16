@@ -8,6 +8,7 @@ import {
   Newspaper,
   Play,
   Sparkles,
+  Star,
   Trophy,
 } from 'lucide-react';
 import { LEAGUE_CONFIG } from '../../data/leagues';
@@ -135,14 +136,24 @@ export function SeasonTab() {
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
             <div>
-              <span className="text-xs font-extrabold text-orange-600 flex items-center gap-1.5">
-                <Briefcase className="w-4 h-4" />
-                오프시즌 에이전트 데스크 (Offseason Agent Desk)
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-extrabold text-orange-600 flex items-center gap-1.5">
+                  <Briefcase className="w-4 h-4" />
+                  오프시즌 에이전트 데스크 (Offseason Agent Desk)
+                </span>
+                {career.league === 'HIGH_SCHOOL' && career.prospectStars && (
+                  <span className="inline-flex items-center gap-1 text-xs font-extrabold text-amber-600 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-lg">
+                    <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
+                    고교 유망주 최종 등급: {career.prospectStars}성 (
+                    {'★'.repeat(career.prospectStars)}
+                    {'☆'.repeat(5 - career.prospectStars)})
+                  </span>
+                )}
+              </div>
               <h3 className="text-xl font-extrabold text-slate-900 mt-1">
                 {career.isOutOfLeagueWarning
-                  ? '⚠️ 구단 오퍼 부재: 에이전트 은퇴 권유 리포트가 도착했어요'
-                  : '다음 시즌을 함께할 구단 또는 드래프트 도전을 선택해 주세요'}
+                  ? '⚠️ 소속팀 부재: 구단 스카우팅 AI 기준을 통과한 계약 오퍼가 없어요'
+                  : '스카우팅 심사를 거쳐 도착한 구단 오퍼 및 진로를 확인해 주세요'}
               </h3>
             </div>
             <span className="text-xs text-slate-500 tabular-nums">
@@ -154,9 +165,9 @@ export function SeasonTab() {
             <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-900 leading-relaxed">
-                만 {career.age}세 노쇠화로 인해 현재 능력치(OVR {career.ovr})로는 소속 리그 구단들의
-                재계약 기준을 충족하지 못해 오퍼가 0건이에요. 정든 코트를 떠나 은퇴식을 진행하거나,
-                고국 KBL 구단과 1년 베테랑 계약을 맺고 국내 팬들 앞에서 마지막 시즌을 보낼 수 있어요.
+                직전 시즌 실전 퍼포먼스(득점·효율·출전시간)와 현재 나이(만 {career.age}세)·능력치(OVR{' '}
+                {career.ovr})를 종합한 구단 스카우팅 AI 심사 결과, 리그 내 재계약 또는 영입 오퍼를 제시한
+                구단이 없어요. 정든 코트를 떠나 공식 은퇴식을 진행해야 해요.
               </p>
             </div>
           )}
@@ -187,12 +198,19 @@ export function SeasonTab() {
                     <span className="text-xs font-bold text-orange-600">
                       {option.badgeText}
                     </span>
-                    {option.locked && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-                        <Lock className="w-3 h-3" />
-                        잠김
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {typeof option.scoutingScore === 'number' && (
+                        <span className="text-[11px] font-bold text-slate-500 tabular-nums">
+                          스카우트 {option.scoutingScore}점
+                        </span>
+                      )}
+                      {option.locked && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                          <Lock className="w-3 h-3" />
+                          잠김
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <p className="text-sm font-extrabold text-slate-900">
                     {option.title}
@@ -219,6 +237,9 @@ export function SeasonTab() {
               </span>
               <span className="tabular-nums">
                 {lastSeason.year}시즌 결산 · 팀 성적 {lastSeason.wins}승 {lastSeason.losses}패
+                {lastSeason.injuredGamesMissed > 0
+                  ? ` · 🩹 부상 결장 ${lastSeason.injuredGamesMissed}G`
+                  : ''}
               </span>
             </div>
             <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">
@@ -229,7 +250,13 @@ export function SeasonTab() {
           {/* 주요 박스스코어 타일 */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 text-center">
             {[
-              { label: '출전 경기', val: `${lastSeason.gp}G` },
+              {
+                label:
+                  lastSeason.injuredGamesMissed > 0
+                    ? `출전 (결장 ${lastSeason.injuredGamesMissed}G)`
+                    : '출전 경기',
+                val: `${lastSeason.gp}G`,
+              },
               { label: '출전 시간', val: `${lastSeason.mpg.toFixed(1)}분` },
               { label: '평균 득점', val: `${lastSeason.ppg.toFixed(1)}점`, highlight: true },
               { label: '평균 리바운드', val: `${lastSeason.rpg.toFixed(1)}개` },

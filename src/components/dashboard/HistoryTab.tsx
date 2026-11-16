@@ -4,6 +4,14 @@ import React from 'react';
 import { Award, Flame, History, Trophy } from 'lucide-react';
 import { useCareerStore } from '../../store/useCareerStore';
 
+function formatMoney(amountK: number): string {
+  if (amountK <= 0) return '$0';
+  if (amountK >= 1000) {
+    return `$${(amountK / 1000).toFixed(2)}M`;
+  }
+  return `$${amountK.toLocaleString()}K`;
+}
+
 export function HistoryTab() {
   const career = useCareerStore((s) => s.career);
   if (!career) return null;
@@ -12,16 +20,22 @@ export function HistoryTab() {
   const careerPpg = (career.totals.points / gp).toFixed(1);
   const careerRpg = (career.totals.rebounds / gp).toFixed(1);
   const careerApg = (career.totals.assists / gp).toFixed(1);
+  const allLeagueCount = career.totals.allLeagueSelections || 0;
 
   return (
     <div className="space-y-6">
       {/* 1. 통산 누적 기록 & 커리어하이 요약 */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <section className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
-          <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-            <Trophy className="w-5 h-5 text-orange-600" />
-            통산 누적 기록 (Career Totals)
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <Trophy className="w-5 h-5 text-orange-600" />
+              통산 누적 기록 (Career Totals)
+            </h2>
+            <span className="text-xs font-extrabold text-emerald-700 tabular-nums">
+              통산 누적 수입: {formatMoney(career.careerEarnings || 0)}
+            </span>
+          </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
             <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
@@ -60,9 +74,19 @@ export function HistoryTab() {
                 {career.totals.championships} / {career.totals.mvps} / {career.totals.allStars}
               </span>
               <span className="block text-[11px] text-slate-400 tabular-nums">
-                NBA 우승 {career.totals.nbaChampionships}회
+                파이널MVP {career.totals.finalsMvps || 0}회
               </span>
             </div>
+          </div>
+
+          {/* 확장 수상 내역 요약 바 */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 tabular-nums">
+            <span>🛡️ 올해의 수비수(DPOY): <strong className="text-slate-900">{career.totals.dpoys || 0}회</strong></span>
+            <span>⚡ 식스맨상(6MOY): <strong className="text-slate-900">{career.totals.sixthManAwards || 0}회</strong></span>
+            <span>📈 기량발전상(MIP): <strong className="text-slate-900">{career.totals.mips || 0}회</strong></span>
+            <span>
+              🏅 올-리그 팀 선정: <strong className="text-slate-900">{allLeagueCount}회</strong>
+            </span>
           </div>
         </section>
 
@@ -171,8 +195,15 @@ export function HistoryTab() {
                     <td className="py-3 px-2 text-amber-600 font-semibold whitespace-nowrap">
                       {[
                         log.wonChampionship ? '💍우승' : null,
+                        log.wonFinalsMvp ? '👑파이널MVP' : null,
                         log.wonMvp ? '🏆MVP' : null,
+                        log.wonDpoy ? '🛡️DPOY' : null,
+                        log.wonSixthMan ? '⚡식스맨' : null,
+                        log.wonMip ? '📈MIP' : null,
+                        log.wonRookieOfYear ? '🌱신인왕' : null,
                         log.allStarSelected ? '⭐올스타' : null,
+                        log.allLeagueTeam ? `🏅올리그(${log.allLeagueTeam})` : null,
+                        log.injuredGamesMissed > 0 ? `🩹결장${log.injuredGamesMissed}G` : null,
                       ]
                         .filter(Boolean)
                         .join(' · ') || '-'}

@@ -49,8 +49,8 @@ export default function BenchToMvpApp() {
         setView('DASHBOARD');
       } else {
         startNewCareer({
-          name: '이현중',
-          jerseyNumber: '7',
+          name: '신입생',
+          jerseyNumber: '',
           heightCm: 198,
           primaryPos: 'SF',
           highSchoolTeamId: 'HS_SAMIL',

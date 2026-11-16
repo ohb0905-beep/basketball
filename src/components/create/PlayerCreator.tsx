@@ -4,20 +4,19 @@ import React, { useState } from 'react';
 import { ArrowLeft, Check, Ruler, Shield, Sparkles } from 'lucide-react';
 import { getHeightModifiers, POSITION_ARCHETYPES } from '../../data/archetypes';
 import { HIGH_SCHOOL_TEAMS } from '../../data/teams';
-import { calculateOvr, createInitialStats } from '../../engine/statCalculator';
+import { getPreviewStatsAndOvrRange } from '../../engine/statCalculator';
 import { useCareerStore } from '../../store/useCareerStore';
 import { Position } from '../../types/game';
 import { TeamEmblem } from '../common/TeamEmblem';
 
 const POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
-const POPULAR_NUMBERS = ['0', '1', '3', '7', '10', '11', '15', '23', '30', '34', '77'];
 
 export function PlayerCreator() {
   const startNewCareer = useCareerStore((s) => s.startNewCareer);
   const setView = useCareerStore((s) => s.setView);
 
-  const [name, setName] = useState('강백호');
-  const [jerseyNumber, setJerseyNumber] = useState('7');
+  const [name, setName] = useState('');
+  const [jerseyNumber, setJerseyNumber] = useState('');
   const [primaryPos, setPrimaryPos] = useState<Position>('PG');
   const [heightCm, setHeightCm] = useState<number>(186);
   const [highSchoolTeamId, setHighSchoolTeamId] = useState<string>(HIGH_SCHOOL_TEAMS[0].id);
@@ -25,8 +24,7 @@ export function PlayerCreator() {
 
   const archetype = POSITION_ARCHETYPES[primaryPos];
   const heightMod = getHeightModifiers(heightCm);
-  const previewStats = createInitialStats(primaryPos, heightCm);
-  const previewOvr = calculateOvr(previewStats, primaryPos);
+  const preview = getPreviewStatsAndOvrRange(primaryPos, heightCm);
 
   const handlePosChange = (pos: Position) => {
     setPrimaryPos(pos);
@@ -40,7 +38,7 @@ export function PlayerCreator() {
       setErrorMsg('선수 이름을 입력해 주세요!');
       return;
     }
-    const cleanNum = jerseyNumber.trim() || '0';
+    const cleanNum = jerseyNumber.trim();
     startNewCareer({
       name: trimmed,
       jerseyNumber: cleanNum,
@@ -74,7 +72,7 @@ export function PlayerCreator() {
               새로운 유망주 프로필 등록
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              포지션과 신장(cm)에 따라 물리 보정이 적용된 초기 능력치가 결정돼요.
+              포지션과 신장(cm) 물리 보정에 더해 개체별 재능 편차가 무작위로 부여되어 초기 능력치와 OVR이 결정돼요.
             </p>
           </div>
 
@@ -96,7 +94,7 @@ export function PlayerCreator() {
                   setName(e.target.value);
                   if (errorMsg) setErrorMsg(null);
                 }}
-                placeholder="예: 이현중, 여준석, 정성우"
+                placeholder="선수 이름 입력"
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-slate-900 font-semibold text-sm focus:outline-none focus:border-orange-500"
               />
               {errorMsg && (
@@ -109,7 +107,7 @@ export function PlayerCreator() {
                 htmlFor="jersey-number-input"
                 className="block text-xs font-bold text-slate-700 mb-1.5"
               >
-                등번호 (#00 ~ #99)
+                등번호 (미입력 시 랜덤)
               </label>
               <input
                 id="jersey-number-input"
@@ -120,29 +118,10 @@ export function PlayerCreator() {
                   const digits = e.target.value.replace(/[^0-9]/g, '');
                   setJerseyNumber(digits);
                 }}
-                placeholder="7"
+                placeholder="00 ~ 99"
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-slate-900 font-bold text-sm tabular-nums focus:outline-none focus:border-orange-500"
               />
             </div>
-          </div>
-
-          {/* 등번호 빠른 선택 */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-slate-400 mr-1">인기 등번호:</span>
-            {POPULAR_NUMBERS.map((num) => (
-              <button
-                key={num}
-                type="button"
-                onClick={() => setJerseyNumber(num)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold tabular-nums transition-colors cursor-pointer ${
-                  jerseyNumber === num
-                    ? 'bg-orange-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                #{num}
-              </button>
-            ))}
           </div>
 
           {/* 2. 포지션 선택 (PG ~ C) */}
@@ -255,7 +234,7 @@ export function PlayerCreator() {
             type="submit"
             className="w-full py-4 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-base transition-colors shadow-xs cursor-pointer"
           >
-            #{jerseyNumber || '0'} {name || '신입생'} 고교 농구부 입부하기
+            {jerseyNumber ? `#${jerseyNumber}` : '랜덤 등번호'} {name || '신입생'} 고교 농구부 입부하기
           </button>
         </div>
 
@@ -265,34 +244,37 @@ export function PlayerCreator() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
                 <span className="text-xs font-semibold text-orange-600">
-                  스카우트 초기 리포트
+                  스카우트 초기 예상 리포트
                 </span>
                 <h2 className="text-xl font-extrabold text-slate-900 mt-0.5">
-                  #{jerseyNumber || '0'} {name || '유망주'} ({primaryPos})
+                  #{jerseyNumber || '?'} {name || '신입 유망주'} ({primaryPos})
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">{archetype.tagline}</p>
               </div>
               <div className="text-right">
-                <span className="block text-xs text-slate-400 font-semibold">초기 OVR</span>
-                <span className="text-3xl font-black text-orange-600 tabular-nums">
-                  {previewOvr}
+                <span className="block text-xs text-slate-400 font-semibold">예상 초기 OVR</span>
+                <span
+                  data-testid="expected-ovr-range"
+                  className="text-2xl font-black text-orange-600 tabular-nums"
+                >
+                  {preview.minOvr} ~ {preview.maxOvr}
                 </span>
               </div>
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed">
-              {archetype.description}
+              {archetype.description} 입부 시 개체별 무작위 편차(-4 ~ +5)가 적용되어 실제 초기 능력치와 OVR이 확정돼요.
             </p>
 
-            {/* 6대 능력치 바 */}
+            {/* 6대 능력치 기준치 바 */}
             <div className="space-y-3">
               {[
-                { key: 'ins', label: '인사이드 득점 (INS)', val: previewStats.ins, mod: heightMod.statModifiers.ins },
-                { key: 'out', label: '아웃사이드 슈팅 (OUT)', val: previewStats.out, mod: heightMod.statModifiers.out },
-                { key: 'ply', label: '플레이메이킹 (PLY)', val: previewStats.ply, mod: heightMod.statModifiers.ply },
-                { key: 'def', label: '대인/팀 수비 (DEF)', val: previewStats.def, mod: heightMod.statModifiers.def },
-                { key: 'reb', label: '리바운드 장악 (REB)', val: previewStats.reb, mod: heightMod.statModifiers.reb },
-                { key: 'phy', label: '피지컬 & 기동력 (PHY)', val: previewStats.phy, mod: heightMod.statModifiers.phy },
+                { key: 'ins', label: '인사이드 득점 (INS)', val: preview.baselineStats.ins, mod: heightMod.statModifiers.ins },
+                { key: 'out', label: '아웃사이드 슈팅 (OUT)', val: preview.baselineStats.out, mod: heightMod.statModifiers.out },
+                { key: 'ply', label: '플레이메이킹 (PLY)', val: preview.baselineStats.ply, mod: heightMod.statModifiers.ply },
+                { key: 'def', label: '대인/팀 수비 (DEF)', val: preview.baselineStats.def, mod: heightMod.statModifiers.def },
+                { key: 'reb', label: '리바운드 장악 (REB)', val: preview.baselineStats.reb, mod: heightMod.statModifiers.reb },
+                { key: 'phy', label: '피지컬 & 기동력 (PHY)', val: preview.baselineStats.phy, mod: heightMod.statModifiers.phy },
               ].map((item) => (
                 <div key={item.key} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
@@ -307,7 +289,9 @@ export function PlayerCreator() {
                           (신장 {item.mod > 0 ? `+${item.mod}` : item.mod})
                         </span>
                       )}
-                      <span className="font-bold text-slate-900">{item.val}</span>
+                      <span className="font-bold text-slate-900">
+                        기준 {item.val} <span className="text-[11px] text-slate-400 font-normal">(±편차)</span>
+                      </span>
                     </div>
                   </div>
                   <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
@@ -339,12 +323,12 @@ export function PlayerCreator() {
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-2">
             <p className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
               <Shield className="w-4 h-4 text-orange-600" />
-              리그 수비 저항치(LDR) & 성장 캡 안내
+              고교 유망주 별점(1~5성) & 진로 제한 안내
             </p>
             <p className="text-xs text-slate-500 leading-relaxed">
               한국 고교농구의 성장 상한선은 <strong className="text-slate-800">OVR 60</strong>이에요.
-              고교 졸업(만 20세) 후 대학 U-리그, KBL, 해외 리그, NCAA D1 등 더 높은 무대로
-              나아가야만 성장이 멈추지 않고 NBA MVP까지 도달할 수 있어요!
+              고교 3년간의 통산 성적, 우승/MVP 여부, 최종 OVR에 따라 <strong className="text-slate-800">1~5성 유망주 등급</strong>이 매겨지며,
+              등급에 따라 진학 가능한 대학·KBL 얼리·NCAA D1·해외 직행 스카우트 오퍼가 차등 해금돼요!
             </p>
           </div>
         </div>

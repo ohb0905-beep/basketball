@@ -43,7 +43,7 @@ export function BestFiveCourt() {
   const hofList = useCareerStore((s) => s.hofList);
   const [selectedEntry, setSelectedEntry] = useState<HallOfFameEntry | null>(null);
 
-  // 각 포지션별 최고 레거시 점수를 기록한 은퇴 선수 자동 매핑 (초기 100% 공석)
+  // 각 포지션별 최고 레거시 점수를 기록한 은퇴 선수 자동 매핑 (주포지션 엄격 매칭 + 동일 선수 중복 배치 방지)
   const bestFiveByPos: Record<Position, HallOfFameEntry | null> = {
     PG: null,
     SG: null,
@@ -52,16 +52,18 @@ export function BestFiveCourt() {
     C: null,
   };
 
+  const placedPlayerIds = new Set<string>();
   for (const pos of ['PG', 'SG', 'SF', 'PF', 'C'] as Position[]) {
-    const candidates = hofList
-      .filter((entry) => entry.primaryPos === pos || entry.secondaryPos === pos)
-      .sort((a, b) => b.legacyScore - a.legacyScore);
-
     const primaryMatch = hofList
-      .filter((entry) => entry.primaryPos === pos)
+      .filter((entry) => entry.primaryPos === pos && !placedPlayerIds.has(entry.id))
       .sort((a, b) => b.legacyScore - a.legacyScore)[0];
 
-    bestFiveByPos[pos] = primaryMatch || candidates[0] || null;
+    if (primaryMatch) {
+      bestFiveByPos[pos] = primaryMatch;
+      placedPlayerIds.add(primaryMatch.id);
+    } else {
+      bestFiveByPos[pos] = null;
+    }
   }
 
   return (
@@ -75,7 +77,7 @@ export function BestFiveCourt() {
               올타임 베스트 5 하프코트
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              직접 육성하고 은퇴시킨 선수 중 포지션별 최고 레거시 선수가 자동 배치돼요
+              직접 육성하고 은퇴시킨 선수 중 각 주포지션 최고 레거시 선수가 1명씩 배치돼요
             </p>
           </div>
           <span className="text-xs font-semibold text-slate-500 tabular-nums">
@@ -300,25 +302,31 @@ export function BestFiveCourt() {
               {selectedEntry.epitaph}
             </p>
 
-            <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="block text-xs text-slate-500">통산 평균</span>
-                <span className="text-sm font-bold text-slate-900 tabular-nums">
+                <span className="text-xs font-bold text-slate-900 tabular-nums">
                   {selectedEntry.careerAverages.ppg}점 {selectedEntry.careerAverages.rpg}리바{' '}
                   {selectedEntry.careerAverages.apg}도움
                 </span>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="block text-xs text-slate-500">통산 누적 득점</span>
-                <span className="text-sm font-bold text-slate-900 tabular-nums">
+                <span className="text-xs font-bold text-slate-900 tabular-nums">
                   {selectedEntry.totals.points.toLocaleString()}점 ({selectedEntry.totals.gp}G)
                 </span>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <span className="block text-xs text-slate-500">우승 / MVP / 올스타</span>
-                <span className="text-sm font-bold text-amber-600 tabular-nums">
+                <span className="text-xs font-bold text-amber-600 tabular-nums">
                   {selectedEntry.totals.championships} / {selectedEntry.totals.mvps} /{' '}
                   {selectedEntry.totals.allStars}
+                </span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="block text-xs text-slate-500">통산 누적 연봉</span>
+                <span className="text-xs font-bold text-emerald-700 tabular-nums">
+                  ${(selectedEntry.careerEarnings || 0).toLocaleString()}K
                 </span>
               </div>
             </div>

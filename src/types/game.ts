@@ -11,16 +11,20 @@ export type Position = 'PG' | 'SG' | 'SF' | 'PF' | 'C';
 
 export type ContractType =
   | 'AMATEUR'
+  | 'MILITARY_SERVICE'
   | 'KBL_ROOKIE'
   | 'KBL_MAX'
   | 'KBL_VET'
   | 'OVERSEAS_CONTRACT'
   | 'GLEAGUE_EXHIBIT'
+  | 'SUMMER_LEAGUE_INVITE'
   | 'TWO_WAY'
   | 'NBA_STANDARD'
   | 'NBA_MAX'
   | 'NBA_VET_MIN'
   | 'FREE_AGENT';
+
+export type TeamDirection = 'REBUILDING' | 'PLAYOFF_HUNT' | 'CONTENDER';
 
 export type ViewState =
   | 'HOME'
@@ -75,14 +79,20 @@ export interface TeamInfo {
   shortName: string;
   city: string;
   league: LeagueId;
-  rating: number; // 구단 전력 (60 ~ 90)
+  rating: number; // 구단 전력 (동적으로 매 오프시즌 ±3 변동)
   primaryColor: string;
   secondaryColor: string;
-  espnAbbr?: string; // NBA/NCAA 공식 로고 연동용 약어
-  espnId?: string;   // NCAA/NBA ESPN Team ID
-  logoUrl?: string;  // 런타임 ESPN API 캐시 URL
+  espnAbbr?: string;
+  espnId?: string;
+  logoUrl?: string;
   prestigeDesc: string;
+  direction?: TeamDirection;
+  neededPositions?: Position[];
+  preferredStyle?: 'PACE_AND_SPACE' | 'DEFENSE_GRIT' | 'HALF_COURT' | 'BALANCED';
+  isMilitaryTeam?: boolean;
 }
+
+export type AllLeagueTier = 1 | 2 | 3 | null;
 
 export interface SeasonBoxScore {
   seasonNumber: number;
@@ -97,6 +107,7 @@ export interface SeasonBoxScore {
   role: string;
   ovr: number;
   gp: number;
+  injuredGamesMissed: number;
   mpg: number;
   ppg: number;
   rpg: number;
@@ -107,10 +118,16 @@ export interface SeasonBoxScore {
   tpPct: number;
   wins: number;
   losses: number;
+  salaryEarned: number; // 해당 시즌 수령 연봉 (단위: USD)
   wonChampionship: boolean;
   wonMvp: boolean;
+  wonFinalsMvp: boolean;
+  wonDpoy: boolean;
+  wonSixthMan: boolean;
+  wonMip: boolean;
   wonRookieOfYear: boolean;
   allStarSelected: boolean;
+  allLeagueTeam: AllLeagueTier;
   singleGameHighPts: number;
   headline: string;
   narrativeLog: string[];
@@ -132,7 +149,16 @@ export interface CareerMilestone {
   age: number;
   title: string;
   description: string;
-  type: 'DEBUT' | 'AWARD' | 'CHAMPIONSHIP' | 'DRAFT' | 'RECORD' | 'INJURY' | 'TOUR' | 'SPECIAL';
+  type:
+    | 'DEBUT'
+    | 'AWARD'
+    | 'CHAMPIONSHIP'
+    | 'DRAFT'
+    | 'RECORD'
+    | 'INJURY'
+    | 'TOUR'
+    | 'MILITARY'
+    | 'SPECIAL';
   teamName: string;
 }
 
@@ -147,6 +173,7 @@ export interface CareerEventChoice {
   switchPrimaryPos?: Position;
   triggerRetirement?: RetirementReason;
   grantMilitaryExemption?: boolean;
+  enlistSangmu?: boolean;
   startFarewellTour?: boolean;
 }
 
@@ -155,7 +182,14 @@ export interface CareerEvent {
   title: string;
   subtitle: string;
   description: string;
-  category: 'POSITION' | 'MILITARY' | 'INJURY' | 'COACH' | 'FAREWELL' | 'CLUTCH';
+  category:
+    | 'POSITION'
+    | 'MILITARY'
+    | 'INJURY'
+    | 'COACH'
+    | 'FAREWELL'
+    | 'CLUTCH'
+    | 'RETIREMENT_ADVICE';
   choices: CareerEventChoice[];
 }
 
@@ -168,10 +202,13 @@ export interface OffseasonOption {
   targetTeam?: TeamInfo;
   contractType: ContractType;
   contractYears: number;
+  annualSalary?: number;
+  scoutingScore?: number;
   actionType:
     | 'SIGN_TEAM'
     | 'ENTER_KBL_DRAFT'
     | 'ENTER_NBA_DRAFT'
+    | 'SUMMER_LEAGUE_SHOWCASE'
     | 'STAY_TEAM'
     | 'RETIRE_VOLUNTARY'
     | 'START_FAREWELL_TOUR'
@@ -184,7 +221,7 @@ export interface OffseasonOption {
 export type RetirementReason =
   | 'VOLUNTARY_HONOR'       // ① 자율 명예 은퇴
   | 'LEGEND_FAREWELL_TOUR'  // ② 레전드 은퇴 투어 완주
-  | 'OUT_OF_LEAGUE'         // ③ 방출 및 구단 오퍼 부재 은퇴
+  | 'OUT_OF_LEAGUE'         // ③ 방출 및 구단 오퍼 부재 강제 은퇴
   | 'CRITICAL_INJURY'       // ④ 노장 치명적 부상 은퇴
   | 'AGE_40_MANDATORY';     // ⑤ 만 40세 정년 은퇴
 
@@ -206,6 +243,9 @@ export interface LegacyEvaluation {
   honoredTeam: TeamInfo;
   honoredTeamSeasons: number;
   honoredTeamPoints: number;
+  honoredTeamMvps: number;
+  honoredTeamChamps: number;
+  honoredTeamAllStars: number;
 }
 
 export interface HallOfFameEntry {
@@ -226,6 +266,7 @@ export interface HallOfFameEntry {
   legacyScore: number;
   jerseyRetired: boolean;
   iconicTeam: TeamInfo;
+  careerEarnings: number;
   totals: {
     gp: number;
     points: number;
@@ -237,6 +278,11 @@ export interface HallOfFameEntry {
     nbaChampionships: number;
     mvps: number;
     nbaMvps: number;
+    finalsMvps: number;
+    dpoys: number;
+    sixthManAwards: number;
+    mips: number;
+    allLeagueSelections: number;
     allStars: number;
     nbaAllStars: number;
   };
@@ -270,6 +316,7 @@ export interface CareerState {
   seasonsPlayed: number;
   ovr: number;
   peakOvr: number;
+  ovrHistory: number[];
   potential: number;
   stats: PlayerStats;
   lastSeasonDelta: StatDelta;
@@ -277,15 +324,21 @@ export interface CareerState {
   team: TeamInfo;
   contractType: ContractType;
   contractYearsLeft: number;
+  annualSalary: number;     // 현재 계약 연봉 (USD 기준)
+  careerEarnings: number;   // 통산 누적 수입 (USD 기준)
   twoWaySeasonsUsed: number;
   role: string;
   coachTrust: number; // 0 ~ 100
   draftStock: number; // 0 ~ 100
+  prospectStars?: number; // 고교 졸업 시 산출된 유망주 등급 (1~5성)
   trainingFocus: TrainingFocus;
   militaryExempt: boolean;
+  militaryServiceSeasonsLeft: number;
+  previousTeamBeforeMilitary: TeamInfo | null;
   isFarewellTour: boolean;
   farewellTourCompleted: boolean;
   isOutOfLeagueWarning: boolean;
+  teamRatingsMap: Record<string, number>; // 동적 구단 전력 저장소
   badges: string[];
   seasonLogs: SeasonBoxScore[];
   milestones: CareerMilestone[];
@@ -303,19 +356,25 @@ export interface CareerState {
     nbaChampionships: number;
     mvps: number;
     nbaMvps: number;
+    finalsMvps: number;
+    dpoys: number;
+    sixthManAwards: number;
+    mips: number;
+    allLeagueSelections: number;
     allStars: number;
     nbaAllStars: number;
   };
-  offseasonLocked: boolean; // 시즌 종료 직후 오프시즌 진로 선택 활성화 여부
+  offseasonLocked: boolean;
   offseasonOptions: OffseasonOption[];
   pendingEvent: CareerEvent | null;
   combineState: CombineState | null;
   draftResult: {
     draftType: 'NBA' | 'KBL';
-    pickNumber: number | null; // null이면 언드래프티
+    pickNumber: number | null;
     round: 1 | 2 | null;
     draftedTeam: TeamInfo | null;
     twoWayOfferTeam: TeamInfo | null;
+    scoutingGrade?: number;
   } | null;
   retirementReason: RetirementReason | null;
   legacyEvaluation: LegacyEvaluation | null;

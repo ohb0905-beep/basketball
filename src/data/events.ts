@@ -13,7 +13,7 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
         {
           label: '과감한 얼리 오펜스 노룩 패스 시도',
           description: '상대 수비가 정돈되기 전에 림으로 달리는 동료에게 총알 패스를 찔러 넣어요.',
-          effectSummary: 'PLY +2, OUT +1 · 감독 신뢰도 소폭 변동',
+          effectSummary: 'PLY +2, OUT +1 · 감독 신뢰도 소폭 상승',
           statChanges: { ply: 2, out: 1 },
           trustDelta: 3,
           draftStockDelta: 4,
@@ -39,8 +39,8 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
         {
           label: '매일 밤 500개씩 딥쓰리 풀업 훈련',
           description: '하프코트만 넘으면 언제든 던질 수 있는 외곽 위협을 만들어요.',
-          effectSummary: 'OUT +3, PHY -1 · 스카우트 주목도 상승',
-          statChanges: { out: 3, phy: -1 },
+          effectSummary: 'OUT +2, PHY -1 · 스카우트 주목도 상승',
+          statChanges: { out: 2, phy: -1 },
           draftStockDelta: 5,
         },
         {
@@ -65,8 +65,8 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
         {
           label: '스텝백 역전 3점 버저비터 시도',
           description: '수비수 두 명 위로 솟구쳐 올라 가장 극적인 외곽포를 쏘아 올려요!',
-          effectSummary: 'OUT +3 · 스카우트 주목도 +6',
-          statChanges: { out: 3 },
+          effectSummary: 'OUT +2 · 스카우트 주목도 +6',
+          statChanges: { out: 2 },
           draftStockDelta: 6,
           trustDelta: 4,
         },
@@ -117,8 +117,8 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
         {
           label: '체력을 쏟아부어 그림자 수비 전개',
           description: '공격 볼륨을 조금 양보하더라도 상대 에이스를 완벽히 지워버려요.',
-          effectSummary: 'DEF +3, REB +1 · 감독 신뢰도 +9',
-          statChanges: { def: 3, reb: 1 },
+          effectSummary: 'DEF +2, REB +1 · 감독 신뢰도 +9',
+          statChanges: { def: 2, reb: 1 },
           trustDelta: 9,
           draftStockDelta: 5,
         },
@@ -170,16 +170,16 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
         {
           label: '외곽 3점슛 장착으로 스트레치 빅맨 변신',
           description: '빅맨을 외곽으로 끌어내어 팀 전체의 공격 공간을 열어줘요.',
-          effectSummary: 'OUT +3, PLY +1 · 현대 농구 적합도 상승',
-          statChanges: { out: 3, ply: 1 },
+          effectSummary: 'OUT +2, PLY +1 · 현대 농구 적합도 상승',
+          statChanges: { out: 2, ply: 1 },
           draftStockDelta: 6,
           trustDelta: 6,
         },
         {
           label: '웨이트 증량으로 골밑 지배력 극대화',
           description: '누구도 밀어낼 수 없는 강력한 박스아웃과 포스트업을 다져요.',
-          effectSummary: 'REB +2, INS +2 · 골밑 장악력 강화',
-          statChanges: { reb: 2, ins: 2 },
+          effectSummary: 'REB +2, INS +1 · 골밑 장악력 강화',
+          statChanges: { reb: 2, ins: 1 },
           trustDelta: 5,
         },
       ],
@@ -212,7 +212,7 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
   ],
   C: [
     {
-      id: 'EVT_C_JOKIC_HUB',
+      id: 'EVT_C_HIGH_POST_HUB',
       title: '하이포스트 컨트롤 타워 전술 도입',
       subtitle: '센터 전용 분기점',
       description:
@@ -222,8 +222,8 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
         {
           label: '패싱 빅맨(Point Center) 스킬 연마',
           description: '넓은 시야와 킥아웃 패스로 상대 더블팀을 무력화해요!',
-          effectSummary: 'PLY +3, OUT +1 · 스카우트 주목도 +7',
-          statChanges: { ply: 3, out: 1 },
+          effectSummary: 'PLY +2, OUT +1 · 스카우트 주목도 +7',
+          statChanges: { ply: 2, out: 1 },
           draftStockDelta: 7,
           trustDelta: 6,
         },
@@ -247,15 +247,15 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
         {
           label: '하체 민첩성과 사이드스텝 집중 훈련',
           description: '가드 앞에서도 밀리지 않는 기동성 있는 스위치 빅맨으로 진화해요.',
-          effectSummary: 'PHY +2, DEF +2 · NBA 스카우트 호평',
-          statChanges: { phy: 2, def: 2 },
+          effectSummary: 'PHY +2, DEF +1 · NBA 스카우트 호평',
+          statChanges: { phy: 2, def: 1 },
           draftStockDelta: 6,
         },
         {
           label: '긴 윙스팬을 활용한 추격 블록슛 타이밍 연구',
           description: '한 발을 내주더라도 뒤에서 덮어버리는 리커버리 블록을 완성해요.',
-          effectSummary: 'DEF +3, REB +1 · 감독 신뢰도 +5',
-          statChanges: { def: 3, reb: 1 },
+          effectSummary: 'DEF +2, REB +1 · 감독 신뢰도 +5',
+          statChanges: { def: 2, reb: 1 },
           trustDelta: 5,
         },
       ],
@@ -268,26 +268,44 @@ export const ASIAN_GAMES_MILITARY_EVENT: CareerEvent = {
   title: '🇰🇷 아시안게임 남자농구 국가대표 차출 & 결승전',
   subtitle: '병역특례(예술·체육요원) 혜택이 걸린 운명의 한판',
   description:
-    '태극마크를 달고 출전한 아시안게임 결승전! 숙적과의 결승 4쿼터 막판, 대표팀의 에이스로서 금메달과 병역특례 혜택을 동시에 거머쥘 절호의 기회가 찾아왔어요.',
+    '태극마크를 달고 출전한 아시안게임 결승전! 숙적과의 결승 4쿼터 막판, 대표팀의 주축 선수로서 금메달과 병역특례 혜택을 동시에 거머쥘 절호의 기회가 찾아왔어요.',
   category: 'MILITARY',
   choices: [
     {
       label: '모든 에너지를 쏟아부어 결승전 클러치 지배!',
       description: '공수 양면에서 코트를 지배하며 대한민국의 금메달을 이끌어요!',
-      effectSummary: '🎖️ 아시안게임 금메달 & 병역특례 획득! · 전 능력치 +1 · 스카우트 주목도 +10',
+      effectSummary: '🎖️ 아시안게임 금메달 & 병역특례 획득! · 전 능력치 +1 · 스카우트 주목도 +8',
       statChanges: { ins: 1, out: 1, ply: 1, def: 1, reb: 1, phy: 1 },
-      trustDelta: 10,
-      draftStockDelta: 10,
+      trustDelta: 8,
+      draftStockDelta: 8,
       grantMilitaryExemption: true,
     },
     {
       label: '팀원들을 살리는 헌신적인 수비와 리바운드 집중',
       description: '궂은일을 도맡아 팀 승리의 일등공신이 되어 금메달을 목에 걸어요!',
-      effectSummary: '🎖️ 아시안게임 금메달 & 병역특례 획득! · DEF +2, REB +2',
-      statChanges: { def: 2, reb: 2 },
-      trustDelta: 12,
-      draftStockDelta: 8,
+      effectSummary: '🎖️ 아시안게임 금메달 & 병역특례 획득! · DEF +2, REB +1',
+      statChanges: { def: 2, reb: 1 },
+      trustDelta: 10,
+      draftStockDelta: 6,
       grantMilitaryExemption: true,
+    },
+  ],
+};
+
+export const SANGMU_ENLISTMENT_EVENT: CareerEvent = {
+  id: 'EVT_SANGMU_ENLISTMENT',
+  title: '🫡 국군체육부대(상무) 입대 영장 도착',
+  subtitle: '만 27세 병역 의무 이행 (2시즌 상무 농구단 복무)',
+  description:
+    '만 27세가 될 때까지 아시안게임 금메달 등 병역특례 혜택을 획득하지 못해 국군체육부대(상무 농구단)에 입대하게 되었어요. 앞으로 2시즌 동안 문경 상무 농구단 소속으로 복무한 뒤 프로 무대로 복귀해요.',
+  category: 'MILITARY',
+  choices: [
+    {
+      label: '🫡 성실하게 상무 농구단에 입대하여 웨이트 및 기초 체력 단련 (2시즌 복무)',
+      description: '규칙적인 일과와 웨이트 트레이닝으로 몸을 만들며 전역 후의 도약을 준비해요.',
+      effectSummary: '2시즌 국군체육부대(상무) 복무 시작 · PHY +1, DEF +1 · 전역 후 병역필 전환',
+      statChanges: { phy: 1, def: 1 },
+      enlistSangmu: true,
     },
   ],
 };
@@ -316,6 +334,30 @@ export const VETERAN_CRITICAL_INJURY_EVENT: CareerEvent = {
   ],
 };
 
+export function createAgentRetirementAdviceEvent(reasonText: string): CareerEvent {
+  return {
+    id: 'EVT_AGENT_RETIREMENT_ADVICE',
+    title: '📋 에이전트의 진지한 면담: 현역 은퇴 권유 리포트',
+    subtitle: '기량 하락 및 베테랑 은퇴 적령기 도달',
+    description: `${reasonText} 에이전트가 조심스럽게 다가와 박수칠 때 명예롭게 코트를 떠나는 선택지와, 냉정한 FA 스카우팅 평가를 감수하며 현역 연장에 도전하는 선택지를 함께 제시했어요.`,
+    category: 'RETIREMENT_ADVICE',
+    choices: [
+      {
+        label: '🎤 에이전트의 조언을 받아들여 명예 은퇴 선언',
+        description: '아름다운 추억을 가슴에 품고 공식 은퇴식과 명예의 전당 심사로 향해요.',
+        effectSummary: '현역 명예 은퇴식 진행 (VOLUNTARY_HONOR)',
+        triggerRetirement: 'VOLUNTARY_HONOR',
+      },
+      {
+        label: '🔥 현역 연장에 도전 (FA 시장 및 구단 스카우팅 평가 대기)',
+        description: '아직 코트를 떠날 수 없어요! 오프시즌 에이전트 데스크에서 구단들의 평가를 직접 확인해요.',
+        effectSummary: '오프시즌 에이전트 데스크 진입 (구단 오퍼가 0개일 경우 미계약 은퇴 처리)',
+        trustDelta: 0,
+      },
+    ],
+  };
+}
+
 export const FAREWELL_TOUR_LOGS: string[] = [
   '원정 경기장 전 관중이 기립박수로 레전드의 마지막 방문을 배웅했어요!',
   '경기 종료 후 상대 팀 에이스와 뜨거운 포옹을 나누며 마지막 유니폼 교환식을 가졌어요!',
@@ -324,27 +366,66 @@ export const FAREWELL_TOUR_LOGS: string[] = [
   '수많은 어린이 팬들이 "고마워요 레전드!" 플래카드를 흔들며 눈시울을 붉혔어요!',
 ];
 
-export function rollSeasonEvent(career: CareerState): CareerEvent | null {
+export function rollSeasonEvent(
+  career: CareerState,
+  rng: () => number = Math.random
+): CareerEvent | null {
+  // 0) 만 27세 병역 미필자 상무 입대 이벤트 (최우선 발동)
+  if (
+    !career.militaryExempt &&
+    career.militaryServiceSeasonsLeft === 0 &&
+    career.age >= 27
+  ) {
+    return SANGMU_ENLISTMENT_EVENT;
+  }
+
   // 1) ④ 노장 치명적 부상 은퇴 기로: 만 32세 이상이고 PHY <= 65일 때 10% 확률
-  if (career.age >= 32 && career.stats.phy <= 65 && Math.random() < 0.1) {
+  if (career.age >= 32 && career.stats.phy <= 65 && rng() < 0.1) {
     return VETERAN_CRITICAL_INJURY_EVENT;
   }
 
-  // 2) 아시안게임 병역특례 이벤트: 미필 상태 & OVR >= 64 & 21~26세 사이일 때 높은 확률로 발생
+  // 2) 기량 급감 또는 평균 은퇴 연령(만 33~35세) 도달 시 에이전트 은퇴 제안 이벤트
+  const ovrHist = career.ovrHistory || [];
+  let twoYearDrop = 0;
+  if (ovrHist.length >= 3) {
+    twoYearDrop = ovrHist[ovrHist.length - 3] - career.ovr;
+  }
+  const peakPpg =
+    career.seasonLogs.length > 0
+      ? Math.max(...career.seasonLogs.map((l) => l.ppg))
+      : 0;
+  const lastLog = career.seasonLogs[career.seasonLogs.length - 1];
+  const lastPpg = lastLog ? lastLog.ppg : 0;
+  const sharpPpgDecline = peakPpg >= 10 && lastPpg <= peakPpg * 0.5 && career.age >= 30;
+  const consecutiveOvrDecline = twoYearDrop >= 4 && career.age >= 30;
+  const reachedAvgRetirementAge = career.age >= 33 && career.age <= 35;
+
+  if (consecutiveOvrDecline || sharpPpgDecline || (reachedAvgRetirementAge && rng() < 0.55)) {
+    let reasonText = `어느덧 농구선수 평균 은퇴 연령인 만 ${career.age}세에 접어들었어요.`;
+    if (consecutiveOvrDecline) {
+      reasonText = `최근 2시즌 동안 종합 능력치(OVR)가 ${twoYearDrop}만큼 하락하며 노쇠화 징후가 뚜렷해졌어요.`;
+    } else if (sharpPpgDecline) {
+      reasonText = `직전 시즌 평균 득점(${lastPpg.toFixed(1)}점)이 전성기(${peakPpg.toFixed(1)}점) 대비 절반 이하로 급감했어요.`;
+    }
+    return createAgentRetirementAdviceEvent(reasonText);
+  }
+
+  // 3) 아시안게임 병역특례 이벤트: 미필 상태 & OVR >= 66 & 21~26세 사이일 때 제한적 확률(28%)로 발생
   if (
     !career.militaryExempt &&
+    career.militaryServiceSeasonsLeft === 0 &&
     career.age >= 21 &&
     career.age <= 26 &&
-    career.ovr >= 64 &&
-    Math.random() < 0.45
+    career.ovr >= 66 &&
+    rng() < 0.28
   ) {
     return ASIAN_GAMES_MILITARY_EVENT;
   }
 
-  // 3) 포지션별 전용 분기점 이벤트 (35% 확률)
-  if (Math.random() < 0.38) {
+  // 4) 포지션별 전용 분기점 이벤트 (32% 확률)
+  if (rng() < 0.32) {
     const pool = POSITION_EVENTS[career.primaryPos] || POSITION_EVENTS.PG;
-    const picked = pool[Math.floor(Math.random() * pool.length)];
+    const picked = pool[Math.floor(rng() * pool.length)];
     return picked;
   }
 

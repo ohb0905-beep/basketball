@@ -18,21 +18,63 @@ export function calculateOvr(stats: PlayerStats, pos: Position): number {
 }
 
 /**
- * 캐릭터 생성 시 기본 포지션 아키타입 + 신장(cm) 물리 보정을 결합하여 초기 능력치 생성
+ * 캐릭터 생성 전 미리보기용 기준 능력치 및 예상 OVR 범위 산출
+ * (실제 생성 시에는 개체별 무작위 편차 -4 ~ +5 및 초기 재능 편차가 적용됨)
  */
-export function createInitialStats(pos: Position, heightCm: number): PlayerStats {
+export function getPreviewStatsAndOvrRange(
+  pos: Position,
+  heightCm: number
+): {
+  baselineStats: PlayerStats;
+  minOvr: number;
+  maxOvr: number;
+} {
   const base = POSITION_ARCHETYPES[pos].baseStats;
   const { statModifiers } = getHeightModifiers(heightCm);
-
   const clamp = (v: number) => Math.max(35, Math.min(82, Math.round(v)));
 
-  return {
+  const baselineStats: PlayerStats = {
     ins: clamp(base.ins + statModifiers.ins),
     out: clamp(base.out + statModifiers.out),
     ply: clamp(base.ply + statModifiers.ply),
     def: clamp(base.def + statModifiers.def),
     reb: clamp(base.reb + statModifiers.reb),
     phy: clamp(base.phy + statModifiers.phy),
+  };
+
+  const baseOvr = calculateOvr(baselineStats, pos);
+  const minOvr = Math.max(46, baseOvr - 5);
+  const maxOvr = Math.min(62, baseOvr + 5);
+
+  return { baselineStats, minOvr, maxOvr };
+}
+
+/**
+ * 캐릭터 생성 시 기본 포지션 아키타입 + 신장(cm) 물리 보정 +
+ * 각 6대 능력치 개체별 무작위 편차(-4 ~ +5)와 초기 재능 편차를 결합하여
+ * 생성할 때마다 초기 스탯과 초기 OVR(약 48~61 범위)이 랜덤으로 결정되게 함
+ */
+export function createInitialStats(
+  pos: Position,
+  heightCm: number,
+  rng: () => number = Math.random
+): PlayerStats {
+  const base = POSITION_ARCHETYPES[pos].baseStats;
+  const { statModifiers } = getHeightModifiers(heightCm);
+
+  // 개체별 초기 재능 편차 (-2 ~ +2)
+  const talentOffset = Math.floor(rng() * 5) - 2;
+  // 각 스탯별 무작위 편차 (-4 ~ +5)
+  const randStatVariance = () => Math.floor(rng() * 10) - 4;
+  const clamp = (v: number) => Math.max(36, Math.min(72, Math.round(v)));
+
+  return {
+    ins: clamp(base.ins + statModifiers.ins + talentOffset + randStatVariance()),
+    out: clamp(base.out + statModifiers.out + talentOffset + randStatVariance()),
+    ply: clamp(base.ply + statModifiers.ply + talentOffset + randStatVariance()),
+    def: clamp(base.def + statModifiers.def + talentOffset + randStatVariance()),
+    reb: clamp(base.reb + statModifiers.reb + talentOffset + randStatVariance()),
+    phy: clamp(base.phy + statModifiers.phy + talentOffset + randStatVariance()),
   };
 }
 
@@ -80,13 +122,12 @@ export function analyzePositionFit(
   const secondBest = ranked.find((r) => r.pos !== currentPrimary) || ranked[1];
   const currentPosOvr = calculateOvr(stats, currentPrimary);
 
-  // 감독 신뢰도 55 이상 또는 해당 부포지션 OVR이 56 이상이면 해금 가능
   const canUnlockSecondary =
     currentSecondary === null && (coachTrust >= 55 || secondBest.ovr >= 56);
 
   let coachAdvice = '';
   if (bestPrimary.pos !== currentPrimary && bestPrimary.ovr > currentPosOvr) {
-    coachAdvice = `자네의 현재 기술과 ${heightCm}cm의 신장을 고려하면 '${bestPrimary.pos}' 포지션으로 전향했을 때 OVR이 ${currentPosOvr}에서 ${bestPrimary.ovr}로 상승하네! 포지션 변경을 진지하게 고려해 보게나해요.`;
+    coachAdvice = `현재 기술과 ${heightCm}cm의 신장을 고려하면 '${bestPrimary.pos}' 포지션으로 전향했을 때 OVR이 ${currentPosOvr}에서 ${bestPrimary.ovr}(으)로 상승해요! 포지션 변경을 진지하게 고려해 봐요.`;
   } else if (!currentSecondary) {
     coachAdvice = `주포지션 '${currentPrimary}'에 아주 잘 맞고 있어요! 여기에 '${secondBest.pos}' 부포지션까지 소화해주면 로테이션 출전 시간(roleIndex +2.5 보너스)을 훨씬 많이 부여할 수 있어요.`;
   } else {
