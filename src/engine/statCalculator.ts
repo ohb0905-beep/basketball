@@ -1,5 +1,10 @@
 import { getHeightModifiers, POSITION_ARCHETYPES } from '../data/archetypes';
-import { PlayerStats, Position } from '../types/game';
+import {
+  GrowthDna,
+  PlayerStats,
+  PlaystyleArchetype,
+  Position,
+} from '../types/game';
 
 /**
  * 포지션별 가중치에 따른 종합 능력치(OVR) 산출
@@ -15,6 +20,151 @@ export function calculateOvr(stats: PlayerStats, pos: Position): number {
     stats.phy * weights.phy;
 
   return Math.max(40, Math.min(99, Math.round(weighted)));
+}
+
+/**
+ * 성장 곡선 DNA 메타 정보 반환
+ */
+export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
+  id: GrowthDna;
+  label: string;
+  badge: string;
+  description: string;
+  peakAgeRange: [number, number];
+  agingOnsetOffset: number;
+} {
+  switch (dna) {
+    case 'EARLY_BLOOMER':
+      return {
+        id: 'EARLY_BLOOMER',
+        label: '조숙형 천재',
+        badge: '⚡ 조숙형 DNA',
+        description: '10대 후반~20대 초반 성장 속도가 매우 빠르지만, 30대 진입 후 노쇠화가 조금 일찍 찾아와요.',
+        peakAgeRange: [24, 27],
+        agingOnsetOffset: -1,
+      };
+    case 'LATE_BLOOMER':
+      return {
+        id: 'LATE_BLOOMER',
+        label: '대기만성형',
+        badge: '🌱 대기만성 DNA',
+        description: '초기 성장은 완만하지만 20대 중후반~30세까지도 기량이 꺾이지 않고 만개해요.',
+        peakAgeRange: [27, 31],
+        agingOnsetOffset: 1,
+      };
+    case 'IRONMAN':
+      return {
+        id: 'IRONMAN',
+        label: '철강왕 내구도',
+        badge: '🛡️ 철강왕 DNA',
+        description: '타고난 강철 몸매로 잔부상 확률이 낮고 30대 중반까지 신체 능력 하락이 크게 억제돼요.',
+        peakAgeRange: [26, 32],
+        agingOnsetOffset: 2,
+      };
+    case 'STANDARD':
+    default:
+      return {
+        id: 'STANDARD',
+        label: '정통 밸런스형',
+        badge: '⚖️ 표준형 DNA',
+        description: '20대 중반에 전성기에 도달하고 30대 초반부터 자연스러운 에이징 커브를 겪는 정석적인 성장형이에요.',
+        peakAgeRange: [26, 29],
+        agingOnsetOffset: 0,
+      };
+  }
+}
+
+/**
+ * 플레이 성향 아키타입 메타 정보 반환
+ */
+export function getPlaystyleInfo(style: PlaystyleArchetype = 'ALL_ROUNDER'): {
+  id: PlaystyleArchetype;
+  label: string;
+  badge: string;
+  description: string;
+} {
+  switch (style) {
+    case 'SCORER':
+      return {
+        id: 'SCORER',
+        label: '크리에이티브 스코어러',
+        badge: '🔥 스코어러',
+        description: '내외곽을 가리지 않고림을 공략해 득점 볼륨을 책임지는 공격 특화 성향이에요.',
+      };
+    case 'PLAYMAKER':
+      return {
+        id: 'PLAYMAKER',
+        label: '플로어 제너럴',
+        badge: '🪄 플레이메이커',
+        description: '넓은 시야와 패스 센스로 동료들의 슛 기회를 살려주는 야전사령관 성향이에요.',
+      };
+    case 'THREE_AND_D':
+      return {
+        id: 'THREE_AND_D',
+        label: '3&D 스페셜리스트',
+        badge: '🎯 3&D 윙맨',
+        description: '순도 높은 외곽 3점슛과 끈질긴 대인 수비로 모든 우승권 구단이 탐내는 공수 알짜 성향이에요.',
+      };
+    case 'RIM_PROTECTOR':
+      return {
+        id: 'RIM_PROTECTOR',
+        label: '림 프로텍터 & 보드 장악',
+        badge: '🦍 림 프로텍터',
+        description: '골밑 블록슛과 리바운드, 든든한 스크린으로 페인트존을 지배하는 수비형 빅맨 성향이에요.',
+      };
+    case 'ALL_ROUNDER':
+    default:
+      return {
+        id: 'ALL_ROUNDER',
+        label: '공수겸장 올라운더',
+        badge: '🌟 올라운더',
+        description: '득점, 리바운드, 패스, 수비까지 코트 위 모든 영역에서 고른 효율을 보여주는 다재다능한 성향이에요.',
+      };
+  }
+}
+
+/**
+ * 초기 능력치와 포지션, 난수를 결합하여 선수 고유 성장 DNA 및 플레이 성향 산출
+ */
+export function rollPlayerDnaAndPlaystyle(
+  stats: PlayerStats,
+  pos: Position,
+  rng: () => number = Math.random
+): {
+  growthDna: GrowthDna;
+  playstyle: PlaystyleArchetype;
+} {
+  const dnaRoll = rng();
+  let growthDna: GrowthDna = 'STANDARD';
+  if (dnaRoll < 0.24) {
+    growthDna = 'EARLY_BLOOMER';
+  } else if (dnaRoll < 0.50) {
+    growthDna = 'LATE_BLOOMER';
+  } else if (dnaRoll < 0.72) {
+    growthDna = 'IRONMAN';
+  } else {
+    growthDna = 'STANDARD';
+  }
+
+  // 능력치 편차 및 포지션에 따른 플레이 성향 결정
+  let playstyle: PlaystyleArchetype = 'ALL_ROUNDER';
+  const attackScore = Math.max(stats.ins, stats.out) + (stats.ins + stats.out) * 0.35;
+  const playmakeScore = stats.ply * 1.45 + stats.out * 0.2;
+  const threeAndDScore = (stats.out + stats.def) * 0.85;
+  const rimScore = (stats.reb + stats.def) * 0.85 + (pos === 'C' || pos === 'PF' ? 8 : -6);
+
+  const candidates: { id: PlaystyleArchetype; score: number }[] = [
+    { id: 'SCORER', score: attackScore + (rng() * 6 - 3) },
+    { id: 'PLAYMAKER', score: playmakeScore + (pos === 'PG' ? 6 : 0) + (rng() * 6 - 3) },
+    { id: 'THREE_AND_D', score: threeAndDScore + (pos === 'SG' || pos === 'SF' ? 5 : 0) + (rng() * 6 - 3) },
+    { id: 'RIM_PROTECTOR', score: rimScore + (rng() * 6 - 3) },
+    { id: 'ALL_ROUNDER', score: (stats.ins + stats.out + stats.ply + stats.def + stats.reb + stats.phy) / 6 * 1.65 + (rng() * 5 - 2.5) },
+  ];
+
+  candidates.sort((a, b) => b.score - a.score);
+  playstyle = candidates[0].id;
+
+  return { growthDna, playstyle };
 }
 
 /**
@@ -43,8 +193,8 @@ export function getPreviewStatsAndOvrRange(
   };
 
   const baseOvr = calculateOvr(baselineStats, pos);
-  const minOvr = Math.max(46, baseOvr - 5);
-  const maxOvr = Math.min(62, baseOvr + 5);
+  const minOvr = Math.max(48, baseOvr - 5);
+  const maxOvr = Math.min(61, baseOvr + 5);
 
   return { baselineStats, minOvr, maxOvr };
 }
@@ -146,10 +296,22 @@ export function analyzePositionFit(
 }
 
 /**
- * 보유 능력치에 따른 자동 배지 부여
+ * 보유 능력치 및 고유 DNA/성향에 따른 자동 배지 부여
  */
-export function evaluatePlayerBadges(stats: PlayerStats, secondaryPos: Position | null): string[] {
+export function evaluatePlayerBadges(
+  stats: PlayerStats,
+  secondaryPos: Position | null,
+  growthDna?: GrowthDna,
+  playstyle?: PlaystyleArchetype
+): string[] {
   const badges: string[] = [];
+  if (growthDna) {
+    badges.push(getGrowthDnaInfo(growthDna).badge);
+  }
+  if (playstyle) {
+    badges.push(getPlaystyleInfo(playstyle).badge);
+  }
+
   if (stats.out >= 85) badges.push('🎯 데드아이 스나이퍼');
   else if (stats.out >= 75) badges.push('🔥 캐치앤슛 스페셜리스트');
 

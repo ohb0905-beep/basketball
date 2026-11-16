@@ -503,8 +503,38 @@ export const ALL_TEAMS: TeamInfo[] = [
   ...NBA_TEAMS,
 ];
 
-export function getTeamsByLeague(league: LeagueId): TeamInfo[] {
-  return ALL_TEAMS.filter((t) => t.league === league && !t.isMilitaryTeam);
+const ALL_POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
+
+function inferDynamicDirection(league: LeagueId, rating: number): TeamDirection {
+  if (league === 'NBA') {
+    return rating >= 84 ? 'CONTENDER' : rating >= 78 ? 'PLAYOFF_HUNT' : 'REBUILDING';
+  }
+  if (league === 'KBL') {
+    return rating >= 70 ? 'CONTENDER' : rating >= 66 ? 'PLAYOFF_HUNT' : 'REBUILDING';
+  }
+  if (league === 'OVERSEAS' || league === 'GLEAGUE') {
+    return rating >= 75 ? 'CONTENDER' : rating >= 72 ? 'PLAYOFF_HUNT' : 'REBUILDING';
+  }
+  if (league === 'NCAA') {
+    return rating >= 77 ? 'CONTENDER' : rating >= 75 ? 'PLAYOFF_HUNT' : 'REBUILDING';
+  }
+  if (league === 'U_LEAGUE') {
+    return rating >= 63 ? 'CONTENDER' : rating >= 60 ? 'PLAYOFF_HUNT' : 'REBUILDING';
+  }
+  return rating >= 60 ? 'CONTENDER' : 'PLAYOFF_HUNT';
+}
+
+function inferDynamicNeededPositions(team: TeamInfo, currentRating: number): Position[] {
+  const baseNeeds = team.neededPositions && team.neededPositions.length > 0
+    ? team.neededPositions
+    : (['PG', 'SF', 'C'] as Position[]);
+  const ratingDiff = Math.abs(currentRating - team.rating);
+  if (ratingDiff === 0) return baseNeeds;
+  // 구단 전력이 변동함에 따라 보강 필요 포지션도 시즌마다 자연스럽게 순환
+  return baseNeeds.map((pos) => {
+    const idx = ALL_POSITIONS.indexOf(pos);
+    return ALL_POSITIONS[(idx + ratingDiff) % ALL_POSITIONS.length];
+  });
 }
 
 export function getTeamById(
@@ -518,11 +548,45 @@ export function getTeamById(
     return {
       ...found,
       rating: newRating,
-      direction:
-        found.league === 'NBA' ? inferNbaDirection(newRating) : found.direction,
+      direction: inferDynamicDirection(found.league, newRating),
+      neededPositions: inferDynamicNeededPositions(found, newRating),
     };
   }
   return found;
+}
+
+export function getTeamsByLeague(
+  league: LeagueId,
+  dynamicRatings?: Record<string, number>
+): TeamInfo[] {
+  return ALL_TEAMS.filter((t) => t.league === league && !t.isMilitaryTeam).map(
+    (t) => getTeamById(t.id, dynamicRatings) || t
+  );
+}
+
+/**
+ * 특정 팀 인덱스([0] 등) 하드코딩 없이 선수의 포지션 니즈와 구단 기조에 맞춰 동적으로 최적 구단 선정
+ */
+export function selectBestFitTeamForPlayer(
+  league: LeagueId,
+  primaryPos: Position,
+  secondaryPos: Position | null,
+  dynamicRatings?: Record<string, number>,
+  rng: () => number = Math.random
+): TeamInfo {
+  const pool = getTeamsByLeague(league, dynamicRatings);
+  const scored = pool
+    .map((team) => {
+      const needs = team.neededPositions || [];
+      const fitScore =
+        (needs.includes(primaryPos) ? 6 : 0) +
+        (secondaryPos && needs.includes(secondaryPos) ? 3 : 0) +
+        (team.direction === 'REBUILDING' ? 2 : 0) +
+        (rng() * 3 - 1.5);
+      return { team, fitScore };
+    })
+    .sort((a, b) => b.fitScore - a.fitScore);
+  return scored[0]?.team || pool[0];
 }
 
 /**
@@ -558,7 +622,6 @@ export function evolveLeagueTeamRatings(
       minR = 72;
       maxR = 92;
     }
-    // 평균 회귀 성향을 약간 섞어 극단적 쏠림 방지
     const reversion =
       baseRating > (minR + maxR) / 2 + 4
         ? -1
@@ -569,3 +632,4 @@ export function evolveLeagueTeamRatings(
   }
   return nextMap;
 }
+

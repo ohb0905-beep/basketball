@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { LEAGUE_CONFIG } from '../../data/leagues';
+import { getGrowthDnaInfo, getPlaystyleInfo } from '../../engine/statCalculator';
 import { CareerState, ContractType } from '../../types/game';
 import { TeamEmblem } from '../common/TeamEmblem';
 
@@ -32,6 +33,8 @@ function formatCurrencyK(amountK: number): string {
 export function PlayerHeader({ career }: { career: CareerState }) {
   const leagueInfo = LEAGUE_CONFIG[career.league];
   const isAtGrowthCap = career.ovr >= leagueInfo.growthCap && career.age <= 28;
+  const dnaInfo = getGrowthDnaInfo(career.growthDna || 'STANDARD');
+  const playstyleInfo = getPlaystyleInfo(career.playstyle || 'ALL_ROUNDER');
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-xs">
@@ -49,6 +52,17 @@ export function PlayerHeader({ career }: { career: CareerState }) {
               <span>
                 {CONTRACT_LABELS[career.contractType]} ({career.contractYearsLeft}년 남음)
               </span>
+              {career.draftPedigreePick && career.draftPedigreeRound && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-orange-700 font-bold">
+                    {career.draftPedigreeRound}R {career.draftPedigreePick}순위 지명
+                    {(career.draftPedigreeSeasonsLeft ?? 0) > 0
+                      ? ` (유망주 보호 ${career.draftPedigreeSeasonsLeft}년)`
+                      : ''}
+                  </span>
+                </>
+              )}
               {career.militaryServiceSeasonsLeft > 0 ? (
                 <>
                   <span aria-hidden="true">·</span>
@@ -82,6 +96,9 @@ export function PlayerHeader({ career }: { career: CareerState }) {
               <span className="text-sm font-bold text-orange-600">
                 {career.primaryPos}
                 {career.secondaryPos ? ` / ${career.secondaryPos}` : ''}
+              </span>
+              <span className="text-xs font-semibold text-slate-600">
+                [{dnaInfo.badge}] · [{playstyleInfo.badge}]
               </span>
             </div>
 

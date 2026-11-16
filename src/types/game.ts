@@ -26,6 +26,19 @@ export type ContractType =
 
 export type TeamDirection = 'REBUILDING' | 'PLAYOFF_HUNT' | 'CONTENDER';
 
+export type GrowthDna =
+  | 'EARLY_BLOOMER' // 조숙형 천재 (10대~20대 초반 폭발적 성장, 다소 이른 에이징)
+  | 'STANDARD'      // 밸런스 표준형 (정석적인 성장과 전성기 유지)
+  | 'LATE_BLOOMER'  // 대기만성형 (20대 중후반~30세까지도 꾸준히 기량 만개)
+  | 'IRONMAN';      // 철강왕 내구도형 (부상 저항력 최상, 30대 중반까지 노쇠화 지연)
+
+export type PlaystyleArchetype =
+  | 'SCORER'        // 온볼 스코어러
+  | 'PLAYMAKER'     // 플로어 제너럴 플레이메이커
+  | 'THREE_AND_D'   // 3&D 윙 스페셜리스트
+  | 'RIM_PROTECTOR' // 림 프로텍터 & 보드 장악 빅맨
+  | 'ALL_ROUNDER';  // 공수겸장 올라운더
+
 export type ViewState =
   | 'HOME'
   | 'CREATE'
@@ -311,6 +324,8 @@ export interface CareerState {
   heightCm: number;
   primaryPos: Position;
   secondaryPos: Position | null;
+  growthDna?: GrowthDna;
+  playstyle?: PlaystyleArchetype;
   age: number;
   seasonYear: number;
   seasonsPlayed: number;
@@ -327,6 +342,9 @@ export interface CareerState {
   annualSalary: number;     // 현재 계약 연봉 (USD 기준)
   careerEarnings: number;   // 통산 누적 수입 (USD 기준)
   twoWaySeasonsUsed: number;
+  draftPedigreePick?: number | null;
+  draftPedigreeRound?: 1 | 2 | null;
+  draftPedigreeSeasonsLeft?: number;
   role: string;
   coachTrust: number; // 0 ~ 100
   draftStock: number; // 0 ~ 100

@@ -320,10 +320,21 @@ export function PlayerCreator() {
             </div>
           </div>
 
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-2.5">
+            <p className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-orange-600" />
+              선수 고유 커리어 DNA &amp; 플레이 성향 부여 안내
+            </p>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              입부 확정 시 선수마다 고유한 <strong className="text-slate-800">성장 곡선 DNA</strong>(조숙형 · 표준형 · 대기만성형 · 철강왕)와{' '}
+              <strong className="text-slate-800">코트 위 플레이 성향</strong>(스코어러 · 플레이메이커 · 3&amp;D 윙 · 림 프로텍터 · 올라운더)이 결정돼요!
+            </p>
+          </div>
+
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-2">
             <p className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
               <Shield className="w-4 h-4 text-orange-600" />
-              고교 유망주 별점(1~5성) & 진로 제한 안내
+              고교 유망주 별점(1~5성) &amp; 진로 제한 안내
             </p>
             <p className="text-xs text-slate-500 leading-relaxed">
               한국 고교농구의 성장 상한선은 <strong className="text-slate-800">OVR 60</strong>이에요.

@@ -1,5 +1,6 @@
 import {
   CareerState,
+  GrowthDna,
   HallOfFameEntry,
   LeagueId,
   LegacyEvaluation,
@@ -10,57 +11,109 @@ import {
   TeamInfo,
 } from '../types/game';
 import { getTeamById } from '../data/teams';
+import { LEAGUE_CONFIG } from '../data/leagues';
 
 const PRO_LEAGUES: LeagueId[] = ['NBA', 'KBL', 'OVERSEAS', 'GLEAGUE'];
 
+export interface AgingCurveOptions {
+  growthDna?: GrowthDna;
+  careerMinutes?: number;
+}
+
 /**
- * 5. 나이에 따른 에이징 커브 (매 시즌 결산 시 자동 차감)
- * - 30~32세 (베테랑기): 매년 PHY -1 ~ -2 감소 (단, 노련미로 PLY +1 보정 가능)
- * - 33~35세 (노쇠화 진행): 매년 PHY -3 ~ -5, INS/DEF/REB -1 ~ -3 감소
- * - 36~39세 (황혼기): 매년 전 스탯 -3 ~ -6 급감
+ * 4-1. 개체별 차등 에이징 커브 (성장 곡선 DNA + 통산 출전 마일리지 + 피지컬 관리 상태 반영)
+ * - 고정 나이 구간 일괄 하락 대신, 선수의 DNA(철강왕/대기만성/표준/조숙형), 누적 마일리지, PHY 수치에 따라
+ *   노쇠화 시작 나이와 하락 폭이 유기적으로 달라짐
  */
 export function applyAgingCurve(
   age: number,
   prev: PlayerStats,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  options?: AgingCurveOptions
 ): { nextStats: PlayerStats; delta: StatDelta } {
   const randInt = (min: number, max: number) =>
     Math.floor(rng() * (max - min + 1)) + min;
-  const clamp = (v: number) => Math.max(35, Math.min(99, v));
+  const clamp = (v: number) => Math.max(35, Math.min(99, Math.round(v)));
+
+  const dna: GrowthDna = options?.growthDna || 'STANDARD';
+  const careerMinutes = options?.careerMinutes ?? 15000;
+
+  // DNA별 노쇠화 시작 나이 오프셋 및 하락 배율
+  const dnaOnsetOffset =
+    dna === 'IRONMAN'
+      ? 2
+      : dna === 'LATE_BLOOMER'
+      ? 1
+      : dna === 'EARLY_BLOOMER'
+      ? -1
+      : 0;
+  const dnaSeverityMult =
+    dna === 'IRONMAN'
+      ? 0.68
+      : dna === 'LATE_BLOOMER'
+      ? 0.85
+      : dna === 'EARLY_BLOOMER'
+      ? 1.15
+      : 1.0;
+
+  // 통산 누적 출전 시간(마일리지) 과부하 여부 (28,000분 이상 시 마일리지 피로 누적)
+  const mileageOffset =
+    careerMinutes >= 30000 ? -1 : careerMinutes <= 9000 ? 1 : 0;
+
+  // 피지컬(PHY) 자기관리 보정 (PHY 82+ 시 노쇠화 완충, PHY 58 이하 시 가속)
+  const phyConditionBonus = prev.phy >= 82 ? 0.82 : prev.phy <= 58 ? 1.2 : 1.0;
+
+  // 개인별 실질 노쇠화 진행 연차 (기본 만 30세 기준)
+  const onsetAge = 30 + dnaOnsetOffset + mileageOffset;
+  const agingYears = age - onsetAge;
 
   const nextStats: PlayerStats = { ...prev };
   const delta: StatDelta = { ins: 0, out: 0, ply: 0, def: 0, reb: 0, phy: 0 };
 
-  if (age >= 30 && age <= 32) {
-    const phyDrop = -randInt(1, 2);
+  if (agingYears < 0) {
+    // 아직 개인 노쇠화 시작 전 (철강왕/대기만성형의 30~31세 구간 등): 기량 유지 및 노련미(PLY) 소폭 상승 가능
+    if (rng() < 0.5 && prev.ply < 99) {
+      nextStats.ply = clamp(prev.ply + 1);
+      delta.ply = nextStats.ply - prev.ply;
+    }
+    return { nextStats, delta };
+  }
+
+  const combinedMult = dnaSeverityMult * phyConditionBonus;
+
+  if (agingYears <= 2) {
+    // 초기 베테랑기: 운동능력(PHY) 소폭 감소, 노련미(PLY) 보정
+    const rawPhyDrop = Math.max(1, Math.round(randInt(1, 2) * combinedMult));
     const plyBoost = rng() < 0.7 ? 1 : 0;
-    nextStats.phy = clamp(prev.phy + phyDrop);
+    nextStats.phy = clamp(prev.phy - rawPhyDrop);
     nextStats.ply = clamp(prev.ply + plyBoost);
     delta.phy = nextStats.phy - prev.phy;
     delta.ply = nextStats.ply - prev.ply;
-  } else if (age >= 33 && age <= 35) {
-    const phyDrop = -randInt(3, 5);
-    const insDrop = -randInt(1, 3);
-    const defDrop = -randInt(1, 3);
-    const rebDrop = -randInt(1, 3);
-    const outDrop = rng() < 0.4 ? -1 : 0;
+  } else if (agingYears <= 5) {
+    // 중기 노쇠화 구간: 운동능력 및 공수 기동력 감소
+    const phyDrop = Math.max(2, Math.round(randInt(3, 5) * combinedMult));
+    const insDrop = Math.max(1, Math.round(randInt(1, 3) * combinedMult));
+    const defDrop = Math.max(1, Math.round(randInt(1, 3) * combinedMult));
+    const rebDrop = Math.max(1, Math.round(randInt(1, 3) * combinedMult));
+    const outDrop = rng() < 0.4 * combinedMult ? 1 : 0;
 
-    nextStats.phy = clamp(prev.phy + phyDrop);
-    nextStats.ins = clamp(prev.ins + insDrop);
-    nextStats.def = clamp(prev.def + defDrop);
-    nextStats.reb = clamp(prev.reb + rebDrop);
-    nextStats.out = clamp(prev.out + outDrop);
+    nextStats.phy = clamp(prev.phy - phyDrop);
+    nextStats.ins = clamp(prev.ins - insDrop);
+    nextStats.def = clamp(prev.def - defDrop);
+    nextStats.reb = clamp(prev.reb - rebDrop);
+    nextStats.out = clamp(prev.out - outDrop);
 
     delta.phy = nextStats.phy - prev.phy;
     delta.ins = nextStats.ins - prev.ins;
     delta.def = nextStats.def - prev.def;
     delta.reb = nextStats.reb - prev.reb;
     delta.out = nextStats.out - prev.out;
-  } else if (age >= 36) {
+  } else {
+    // 황혼기 급감 구간: 전 영역 노쇠화 진행
     const keys: (keyof PlayerStats)[] = ['ins', 'out', 'ply', 'def', 'reb', 'phy'];
     for (const k of keys) {
-      const drop = -randInt(3, 6);
-      nextStats[k] = clamp(prev[k] + drop);
+      const drop = Math.max(2, Math.round(randInt(3, 6) * combinedMult));
+      nextStats[k] = clamp(prev[k] - drop);
       delta[k] = nextStats[k] - prev[k];
     }
   }
@@ -69,7 +122,7 @@ export function applyAgingCurve(
 }
 
 /**
- * 5대 은퇴 조건 중 시즌 직후 체크
+ * 5대 은퇴 조건 중 시즌 직후 체크 (고정 OVR 커트라인 대신 리그 수비저항 LDR 및 실전 퍼포먼스 기반 판정)
  */
 export function checkRetirementEligibility(career: CareerState): {
   canRetireVoluntarily: boolean;
@@ -90,10 +143,24 @@ export function checkRetirementEligibility(career: CareerState): {
     !career.isFarewellTour &&
     !career.farewellTourCompleted;
 
+  const leagueLdr = LEAGUE_CONFIG[career.league].ldr;
+  const lastLog =
+    career.seasonLogs.length > 0
+      ? career.seasonLogs[career.seasonLogs.length - 1]
+      : null;
+
+  // 고정 OVR 수치 대신 소속 리그 수비 저항(LDR) 대비 경쟁력 상실 및 실전 성적 급락을 유기적으로 판정
+  const ovrGapFromLeague = career.ovr - leagueLdr;
+  const severeRealGameDecline =
+    lastLog !== null &&
+    lastLog.ppg < 3.2 &&
+    lastLog.mpg < 8.5 &&
+    lastLog.rpg + lastLog.apg < 2.8;
+
   const isOutOfLeague =
-    career.age >= 32 &&
-    ((career.league === 'NBA' && career.ovr < 73) ||
-      (career.league !== 'NBA' && career.ovr < 58));
+    career.age >= 33 &&
+    ((ovrGapFromLeague <= -12 && (!lastLog || lastLog.ppg < 4.5)) ||
+      (ovrGapFromLeague <= -8 && severeRealGameDecline));
 
   const isMandatoryAge40 = career.age >= 40;
 
@@ -106,7 +173,7 @@ export function checkRetirementEligibility(career: CareerState): {
 }
 
 /**
- * 4. 영구 결번(Jersey Retirement) 기준 대폭 상향 및 프로 한정 & 6단계 레거시 등급 심사
+ * 6. 영구 결번(Jersey Retirement) 기준 대폭 상향 및 프로 한정 & 6단계 레거시 등급 심사
  * - 대학/아마추어 팀(HIGH_SCHOOL, U_LEAGUE, NCAA) 및 상무는 영구 결번 심사 대상에서 완전 제외
  * - 오직 프로 구단(NBA, KBL, OVERSEAS, GLEAGUE)에서만 심사하며, 해당 단일 프로 구단(honoredTeam) 소속 누적 기록만 기준:
  *   1) 프랜차이즈 헌신 (필수): 단일 프로 구단 최소 7시즌 이상 활약 AND 해당 구단 누적 득점 10,000점 이상 (KBL/해외/G리그는 6,000점 이상)

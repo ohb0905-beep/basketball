@@ -5,7 +5,10 @@ import {
   AllLeagueTier,
   CareerState,
   ContractType,
+  GrowthDna,
   PlayerStats,
+  PlaystyleArchetype,
+  Position,
   SeasonBoxScore,
   StatDelta,
   TrainingFocus,
@@ -53,31 +56,136 @@ export function getContractDefaultSalary(contractType: ContractType, ovr: number
 }
 
 /**
- * 3-2. 팀 내 입지(Role), 출전 시간(MPG) 및 부상 결장(injuredGamesMissed) 산출 공식
+ * 직전 시즌 분당 실전 효율(Per-36 Real Efficiency) 모멘텀 계산
+ * - 2라운드/언드래프티/벤치 선수가 제한된 출전 시간 동안 효율적인 활약을 펼치면
+ *   단순 OVR 차이를 극복하고 로테이션과 주전 자리를 꿰찰 수 있게 해줌
+ */
+export function calculateRecentEfficiencyMomentum(
+  seasonLogs?: SeasonBoxScore[],
+  primaryPos: Position = 'SG'
+): number {
+  if (!seasonLogs || seasonLogs.length === 0) return 0;
+  const lastLog = seasonLogs[seasonLogs.length - 1];
+  if (lastLog.mpg < 4.0) return 0;
+
+  const scale36 = 36 / Math.max(10, lastLog.mpg);
+  const pts36 = lastLog.ppg * scale36;
+  const reb36 = lastLog.rpg * scale36;
+  const ast36 = lastLog.apg * scale36;
+  const stk36 = (lastLog.spg + lastLog.bpg) * scale36;
+
+  // 포지션별 가중 분당 생산성
+  const posProd =
+    primaryPos === 'PG'
+      ? pts36 * 0.42 + ast36 * 1.45 + stk36 * 1.6 + reb36 * 0.35
+      : primaryPos === 'C' || primaryPos === 'PF'
+      ? pts36 * 0.42 + reb36 * 1.15 + stk36 * 2.1 + ast36 * 0.65
+      : pts36 * 0.52 + reb36 * 0.65 + ast36 * 0.85 + stk36 * 1.85;
+
+  const shootingEff = (lastLog.fgPct - 43.5) * 0.35 + (lastLog.tpPct - 33.5) * 0.25;
+  const rawMomentum = (posProd - 14.5) * 0.55 + shootingEff;
+
+  return Math.max(-4.5, Math.min(9.5, Number(rawMomentum.toFixed(2))));
+}
+
+/**
+ * 2. 드래프트 위상(Draft Pedigree) + 구단 육성 기조 + 실전 효율 모멘텀이 결합된 유기적 로테이션(출전 시간) 시스템
+ * - KBL 1라운드(특히 1~3순위) 및 NBA 1라운드 지명 신인은 초기 OVR이 팀 평균보다 낮더라도
+ *   구단이 미래를 보고 선발한 핵심 자산이므로 가비지 타임(4~8분)에 방치되지 않고
+ *   '핵심 유망주 로테이션(20~28분)' 이상으로 우선 기용됨!
  */
 export function calculateRoleAndMpg(
   career: Pick<
     CareerState,
     'ovr' | 'team' | 'coachTrust' | 'secondaryPos' | 'contractType' | 'league'
-  > & { stats?: Pick<PlayerStats, 'phy'> },
+  > & {
+    stats?: Pick<PlayerStats, 'phy'>;
+    primaryPos?: Position;
+    growthDna?: GrowthDna;
+    draftPedigreePick?: number | null;
+    draftPedigreeRound?: 1 | 2 | null;
+    draftPedigreeSeasonsLeft?: number;
+    seasonLogs?: SeasonBoxScore[];
+  },
   rng: () => number = Math.random
 ): RoleAndMpgResult {
   const leagueConfig = LEAGUE_CONFIG[career.league];
   const dualBonus = career.secondaryPos ? 2.5 : 0;
-  const roleIndex =
-    career.ovr - career.team.rating + (career.coachTrust - 50) * 0.18 + dualBonus;
+
+  // 1) 구단 육성 기조 보정: 리빌딩(REBUILDING) 구단은 젊은 유망주에게 더 많은 출전 기회를 부여
+  const teamDirection = career.team.direction || 'PLAYOFF_HUNT';
+  const rebuildingYouthBoost =
+    teamDirection === 'REBUILDING'
+      ? 3.5
+      : teamDirection === 'CONTENDER'
+      ? -1.0
+      : 1.0;
+
+  // 2) 포지션 니즈 적합도 보정: 구단의 보강 필요 포지션과 일치하면 로테이션 진입이 수월함
+  const needed = career.team.neededPositions || [];
+  const posNeedBoost =
+    career.primaryPos && needed.includes(career.primaryPos)
+      ? 2.8
+      : career.secondaryPos && needed.includes(career.secondaryPos)
+      ? 1.5
+      : 0;
+
+  // 3) 입단 위상(Draft Pedigree) 보정: KBL 1라운드 / NBA 1라운드 신인은 초기 OVR 차이를 보정받음
+  const pedigreeSeasonsLeft = career.draftPedigreeSeasonsLeft ?? 0;
+  const pick = career.draftPedigreePick ?? null;
+  const round = career.draftPedigreeRound ?? null;
+  const isFirstRoundPedigree =
+    pedigreeSeasonsLeft > 0 &&
+    round === 1 &&
+    (career.league === 'KBL' || career.league === 'NBA');
+
+  let pedigreeBonus = 0;
+  if (isFirstRoundPedigree && pick !== null) {
+    if (career.league === 'KBL') {
+      // KBL 1~3순위 로터리 신인은 구단 간판 유망주 대우 (+11 ~ +15 보정)
+      pedigreeBonus = pick <= 3 ? 14.5 : pick <= 6 ? 11.5 : 9.0;
+    } else if (career.league === 'NBA') {
+      // NBA 1라운드 로터리(1~14순위) 및 1라운더(15~30순위) 육성 프리미엄
+      pedigreeBonus = pick <= 5 ? 15.0 : pick <= 14 ? 12.0 : 9.0;
+    }
+  } else if (pedigreeSeasonsLeft > 0 && round === 2) {
+    pedigreeBonus = 3.5;
+  }
+
+  // 4) 직전 시즌 분당 실전 효율 모멘텀 (2라운더/언드래프티도 효율이 좋으면 출전시간 급상승)
+  const efficiencyMomentum = calculateRecentEfficiencyMomentum(
+    career.seasonLogs,
+    career.primaryPos || 'SG'
+  );
+
+  // 기본 OVR 차이를 완충(0.85배)하고 신뢰도·육성기조·드래프트위상·실전효율을 유기적으로 합산
+  const rawOvrDiff = career.ovr - career.team.rating;
+  const roleIndex = Number(
+    (
+      rawOvrDiff +
+      (career.coachTrust - 50) * 0.22 +
+      dualBonus +
+      rebuildingYouthBoost * (pedigreeSeasonsLeft > 0 ? 1.0 : 0.35) +
+      posNeedBoost * (pedigreeSeasonsLeft > 0 || (career.seasonLogs && career.seasonLogs.length > 0) ? 1.0 : 0) +
+      pedigreeBonus +
+      efficiencyMomentum
+    ).toFixed(2)
+  );
 
   if (career.contractType === 'TWO_WAY') {
     const gp = Math.min(50, Math.round(18 + rng() * 24));
     const role = '투웨이 콜업 로테이션';
-    const mpg = Number((8.5 + Math.max(0, (career.ovr - 70) * 1.1)).toFixed(1));
+    const effBoostMpg = Math.max(0, efficiencyMomentum * 0.9);
+    const mpg = Number(
+      Math.min(24.5, 8.5 + Math.max(0, (career.ovr - 70) * 1.1) + effBoostMpg).toFixed(1)
+    );
     return {
       roleIndex,
       role,
       mpg,
       gp,
       injuredGamesMissed: 0,
-      basePer36: 12.2,
+      basePer36: 12.8,
     };
   }
 
@@ -86,7 +194,17 @@ export function calculateRoleAndMpg(
   let healthyGp = leagueConfig.games;
   let basePer36 = 10.0;
 
-  if (roleIndex < -9) {
+  // ★ 핵심: KBL 1라운드 / NBA 1라운드 신인은 초기 OVR이 낮더라도 절대 가비지 타임에 빠지지 않고
+  // 최소 '핵심 유망주 로테이션 (20~28분)'으로 우선 기용됨!
+  if (isFirstRoundPedigree && roleIndex < 7 && rawOvrDiff < 2) {
+    const isTopLottery = pick !== null && (career.league === 'KBL' ? pick <= 3 : pick <= 10);
+    role = isTopLottery ? '주전급 코어 유망주 (1라운드 픽)' : '핵심 유망주 로테이션 (1라운드 픽)';
+    const minMpg = isTopLottery ? 23.5 : 20.0;
+    const maxMpg = isTopLottery ? 28.0 : 25.5;
+    mpg = Number((minMpg + rng() * (maxMpg - minMpg)).toFixed(1));
+    healthyGp = Math.max(1, Math.round(leagueConfig.games * (0.9 + rng() * 0.1)));
+    basePer36 = isTopLottery ? 16.5 : 14.8;
+  } else if (roleIndex < -9) {
     role = '가비지 타임 (벤치 끝자리)';
     mpg = Number((4.0 + rng() * 4.5).toFixed(1));
     healthyGp = Math.max(1, Math.round(leagueConfig.games * 0.55));
@@ -95,7 +213,7 @@ export function calculateRoleAndMpg(
     role = '벤치 로테이션';
     mpg = Number((11.0 + rng() * 5.5).toFixed(1));
     healthyGp = Math.max(1, Math.round(leagueConfig.games * (0.82 + rng() * 0.14)));
-    basePer36 = 12.2;
+    basePer36 = 12.4;
   } else if (roleIndex < 2) {
     role = '핵심 식스맨';
     mpg = Number((18.5 + rng() * 5.5).toFixed(1));
@@ -105,7 +223,7 @@ export function calculateRoleAndMpg(
     role = '주전 스타터';
     mpg = Number((26.5 + rng() * 5.0).toFixed(1));
     healthyGp = Math.max(1, Math.round(leagueConfig.games * (0.92 + rng() * 0.08)));
-    basePer36 = 18.0;
+    basePer36 = 18.2;
   } else {
     role = '프랜차이즈 1옵션 에이스';
     mpg = Number((33.0 + rng() * 3.8).toFixed(1));
@@ -113,12 +231,15 @@ export function calculateRoleAndMpg(
     basePer36 = 22.8;
   }
 
-  // 부상 리스크 계산: PHY가 낮거나(< 62) 출전시간이 과다할 때(mpg >= 32.5) 잔부상 결장 발생
+  // 부상 리스크 계산: PHY가 낮거나(< 62) 출전시간이 과다할 때 잔부상 결장 발생 (철강왕 DNA는 부상 확률 대폭 감소)
   const phy = career.stats?.phy ?? 65;
+  const dna = career.growthDna || 'STANDARD';
   let injuredGamesMissed = 0;
   const lowPhyRisk = phy < 60 ? 0.24 : phy < 68 ? 0.12 : 0.04;
   const highMpgRisk = mpg >= 33.5 ? 0.14 : mpg >= 29.0 ? 0.06 : 0;
-  if (rng() < lowPhyRisk + highMpgRisk) {
+  const dnaInjuryMult = dna === 'IRONMAN' ? 0.45 : 1.0;
+
+  if (rng() < (lowPhyRisk + highMpgRisk) * dnaInjuryMult) {
     const maxMiss = Math.max(3, Math.round(leagueConfig.games * 0.28));
     injuredGamesMissed = Math.max(2, Math.min(maxMiss, Math.round(3 + rng() * (maxMiss - 2))));
   }
@@ -136,7 +257,7 @@ export function calculateRoleAndMpg(
 }
 
 /**
- * 3-3. 상대 수비 저항치(ldr)와 25득점 소프트캡이 적용된 평균 득점(PPG) 공식 (난이도 상향 반영)
+ * 3-3. 상대 수비 저항치(ldr)와 25득점 소프트캡이 적용된 평균 득점(PPG) 공식
  */
 export function calculatePpg(
   stats: Pick<PlayerStats, 'ins' | 'out'>,
@@ -146,7 +267,6 @@ export function calculatePpg(
   rng: () => number = Math.random
 ): { ppg: number; offEdge: number; rawPpg: number } {
   const attackStat = stats.ins * 0.52 + stats.out * 0.48;
-  // 수비 저항 대비 공격 우위 계수 보수적 조정 (저능력치 시 득점 억제 강화)
   const diff = attackStat - ldr;
   const offEdge =
     diff >= 0
@@ -161,20 +281,27 @@ export function calculatePpg(
 }
 
 /**
- * 3-4. 보수적으로 상향된 시즌 성장 공식 (쉽게 OVR 90+에 도달하지 못하도록 조정) + 부상 페널티 + 에이징 커브
+ * 3-4. 선수 고유 성장 곡선 DNA(조숙형/표준형/대기만성형/철강왕)가 반영된 시즌 성장 및 에이징 수식
  */
 export function calculateSeasonStatGrowth(
-  career: Pick<CareerState, 'age' | 'ovr' | 'potential' | 'league' | 'stats' | 'trainingFocus'>,
+  career: Pick<CareerState, 'age' | 'ovr' | 'potential' | 'league' | 'stats' | 'trainingFocus'> & {
+    growthDna?: GrowthDna;
+    totals?: CareerState['totals'];
+  },
   mpg: number,
   rng: () => number = Math.random,
   injuredGamesMissed: number = 0
 ): { nextStats: PlayerStats; delta: StatDelta } {
   const leagueConfig = LEAGUE_CONFIG[career.league];
   const prev = career.stats;
+  const dna: GrowthDna = career.growthDna || 'STANDARD';
 
-  // 만 27세 이하: 성장 구간 (전체 난이도 상향: baseGain을 1.72로 보수화하고 OVR 82+ 구간 점진적 감쇠 추가)
-  if (career.age <= 27) {
-    const ptFactor = mpg >= 26 ? 1.15 : mpg >= 16 ? 0.88 : 0.48;
+  // DNA별 성장 상한 연령 (대기만성형은 만 29세까지 성장 지속, 조숙형은 만 25세 이후 완숙)
+  const maxGrowthAge =
+    dna === 'LATE_BLOOMER' ? 29 : dna === 'EARLY_BLOOMER' ? 26 : 27;
+
+  if (career.age <= maxGrowthAge) {
+    const ptFactor = mpg >= 24 ? 1.15 : mpg >= 15 ? 0.92 : 0.52;
     const capPenalty =
       career.ovr >= leagueConfig.growthCap
         ? 0.20
@@ -188,7 +315,7 @@ export function calculateSeasonStatGrowth(
         ? 0.50
         : 1.0;
 
-    // 고능력치(OVR 80+) 진입 시 슈퍼스타 벽(High-OVR Diminishing Returns) 적용
+    // 고능력치(OVR 80+) 진입 시 슈퍼스타 벽(High-OVR Diminishing Returns)
     const highOvrWall =
       career.ovr >= 88
         ? 0.38
@@ -198,8 +325,17 @@ export function calculateSeasonStatGrowth(
         ? 0.78
         : 1.0;
 
-    const injuryFactor = injuredGamesMissed >= 10 ? 0.62 : injuredGamesMissed > 0 ? 0.82 : 1.0;
-    const ageMultiplier = career.age <= 20 ? 1.12 : career.age <= 23 ? 0.96 : 0.72;
+    const injuryFactor = injuredGamesMissed >= 10 ? 0.65 : injuredGamesMissed > 0 ? 0.85 : 1.0;
+
+    // DNA별 나이대 성장 곡선 차별화
+    let ageMultiplier = 0.85;
+    if (dna === 'EARLY_BLOOMER') {
+      ageMultiplier = career.age <= 21 ? 1.32 : career.age <= 24 ? 1.05 : 0.62;
+    } else if (dna === 'LATE_BLOOMER') {
+      ageMultiplier = career.age <= 21 ? 0.92 : career.age <= 26 ? 1.12 : 0.95;
+    } else {
+      ageMultiplier = career.age <= 20 ? 1.12 : career.age <= 23 ? 0.96 : 0.74;
+    }
 
     const baseGain =
       1.72 * ptFactor * capPenalty * potPenalty * highOvrWall * injuryFactor * ageMultiplier;
@@ -231,11 +367,14 @@ export function calculateSeasonStatGrowth(
     return { nextStats, delta };
   }
 
-  // 만 28~29세: 전성기 완숙 구간 (극소폭 상승 또는 유지)
-  if (career.age <= 29) {
+  // 전성기 완숙 구간 (개인별 노쇠화 시작 직전)
+  const primeEndAge =
+    dna === 'IRONMAN' ? 31 : dna === 'LATE_BLOOMER' ? 30 : dna === 'EARLY_BLOOMER' ? 28 : 29;
+
+  if (career.age <= primeEndAge) {
     const nextStats: PlayerStats = { ...prev };
     const delta: StatDelta = { ins: 0, out: 0, ply: 0, def: 0, reb: 0, phy: 0 };
-    if (career.ovr < leagueConfig.growthCap && career.ovr < career.potential && rng() < 0.55) {
+    if (career.ovr < leagueConfig.growthCap && career.ovr < career.potential && rng() < 0.58) {
       const bonusKey: keyof PlayerStats =
         career.trainingFocus === 'OUTSIDE_SHOOTING'
           ? 'out'
@@ -252,8 +391,70 @@ export function calculateSeasonStatGrowth(
     return { nextStats, delta };
   }
 
-  // 만 30세 이상: retirementEngine의 에이징 커브(노쇠화) 수식 적용
-  return applyAgingCurve(career.age, prev, rng);
+  // 개체별 차등 에이징 커브(노쇠화) 수식 적용
+  const careerMinutes = career.totals ? career.totals.gp * 24 : 15000;
+  return applyAgingCurve(career.age, prev, rng, {
+    growthDna: dna,
+    careerMinutes,
+  });
+}
+
+/**
+ * 포지션 및 플레이 성향에 맞춘 실전 공헌 효율 기반 감독 신뢰도 변화 산출
+ * - 단순 득점(ppg >= 18) 하드코딩을 폐기하고, 출전 시간 대비 야투율/3점 효율/어시스트/리바운드/스틸·블록 수비 기여를 공정하게 평가
+ */
+export function calculateOrganicTrustDelta(params: {
+  pos: Position;
+  playstyle?: PlaystyleArchetype;
+  mpg: number;
+  ppg: number;
+  rpg: number;
+  apg: number;
+  spg: number;
+  bpg: number;
+  fgPct: number;
+  tpPct: number;
+  winRate: number;
+  wonDpoy: boolean;
+  wonSixthMan: boolean;
+  wonMvp: boolean;
+}): number {
+  const { pos, playstyle, mpg, ppg, rpg, apg, spg, bpg, fgPct, tpPct, winRate, wonDpoy, wonSixthMan, wonMvp } =
+    params;
+
+  const scale36 = 36 / Math.max(10, mpg);
+  const pts36 = ppg * scale36;
+  const reb36 = rpg * scale36;
+  const ast36 = apg * scale36;
+  const stk36 = (spg + bpg) * scale36;
+
+  // 슈팅 효율 점수
+  const effScore = (fgPct - 43.0) * 0.35 + (tpPct - 33.0) * 0.25;
+
+  // 포지션 및 플레이 성향별 실전 공헌 지수
+  let roleContribution = 0;
+  if (playstyle === 'PLAYMAKER' || pos === 'PG') {
+    roleContribution = ast36 * 1.45 + pts36 * 0.42 + stk36 * 1.65 + reb36 * 0.35;
+  } else if (playstyle === 'RIM_PROTECTOR' || pos === 'C' || pos === 'PF') {
+    roleContribution = reb36 * 1.2 + stk36 * 2.25 + pts36 * 0.42 + ast36 * 0.65;
+  } else if (playstyle === 'THREE_AND_D') {
+    roleContribution = stk36 * 2.15 + (tpPct - 34.0) * 0.8 + pts36 * 0.48 + reb36 * 0.55;
+  } else {
+    roleContribution = pts36 * 0.55 + reb36 * 0.65 + ast36 * 0.85 + stk36 * 1.75;
+  }
+
+  const totalImpact =
+    roleContribution +
+    effScore +
+    (winRate - 0.48) * 14 +
+    (wonDpoy || wonSixthMan || wonMvp ? 6 : 0);
+
+  if (totalImpact >= 22.0) return 9;
+  if (totalImpact >= 17.5) return 6;
+  if (totalImpact >= 13.5) return 4;
+  if (totalImpact >= 10.0) return 2;
+  if (totalImpact >= 7.5) return 0;
+  return -3;
 }
 
 export interface SimulatedSeasonResult {
@@ -267,7 +468,7 @@ export interface SimulatedSeasonResult {
 }
 
 /**
- * 한 시즌 전체 시뮬레이션 실행 (개인 타이틀 확대, 수비 공정성, 부상 리스크, 연봉 정산 포함)
+ * 한 시즌 전체 시뮬레이션 실행 (개인 타이틀 확대, 수비 공정성, 부상 리스크, 연봉 정산, 실전 효율 신뢰도 반영)
  */
 export function simulateSeason(
   career: CareerState,
@@ -544,15 +745,23 @@ export function simulateSeason(
   );
   const nextOvr = calculateOvr(nextStats, career.primaryPos);
 
-  // 감독 신뢰도 및 드래프트 주가 갱신
-  const trustChange =
-    ppg >= 18 || wonDpoy || wonSixthMan
-      ? 7
-      : ppg >= 10
-      ? 4
-      : ppg >= 6
-      ? 2
-      : -2;
+  // 포지션 및 플레이 성향별 실전 공헌 효율 기반 감독 신뢰도 변화
+  const trustChange = calculateOrganicTrustDelta({
+    pos: career.primaryPos,
+    playstyle: career.playstyle,
+    mpg,
+    ppg,
+    rpg,
+    apg,
+    spg,
+    bpg,
+    fgPct,
+    tpPct,
+    winRate,
+    wonDpoy,
+    wonSixthMan,
+    wonMvp,
+  });
   const nextCoachTrust = Math.max(15, Math.min(100, career.coachTrust + trustChange));
 
   const stockBoost =
@@ -565,7 +774,12 @@ export function simulateSeason(
     Math.min(100, Math.round(career.draftStock * 0.42 + stockBoost))
   );
 
-  const nextBadges = evaluatePlayerBadges(nextStats, career.secondaryPos);
+  const nextBadges = evaluatePlayerBadges(
+    nextStats,
+    career.secondaryPos,
+    career.growthDna,
+    career.playstyle
+  );
 
   return {
     boxScore,
