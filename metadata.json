@@ -1,0 +1,6 @@
+{
+  "name": "벤치에서 MVP까지 (From Bench to MVP)",
+  "description": "고교 농구 벤치 끝자리에서 시작해 대학, KBL, 해외 리그, G리그, NCAA를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 하드코어 농구 선수 육성 시뮬레이션 웹 게임",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
