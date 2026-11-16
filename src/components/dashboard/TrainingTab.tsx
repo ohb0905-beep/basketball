@@ -7,6 +7,7 @@ import {
   Check,
   Dumbbell,
   Flame,
+  Lock,
   MessageSquare,
   RefreshCw,
   Sparkles,
@@ -15,6 +16,8 @@ import { POSITION_ARCHETYPES } from '../../data/archetypes';
 import { LEAGUE_CONFIG } from '../../data/leagues';
 import {
   analyzePositionFit,
+  canSwitchToPosition,
+  getBiomechanicalStatCaps,
   getSpecialCampOptions,
   getTraitInfo,
 } from '../../engine/statCalculator';
@@ -96,17 +99,18 @@ export function TrainingTab() {
     career.secondaryPos,
     career.coachTrust
   );
+  const bioCaps = getBiomechanicalStatCaps(career.heightCm, career.primaryPos);
   const specialCamps = getSpecialCampOptions(career);
   const traits = career.traits || [];
   const campCompletedThisYear = career.lastCampYear === career.seasonYear;
 
   const statItems = [
-    { key: 'ins', label: '인사이드 득점 (INS)', val: career.stats.ins, delta: career.lastSeasonDelta.ins },
-    { key: 'out', label: '아웃사이드 슈팅 (OUT)', val: career.stats.out, delta: career.lastSeasonDelta.out },
-    { key: 'ply', label: '플레이메이킹 (PLY)', val: career.stats.ply, delta: career.lastSeasonDelta.ply },
-    { key: 'def', label: '대인/팀 수비 (DEF)', val: career.stats.def, delta: career.lastSeasonDelta.def },
-    { key: 'reb', label: '리바운드 장악 (REB)', val: career.stats.reb, delta: career.lastSeasonDelta.reb },
-    { key: 'phy', label: '피지컬 & 기동력 (PHY)', val: career.stats.phy, delta: career.lastSeasonDelta.phy },
+    { key: 'ins' as const, label: '인사이드 득점 (INS)', val: career.stats.ins, delta: career.lastSeasonDelta.ins, cap: bioCaps.ins },
+    { key: 'out' as const, label: '아웃사이드 슈팅 (OUT)', val: career.stats.out, delta: career.lastSeasonDelta.out, cap: bioCaps.out },
+    { key: 'ply' as const, label: '플레이메이킹 (PLY)', val: career.stats.ply, delta: career.lastSeasonDelta.ply, cap: bioCaps.ply },
+    { key: 'def' as const, label: '대인/팀 수비 (DEF)', val: career.stats.def, delta: career.lastSeasonDelta.def, cap: bioCaps.def },
+    { key: 'reb' as const, label: '리바운드 장악 (REB)', val: career.stats.reb, delta: career.lastSeasonDelta.reb, cap: bioCaps.reb },
+    { key: 'phy' as const, label: '피지컬 & 기동력 (PHY)', val: career.stats.phy, delta: career.lastSeasonDelta.phy, cap: bioCaps.phy },
   ];
 
   return (
@@ -117,11 +121,11 @@ export function TrainingTab() {
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-lg font-extrabold text-slate-900">
-                6대 세부 능력치 & 시즌 증감
+                6대 세부 능력치 & 생체역학 상한선
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {career.age <= 28
-                  ? `현재 리그 성장 상한선: OVR ${leagueInfo.growthCap} · 선수 잠재력 상한: ${career.potential}`
+                  ? `현재 리그 성장 상한: OVR ${leagueInfo.growthCap} · 잠재력 상한: ${career.potential} (각성 ${career.potentialBreakthroughCount || 0}/2회)`
                   : `만 ${career.age}세 베테랑 에이징 커브 구간 (노련미 유지 및 체력 관리 중요)`}
               </p>
             </div>
@@ -134,7 +138,14 @@ export function TrainingTab() {
             {statItems.map((item) => (
               <div key={item.key} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-700">{item.label}</span>
+                  <span className="font-bold text-slate-700">
+                    {item.label}
+                    {item.cap < 99 && (
+                      <span className="ml-1.5 text-[10px] font-semibold text-slate-400">
+                        (신장 상한 {item.cap})
+                      </span>
+                    )}
+                  </span>
                   <div className="flex items-center gap-2 tabular-nums">
                     {item.delta !== 0 && (
                       <span
@@ -288,26 +299,40 @@ export function TrainingTab() {
             </div>
           </div>
 
-          {/* 주포지션 전향 */}
+          {/* 주포지션 전향 (인접 포지션 및 생체역학 신장 한계 검증) */}
           <div className="space-y-2 pt-2 border-t border-slate-100">
             <p className="text-xs font-bold text-slate-700">
-              주포지션 전향 (신장 {career.heightCm}cm 및 현재 능력치 기준)
+              주포지션 전향 (인접 포지션 또는 해금된 부포지션 · 신장 {career.heightCm}cm 생체역학 제한 적용)
             </p>
             <div className="grid grid-cols-5 gap-2">
               {(['PG', 'SG', 'SF', 'PF', 'C'] as Position[]).map((pos) => {
                 const isPrimary = career.primaryPos === pos;
+                const check = canSwitchToPosition(
+                  career.primaryPos,
+                  pos,
+                  career.secondaryPos,
+                  career.heightCm
+                );
+                const disabled = !isPrimary && !check.allowed;
                 return (
                   <button
                     key={pos}
                     type="button"
+                    disabled={disabled}
+                    title={check.reason}
                     onClick={() => switchPrimaryPosition(pos)}
-                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                    className={`p-2.5 rounded-xl border text-center transition-all ${
                       isPrimary
-                        ? 'border-slate-900 bg-slate-900 text-white font-extrabold'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-orange-500'
+                        ? 'border-slate-900 bg-slate-900 text-white font-extrabold cursor-default'
+                        : disabled
+                        ? 'border-slate-200 bg-slate-50 text-slate-400 opacity-60 cursor-not-allowed'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-orange-500 cursor-pointer'
                     }`}
                   >
-                    <span className="block text-xs font-bold">{pos}</span>
+                    <span className="block text-xs font-bold flex items-center justify-center gap-0.5">
+                      {pos}
+                      {disabled && <Lock className="w-2.5 h-2.5 inline" />}
+                    </span>
                     <span className="block text-[10px] opacity-80">
                       {POSITION_ARCHETYPES[pos].koreanName}
                     </span>

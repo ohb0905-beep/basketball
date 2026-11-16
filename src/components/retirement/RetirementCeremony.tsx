@@ -1,8 +1,9 @@
 'use client';
 
 import React from 'react';
-import { Award, Crown, Home, Sparkles } from 'lucide-react';
+import { Award, Crown, Home, Medal, Sparkles } from 'lucide-react';
 import { evaluateCareerLegacy } from '../../engine/retirementEngine';
+import { getAwardsByLeague } from '../../engine/seasonSimulator';
 import { useCareerStore } from '../../store/useCareerStore';
 import { RetirementReason } from '../../types/game';
 import { TeamEmblem } from '../common/TeamEmblem';
@@ -14,6 +15,13 @@ const REASON_LABELS: Record<RetirementReason, string> = {
   CRITICAL_INJURY: '④ 부상 투혼 끝에 내려놓은 정든 유니폼',
   AGE_40_MANDATORY: '⑤ 만 40세 불혹의 나이까지 코트를 지킨 철인의 정년 은퇴',
 };
+
+function formatEarnings(amountUsd: number): string {
+  if (!amountUsd || amountUsd <= 0) return '$0';
+  if (amountUsd >= 1000000) return `$${(amountUsd / 1000000).toFixed(2)}M`;
+  if (amountUsd >= 1000) return `$${Math.round(amountUsd / 1000).toLocaleString()}K`;
+  return `$${amountUsd.toLocaleString()}`;
+}
 
 export function RetirementCeremony() {
   const career = useCareerStore((s) => s.career);
@@ -29,7 +37,7 @@ export function RetirementCeremony() {
   const avgPpg = (career.totals.points / gp).toFixed(1);
   const avgRpg = (career.totals.rebounds / gp).toFixed(1);
   const avgApg = (career.totals.assists / gp).toFixed(1);
-  const earningsM = ((career.careerEarnings || 0) / 1000).toFixed(2);
+  const leagueAwards = getAwardsByLeague(career.seasonLogs);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -47,9 +55,9 @@ export function RetirementCeremony() {
           </p>
         </div>
 
-        {/* 6단계 레거시 등급 & 구단 영구결번 배너 연출 */}
+        {/* 7단계 레거시 등급 & 구단 영구결번 배너 연출 */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
-          {/* 좌측: 6단계 레거시 등급 카드 */}
+          {/* 좌측: 7단계 레거시 등급 카드 */}
           <div className="md:col-span-7 rounded-2xl bg-slate-50 border border-slate-200 p-6 flex flex-col justify-between space-y-4">
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
@@ -61,7 +69,7 @@ export function RetirementCeremony() {
               </h2>
               <p className="text-xs font-bold text-orange-600 tabular-nums">
                 레거시 총점: {evaluation.legacyScore.toLocaleString()}점 · 전성기 OVR{' '}
-                {career.peakOvr} · 통산 수입 ${earningsM}M
+                {career.peakOvr} · 통산 수입 {formatEarnings(career.careerEarnings || 0)}
               </p>
             </div>
 
@@ -85,9 +93,9 @@ export function RetirementCeremony() {
                 </span>
               </div>
               <div className="p-3 rounded-xl bg-white border border-slate-200">
-                <span className="block text-[11px] text-slate-500">우승 / MVP</span>
+                <span className="block text-[11px] text-slate-500">NBA 우승 / MVP</span>
                 <span className="text-base font-black text-amber-600 tabular-nums">
-                  {career.totals.championships}회 / {career.totals.mvps}회
+                  {career.totals.nbaChampionships}회 / {career.totals.nbaMvps}회
                 </span>
               </div>
             </div>
@@ -144,6 +152,37 @@ export function RetirementCeremony() {
             )}
           </div>
         </div>
+
+        {/* 리그별 트로피 캐비닛 (은퇴식 요약) */}
+        {leagueAwards.length > 0 && (
+          <div className="rounded-2xl bg-slate-50 border border-slate-200 p-5 space-y-3">
+            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+              <Medal className="w-4 h-4 text-amber-500" />
+              리그별 통산 수상 & 트로피 내역 (League-Separated Honors)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {leagueAwards.map((la) => (
+                <div
+                  key={la.league}
+                  className="p-3.5 rounded-xl bg-white border border-slate-200 space-y-1.5 text-xs"
+                >
+                  <div className="flex items-center justify-between font-bold text-slate-900">
+                    <span>{la.leagueName}</span>
+                    <span className="text-[11px] text-slate-500">
+                      {la.seasons}시즌 ({la.points.toLocaleString()}점)
+                    </span>
+                  </div>
+                  <p className="text-amber-700 font-bold">
+                    💍 우승 {la.championships}회 · 🏆 MVP {la.mvps}회 · 👑 FMVP {la.finalsMvps}회 · ⭐ 올스타 {la.allStars}회
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    🛡️ DPOY {la.dpoys} · ⚡ 6MOY {la.sixthManAwards} · 📈 MIP {la.mips} · 🏅 올-리그 {la.allLeague1st + la.allLeague2nd + la.allLeague3rd}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 명예의 전당 및 올타임 베스트 5 하프코트 등록 버튼 */}
         <div className="pt-2">

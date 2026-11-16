@@ -23,6 +23,14 @@ import {
   ROLE_PROMISE_LABELS,
 } from '../engine/draftEngine';
 import {
+  advancePlayoffRound,
+  createLiveFinalGame,
+  createPlayoffBracket,
+  simulateLiveQuarter,
+  skipEntirePlayoffs,
+  skipLiveGameToEnd,
+} from '../engine/playoffEngine';
+import {
   buildHallOfFameEntry,
   checkRetirementEligibility,
   evaluateCareerLegacy,
@@ -36,7 +44,9 @@ import {
 import {
   applySpecialCampProgram,
   calculateOvr,
+  canSwitchToPosition,
   createInitialStats,
+  enforceBiomechanicalCaps,
   evaluatePlayerBadges,
   getGrowthDnaInfo,
   getPlaystyleInfo,
@@ -50,6 +60,7 @@ import {
   CareerState,
   ContractType,
   HallOfFameEntry,
+  LiveTacticId,
   OffseasonOption,
   PlayerStats,
   Position,
@@ -97,6 +108,14 @@ interface CareerStoreState {
   triggerMidSeasonCrossroads: () => void;
 
   playSeason: () => void;
+  advancePlayoffBracketRound: () => void;
+  skipPlayoffsToEnd: () => void;
+  startFinalsLiveBroadcast: () => void;
+  setLiveGameTactic: (tactic: LiveTacticId) => void;
+  playNextLiveQuarter: () => void;
+  skipLiveGame: () => void;
+  closeLiveGameAndReturn: () => void;
+
   resolveEventChoice: (choice: CareerEventChoice) => void;
   selectOffseasonOption: (option: OffseasonOption) => void;
 
@@ -241,6 +260,13 @@ export const useCareerStore = create<CareerStoreState>()(
           isOutOfLeagueWarning: false,
           agentAdviceShown: false,
           midSeasonEventTriggeredThisYear: false,
+          seenEventIds: [],
+          recentEventCategories: [],
+          pendingChainEvent: null,
+          seasonPhase: 'REGULAR_SEASON',
+          currentStandings: [],
+          playoffBracket: null,
+          liveGame: null,
           rivals: [],
           teamRatingsMap: initialRatingsMap,
           badges: evaluatePlayerBadges(
@@ -332,11 +358,33 @@ export const useCareerStore = create<CareerStoreState>()(
       switchPrimaryPosition: (newPos) => {
         const { career } = get();
         if (!career || career.primaryPos === newPos) return;
-        const newOvr = calculateOvr(career.stats, newPos);
+
+        const switchCheck = canSwitchToPosition(
+          career.primaryPos,
+          newPos,
+          career.secondaryPos,
+          career.heightCm
+        );
+        if (!switchCheck.allowed) {
+          get().showToast(
+            '포지션 전향 불가!',
+            switchCheck.reason || '인접 포지션 또는 해금된 부포지션으로만 전향할 수 있어요.',
+            'amber'
+          );
+          return;
+        }
+
+        const cappedStats = enforceBiomechanicalCaps(
+          career.stats,
+          career.heightCm,
+          newPos
+        );
+        const newOvr = calculateOvr(cappedStats, newPos, career.heightCm);
         const newSecondary =
           career.secondaryPos === newPos ? career.primaryPos : career.secondaryPos;
         const { role } = calculateRoleAndMpg({
           ...career,
+          stats: cappedStats,
           primaryPos: newPos,
           ovr: newOvr,
           secondaryPos: newSecondary,
@@ -345,6 +393,7 @@ export const useCareerStore = create<CareerStoreState>()(
         set({
           career: {
             ...career,
+            stats: cappedStats,
             primaryPos: newPos,
             secondaryPos: newSecondary,
             ovr: newOvr,
@@ -366,7 +415,7 @@ export const useCareerStore = create<CareerStoreState>()(
           toast: {
             id: `TOAST_${Date.now()}`,
             title: `주포지션을 ${newPos}(으)로 전향했어요!`,
-            description: `새로운 포지션 가중치가 적용되어 종합 OVR이 ${newOvr}(으)로 조정되었어요.`,
+            description: `새로운 포지션 가중치 및 신장 밸런스가 적용되어 종합 OVR이 ${newOvr}(으)로 조정되었어요.`,
             tone: 'orange',
           },
         });
@@ -771,6 +820,8 @@ export const useCareerStore = create<CareerStoreState>()(
           }
         }
 
+        const initialBracket = createPlayoffBracket(career, sim.standings);
+
         const updatedCareerBase: CareerState = {
           ...career,
           age: nextAge,
@@ -802,6 +853,13 @@ export const useCareerStore = create<CareerStoreState>()(
           militaryServiceSeasonsLeft: nextMilitaryLeft,
           previousTeamBeforeMilitary: nextPrevTeam,
           midSeasonEventTriggeredThisYear: false,
+          currentStandings: sim.standings,
+          playoffBracket: initialBracket,
+          liveGame: null,
+          seasonPhase:
+            !initialBracket.playerEliminated && initialBracket.rounds.length > 0
+              ? 'POSTSEASON_BRACKET'
+              : 'OFFSEASON',
           rivals: sim.updatedRivals,
           teamRatingsMap: nextRatingsMap,
           badges: sim.nextBadges,
@@ -850,6 +908,23 @@ export const useCareerStore = create<CareerStoreState>()(
         }
 
         const rolledEvent = rollSeasonEvent(updatedCareerBase);
+        const nextSeenIds = [...(career.seenEventIds || [])];
+        const nextRecentCats = [...(career.recentEventCategories || [])];
+        let nextPendingChain = career.pendingChainEvent || null;
+
+        if (rolledEvent) {
+          if (
+            career.pendingChainEvent &&
+            rolledEvent.id === career.pendingChainEvent.id
+          ) {
+            nextPendingChain = null;
+          }
+          if (!nextSeenIds.includes(rolledEvent.id)) {
+            nextSeenIds.push(rolledEvent.id);
+          }
+          nextRecentCats.push(rolledEvent.category);
+        }
+
         const offseasonOptions = generateOffseasonOptions(updatedCareerBase);
         const { isOutOfLeague } = checkRetirementEligibility(updatedCareerBase);
         const hasNoActiveOffers =
@@ -859,12 +934,265 @@ export const useCareerStore = create<CareerStoreState>()(
         set({
           career: {
             ...updatedCareerBase,
+            seenEventIds: nextSeenIds,
+            recentEventCategories: nextRecentCats.slice(-6),
+            pendingChainEvent: nextPendingChain,
             agentAdviceShown:
               updatedCareerBase.agentAdviceShown ||
               rolledEvent?.id === 'EVT_AGENT_RETIREMENT_ADVICE',
             isOutOfLeagueWarning: isOutOfLeague || hasNoActiveOffers,
             offseasonOptions,
             pendingEvent: rolledEvent,
+          },
+        });
+      },
+
+      advancePlayoffBracketRound: () => {
+        const { career } = get();
+        if (!career || !career.playoffBracket) return;
+
+        const standings = career.currentStandings || [];
+        const updatedBracket = advancePlayoffRound(
+          career.playoffBracket,
+          career,
+          standings
+        );
+
+        // 만약 결승 라운드에 플레이어가 진출했고 아직 결승 승자가 미확정이면 실시간 파이널 중계 진입 가능
+        const logs = [...career.seasonLogs];
+        if (logs.length > 0) {
+          const lastIdx = logs.length - 1;
+          const prevLog = logs[lastIdx];
+          const wonChamp = updatedBracket.championTeamId === prevLog.teamId;
+          logs[lastIdx] = {
+            ...prevLog,
+            playoffResult: updatedBracket.playoffResultLabel,
+            wonChampionship: wonChamp || prevLog.wonChampionship,
+          };
+        }
+
+        set({
+          career: {
+            ...career,
+            playoffBracket: updatedBracket,
+            seasonLogs: logs,
+            seasonPhase: updatedBracket.championTeamId
+              ? 'OFFSEASON'
+              : 'POSTSEASON_BRACKET',
+          },
+        });
+      },
+
+      skipPlayoffsToEnd: () => {
+        const { career } = get();
+        if (!career || !career.playoffBracket) return;
+
+        const standings = career.currentStandings || [];
+        const finishedBracket = skipEntirePlayoffs(
+          career.playoffBracket,
+          career,
+          standings
+        );
+
+        const logs = [...career.seasonLogs];
+        let nextTotals = { ...career.totals };
+        if (logs.length > 0) {
+          const lastIdx = logs.length - 1;
+          const prevLog = logs[lastIdx];
+          const wonChamp = finishedBracket.championTeamId === prevLog.teamId;
+          const wasChampBefore = prevLog.wonChampionship;
+
+          if (wonChamp && !wasChampBefore) {
+            nextTotals.championships += 1;
+            if (prevLog.league === 'NBA') nextTotals.nbaChampionships += 1;
+          } else if (!wonChamp && wasChampBefore) {
+            nextTotals.championships = Math.max(0, nextTotals.championships - 1);
+            if (prevLog.league === 'NBA') {
+              nextTotals.nbaChampionships = Math.max(
+                0,
+                nextTotals.nbaChampionships - 1
+              );
+            }
+          }
+
+          logs[lastIdx] = {
+            ...prevLog,
+            playoffResult: finishedBracket.playoffResultLabel,
+            wonChampionship: wonChamp,
+          };
+        }
+
+        set({
+          career: {
+            ...career,
+            playoffBracket: finishedBracket,
+            seasonLogs: logs,
+            totals: nextTotals,
+            seasonPhase: 'OFFSEASON',
+          },
+          toast: {
+            id: `TOAST_${Date.now()}`,
+            title: `포스트시즌 종료: ${finishedBracket.playoffResultLabel}`,
+            description: '비시즌 진로 및 계약 선택을 진행해 주세요.',
+            tone: finishedBracket.playoffResultLabel === '리그 우승' ? 'amber' : 'slate',
+          },
+        });
+      },
+
+      startFinalsLiveBroadcast: () => {
+        const { career } = get();
+        if (!career || !career.playoffBracket) return;
+
+        const bracket = career.playoffBracket;
+        const currentSeriesList = bracket.rounds[bracket.currentRound - 1] || [];
+        const playerSeries =
+          currentSeriesList.find((s) => s.involvesPlayer) || currentSeriesList[0];
+
+        const oppTeam: TeamInfo = playerSeries
+          ? playerSeries.higherSeed.team.id === career.team.id
+            ? playerSeries.lowerSeed.team
+            : playerSeries.higherSeed.team
+          : career.team;
+
+        const liveGame = createLiveFinalGame(career, oppTeam, 'LEAGUE_FINALS');
+        set({
+          career: {
+            ...career,
+            liveGame,
+            seasonPhase: 'LIVE_FINAL_BROADCAST',
+          },
+        });
+      },
+
+      setLiveGameTactic: (tactic) => {
+        const { career } = get();
+        if (!career || !career.liveGame) return;
+        set({
+          career: {
+            ...career,
+            liveGame: {
+              ...career.liveGame,
+              currentTactic: tactic,
+            },
+          },
+        });
+      },
+
+      playNextLiveQuarter: () => {
+        const { career } = get();
+        if (!career || !career.liveGame) return;
+
+        const nextLive = simulateLiveQuarter(
+          career.liveGame,
+          career,
+          career.liveGame.currentTactic
+        );
+
+        let nextCareer: CareerState = {
+          ...career,
+          liveGame: nextLive,
+        };
+
+        if (nextLive.isFinished && nextLive.finalOutcome) {
+          const outcome = nextLive.finalOutcome;
+          if (nextLive.gameType === 'ASIAN_GAMES_FINAL') {
+            if (outcome.grantedMilitaryExemption && !career.militaryExempt) {
+              nextCareer = {
+                ...nextCareer,
+                militaryExempt: true,
+                draftStock: Math.min(100, career.draftStock + 10),
+                milestones: [
+                  ...career.milestones,
+                  {
+                    id: `MS_AG_GOLD_${Date.now()}`,
+                    year: career.seasonYear,
+                    age: career.age,
+                    title: '🏅 아시안게임 결승전 승리 & 금메달 병역특례 획득!',
+                    description: outcome.headline,
+                    type: 'AWARD',
+                    teamName: '대한민국 국가대표팀',
+                  },
+                ],
+              };
+            }
+          } else {
+            // LEAGUE_FINALS 결과 반영
+            const logs = [...career.seasonLogs];
+            const nextTotals = { ...career.totals };
+            if (logs.length > 0) {
+              const lastIdx = logs.length - 1;
+              const prevLog = logs[lastIdx];
+              const wasChampBefore = prevLog.wonChampionship;
+              const wasFmvpBefore = prevLog.wonFinalsMvp;
+
+              if (outcome.won && !wasChampBefore) {
+                nextTotals.championships += 1;
+                if (prevLog.league === 'NBA') nextTotals.nbaChampionships += 1;
+              } else if (!outcome.won && wasChampBefore) {
+                nextTotals.championships = Math.max(0, nextTotals.championships - 1);
+                if (prevLog.league === 'NBA') {
+                  nextTotals.nbaChampionships = Math.max(
+                    0,
+                    nextTotals.nbaChampionships - 1
+                  );
+                }
+              }
+
+              if (outcome.wonFinalsMvp && !wasFmvpBefore) {
+                nextTotals.finalsMvps = (nextTotals.finalsMvps || 0) + 1;
+              }
+
+              logs[lastIdx] = {
+                ...prevLog,
+                wonChampionship: outcome.won,
+                wonFinalsMvp: outcome.wonFinalsMvp,
+                playoffResult: outcome.won ? '리그 우승' : '파이널 준우승',
+                narrativeLog: [outcome.headline, ...prevLog.narrativeLog],
+              };
+            }
+
+            const updatedBracket = career.playoffBracket
+              ? {
+                  ...career.playoffBracket,
+                  championTeamId: outcome.won
+                    ? career.team.id
+                    : nextLive.opponentTeam.id,
+                  playerEliminated: !outcome.won,
+                  playoffResultLabel: outcome.won ? '리그 우승' : '파이널 준우승',
+                }
+              : null;
+
+            nextCareer = {
+              ...nextCareer,
+              seasonLogs: logs,
+              totals: nextTotals,
+              playoffBracket: updatedBracket,
+            };
+          }
+        }
+
+        set({ career: nextCareer });
+      },
+
+      skipLiveGame: () => {
+        const { career } = get();
+        if (!career || !career.liveGame) return;
+
+        let guard = 0;
+        while (get().career?.liveGame && !get().career?.liveGame?.isFinished && guard < 8) {
+          get().playNextLiveQuarter();
+          guard++;
+        }
+      },
+
+      closeLiveGameAndReturn: () => {
+        const { career } = get();
+        if (!career) return;
+        set({
+          career: {
+            ...career,
+            liveGame: null,
+            seasonPhase: 'OFFSEASON',
           },
         });
       },
@@ -887,19 +1215,24 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
-        const nextStats: PlayerStats = { ...career.stats };
+        const rawStats: PlayerStats = { ...career.stats };
         if (choice.statChanges) {
           for (const k of Object.keys(
             choice.statChanges
           ) as (keyof PlayerStats)[]) {
             const diff = choice.statChanges[k] || 0;
-            nextStats[k] = clampStat(nextStats[k] + diff);
+            rawStats[k] = clampStat(rawStats[k] + diff);
           }
         }
 
         const nextPrimary = choice.switchPrimaryPos || career.primaryPos;
         const nextSecondary = choice.unlockSecondaryPos || career.secondaryPos;
-        const nextOvr = calculateOvr(nextStats, nextPrimary);
+        const nextStats = enforceBiomechanicalCaps(
+          rawStats,
+          career.heightCm,
+          nextPrimary
+        );
+        const nextOvr = calculateOvr(nextStats, nextPrimary, career.heightCm);
         const nextPotential = Math.min(
           98,
           career.potential + (choice.potentialDelta || 0)
@@ -994,6 +1327,30 @@ export const useCareerStore = create<CareerStoreState>()(
           }
         }
 
+        // 아시안게임 결승전 실시간 라이브 중계 시작
+        let nextLiveGame = career.liveGame || null;
+        let nextSeasonPhase = career.seasonPhase || 'OFFSEASON';
+        if (choice.startAsianGamesFinal) {
+          const agOpponent: TeamInfo = {
+            id: 'AG_FINAL_OPP',
+            name: '아시아 최강 라이벌 대표팀',
+            shortName: '결승 상대국',
+            city: '개최지 아레나',
+            league: 'OVERSEAS',
+            rating: 72,
+            primaryColor: '#DC2626',
+            secondaryColor: '#FACC15',
+            prestigeDesc: '아시안게임 금메달을 놓고 맞붙는 결승전 숙적이에요.',
+            direction: 'CONTENDER',
+          };
+          nextLiveGame = createLiveFinalGame(
+            career,
+            agOpponent,
+            'ASIAN_GAMES_FINAL'
+          );
+          nextSeasonPhase = 'LIVE_FINAL_BROADCAST';
+        }
+
         const updatedBase: CareerState = {
           ...career,
           primaryPos: nextPrimary,
@@ -1018,6 +1375,9 @@ export const useCareerStore = create<CareerStoreState>()(
           militaryExempt: nextMilitaryExempt,
           militaryServiceSeasonsLeft: nextMilitaryServiceLeft,
           previousTeamBeforeMilitary: nextPrevTeam,
+          pendingChainEvent: choice.nextChainEvent || career.pendingChainEvent || null,
+          liveGame: nextLiveGame,
+          seasonPhase: nextSeasonPhase,
           badges: evaluatePlayerBadges(
             nextStats,
             nextSecondary,
@@ -1040,7 +1400,9 @@ export const useCareerStore = create<CareerStoreState>()(
           },
           toast: {
             id: `TOAST_${Date.now()}`,
-            title: choice.enlistSangmu
+            title: choice.startAsianGamesFinal
+              ? '📡 아시안게임 결승전 실시간 라이브 중계 시작!'
+              : choice.enlistSangmu
               ? '🫡 국군체육부대(상무)에 입대했어요!'
               : choice.executeTradeToContender
               ? `✈️ ${nextTeam.name}(으)로 트레이드 이적 완료!`
@@ -1252,6 +1614,9 @@ export const useCareerStore = create<CareerStoreState>()(
             isOutOfLeagueWarning: false,
             offseasonLocked: false,
             offseasonOptions: [],
+            seasonPhase: 'REGULAR_SEASON',
+            playoffBracket: null,
+            liveGame: null,
             milestones: nextMilestones,
           },
           toast: {
@@ -1546,6 +1911,9 @@ export const useCareerStore = create<CareerStoreState>()(
             draftResult: null,
             offseasonLocked: false,
             offseasonOptions: [],
+            seasonPhase: 'REGULAR_SEASON',
+            playoffBracket: null,
+            liveGame: null,
             milestones: [
               ...career.milestones,
               {

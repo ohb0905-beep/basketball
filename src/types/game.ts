@@ -110,6 +110,12 @@ export type ViewState =
   | 'DRAFT_LIVE'
   | 'RETIREMENT';
 
+export type SeasonPhase =
+  | 'REGULAR_SEASON'
+  | 'POSTSEASON_BRACKET'
+  | 'LIVE_FINAL_BROADCAST'
+  | 'OFFSEASON';
+
 export type TrainingFocus =
   | 'INSIDE_SCORING'
   | 'OUTSIDE_SHOOTING'
@@ -170,6 +176,115 @@ export interface TeamInfo {
 
 export type AllLeagueTier = 1 | 2 | 3 | null;
 
+export interface StandingEntry {
+  rank: number;
+  team: TeamInfo;
+  wins: number;
+  losses: number;
+  winPct: number;
+  gb: number;
+  isPlayerTeam: boolean;
+  qualifiedPlayoffs: boolean;
+}
+
+export interface PlayoffSeriesMatchup {
+  id: string;
+  roundNumber: number;
+  roundLabel: string;
+  bestOf: number;
+  winsNeeded: number;
+  higherSeed: StandingEntry;
+  lowerSeed: StandingEntry;
+  higherSeedWins: number;
+  lowerSeedWins: number;
+  winnerId: string | null;
+  involvesPlayer: boolean;
+  summaryLog: string[];
+}
+
+export interface PlayoffBracketState {
+  league: LeagueId;
+  year: number;
+  totalRounds: number;
+  currentRound: number;
+  rounds: PlayoffSeriesMatchup[][];
+  playerEliminated: boolean;
+  playerReachedFinals: boolean;
+  championTeamId: string | null;
+  playoffResultLabel: string;
+}
+
+export type LiveTacticId =
+  | 'ACE_HERO'          // 에이스 모드: 공격 주도권 극대화 (득점↑, 체력 소모↑)
+  | 'LOCKDOWN_DEFENSE'  // 질식 수비: 상대 에이스 봉쇄 (수비·스틸↑, 파울 위험↑)
+  | 'UNSELFISH_PASS'    // 이타적 조율: 팀원 찬스 창출 (어시스트·팀 야투율↑)
+  | 'PACE_CONSERVE';    // 체력 안배: 페이스 조절 (체력 회복, 4쿼터 클러치 대비)
+
+export interface LiveQuarterLog {
+  quarter: number; // 1, 2, 3, 4, 5(OT)
+  label: string;
+  teamPts: number;
+  oppPts: number;
+  playerPts: number;
+  playerReb: number;
+  playerAst: number;
+  playByPlay: string[];
+}
+
+export interface LiveGameState {
+  gameType: 'LEAGUE_FINALS' | 'ASIAN_GAMES_FINAL';
+  title: string;
+  subtitle: string;
+  playerTeam: TeamInfo;
+  opponentTeam: TeamInfo;
+  quarter: number; // 현재 진행 완료된 쿼터 (0 = 시작 전, 1~4, 5=OT)
+  isFinished: boolean;
+  teamScore: number;
+  oppScore: number;
+  currentTactic: LiveTacticId;
+  momentum: 'HOT' | 'NEUTRAL' | 'COLD';
+  playerStats: {
+    pts: number;
+    reb: number;
+    ast: number;
+    stl: number;
+    blk: number;
+    fgm: number;
+    fga: number;
+    tpm: number;
+    tpa: number;
+    fouls: number;
+    stamina: number;
+  };
+  quarterLogs: LiveQuarterLog[];
+  finalOutcome?: {
+    won: boolean;
+    wonFinalsMvp: boolean;
+    grantedMilitaryExemption: boolean;
+    headline: string;
+  };
+}
+
+export interface LeagueAwardSummary {
+  league: LeagueId;
+  leagueName: string;
+  leagueShortName: string;
+  seasons: number;
+  gp: number;
+  points: number;
+  championships: number;
+  mvps: number;
+  finalsMvps: number;
+  dpoys: number;
+  sixthManAwards: number;
+  mips: number;
+  roys: number;
+  allStars: number;
+  allLeague1st: number;
+  allLeague2nd: number;
+  allLeague3rd: number;
+}
+
 export interface SeasonBoxScore {
   seasonNumber: number;
   year: number;
@@ -194,6 +309,9 @@ export interface SeasonBoxScore {
   tpPct: number;
   wins: number;
   losses: number;
+  teamRank?: number;
+  totalLeagueTeams?: number;
+  playoffResult?: string;
   salaryEarned: number; // 해당 시즌 수령 연봉 (단위: USD)
   wonChampionship: boolean;
   wonMvp: boolean;
@@ -238,10 +356,25 @@ export interface CareerMilestone {
   teamName: string;
 }
 
+export type EncounterArchetypeCategory =
+  | 'TACTICAL_CLASH'
+  | 'LOCKER_ROOM'
+  | 'MEDIA_SPOTLIGHT'
+  | 'RIVAL_SHOWDOWN'
+  | 'SLUMP_MECHANICS'
+  | 'LOAD_MANAGEMENT'
+  | 'OFF_COURT_BRAND'
+  | 'FRONT_OFFICE'
+  | 'ROLE_ADAPTATION'
+  | 'SCOUTING_SHOWCASE'
+  | 'NATIONAL_PRIDE'
+  | 'VETERAN_LEGACY';
+
 export interface CareerEventChoice {
   label: string;
   description: string;
   effectSummary: string;
+  requiredTrait?: PlayerTraitId;
   statChanges?: Partial<PlayerStats>;
   trustDelta?: number;
   draftStockDelta?: number;
@@ -250,10 +383,12 @@ export interface CareerEventChoice {
   switchPrimaryPos?: Position;
   triggerRetirement?: RetirementReason;
   grantMilitaryExemption?: boolean;
+  startAsianGamesFinal?: boolean;
   enlistSangmu?: boolean;
   startFarewellTour?: boolean;
   executeTradeToContender?: boolean;
   markAgentAdviceDismissed?: boolean;
+  nextChainEvent?: CareerEvent;
 }
 
 export interface CareerEvent {
@@ -269,7 +404,8 @@ export interface CareerEvent {
     | 'FAREWELL'
     | 'CLUTCH'
     | 'RETIREMENT_ADVICE'
-    | 'MID_SEASON_CROSSROADS';
+    | 'MID_SEASON_CROSSROADS'
+    | EncounterArchetypeCategory;
   choices: CareerEventChoice[];
 }
 
@@ -311,6 +447,7 @@ export type LegacyTierId =
   | 'GOAT'
   | 'FIRST_BALLOT_HOF'
   | 'NBA_ALL_STAR'
+  | 'NBA_VETERAN'
   | 'ASIA_KBL_LEGEND'
   | 'PRO_VETERAN'
   | 'COURT_CHALLENGER';
@@ -433,6 +570,13 @@ export interface CareerState {
   isOutOfLeagueWarning: boolean;
   agentAdviceShown?: boolean;
   midSeasonEventTriggeredThisYear?: boolean;
+  seenEventIds?: string[];
+  recentEventCategories?: string[];
+  pendingChainEvent?: CareerEvent | null;
+  seasonPhase?: SeasonPhase;
+  currentStandings?: StandingEntry[];
+  playoffBracket?: PlayoffBracketState | null;
+  liveGame?: LiveGameState | null;
   rivals?: RivalPlayer[];
   teamRatingsMap: Record<string, number>; // 동적 구단 전력 저장소
   badges: string[];

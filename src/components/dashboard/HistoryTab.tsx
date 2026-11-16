@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { Award, Flame, History, Swords, Trophy } from 'lucide-react';
+import { Award, Flame, History, Medal, Swords, Trophy } from 'lucide-react';
+import { getAwardsByLeague } from '../../engine/seasonSimulator';
 import { useCareerStore } from '../../store/useCareerStore';
 
 function formatMoney(amountUsd: number): string {
@@ -25,6 +26,7 @@ export function HistoryTab() {
   const careerApg = (career.totals.assists / gp).toFixed(1);
   const allLeagueCount = career.totals.allLeagueSelections || 0;
   const rivals = career.rivals || [];
+  const leagueAwards = getAwardsByLeague(career.seasonLogs);
 
   return (
     <div className="space-y-6">
@@ -73,12 +75,12 @@ export function HistoryTab() {
             </div>
 
             <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-              <span className="block text-xs text-slate-500">우승 / MVP / 올스타</span>
+              <span className="block text-xs text-slate-500">NBA 우승 / MVP / 올스타</span>
               <span className="text-xl font-black text-amber-600 tabular-nums">
-                {career.totals.championships} / {career.totals.mvps} / {career.totals.allStars}
+                {career.totals.nbaChampionships} / {career.totals.nbaMvps} / {career.totals.nbaAllStars}
               </span>
               <span className="block text-[11px] text-slate-400 tabular-nums">
-                파이널MVP {career.totals.finalsMvps || 0}회
+                전체 리그 합산 {career.totals.championships}우승 · {career.totals.mvps}MVP
               </span>
             </div>
           </div>
@@ -131,6 +133,81 @@ export function HistoryTab() {
           </div>
         </section>
       </div>
+
+      {/* 1.5 리그별 트로피 캐비닛 (League-Separated Trophy Cabinet) */}
+      <section
+        data-testid="league-trophy-cabinet"
+        className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+              <Medal className="w-5 h-5 text-amber-500" />
+              리그별 분리 트로피 캐비닛 (Trophy Cabinet by League)
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              고교·대학 아마추어 무대와 KBL·해외·NBA 프로 리그의 우승 및 수상 내역을 리그 위상에 맞게 엄격히 분리해 기록해요.
+            </p>
+          </div>
+        </div>
+
+        {leagueAwards.length === 0 ? (
+          <p className="text-xs text-slate-500 py-4 text-center bg-slate-50 rounded-xl border border-slate-200">
+            아직 완료한 시즌이나 획득한 리그 트로피가 없어요.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {leagueAwards.map((la) => (
+              <div
+                key={la.league}
+                className={`p-4 rounded-xl border space-y-2.5 ${
+                  la.league === 'NBA'
+                    ? 'bg-amber-50/40 border-amber-300'
+                    : la.league === 'KBL' || la.league === 'OVERSEAS'
+                    ? 'bg-indigo-50/30 border-indigo-200'
+                    : 'bg-slate-50 border-slate-200'
+                }`}
+              >
+                <div className="flex items-center justify-between border-b border-slate-200/70 pb-2">
+                  <span className="text-sm font-black text-slate-900">
+                    {la.leagueName}
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
+                    {la.seasons}시즌 · {la.gp}G · 통산 {la.points.toLocaleString()}점
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-1.5 text-center text-xs tabular-nums">
+                  <div className="p-2 rounded-lg bg-white border border-slate-200/80">
+                    <span className="block text-[10px] text-slate-400">💍 우승</span>
+                    <span className="font-black text-amber-600">{la.championships}회</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-slate-200/80">
+                    <span className="block text-[10px] text-slate-400">🏆 MVP</span>
+                    <span className="font-black text-orange-600">{la.mvps}회</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-slate-200/80">
+                    <span className="block text-[10px] text-slate-400">👑 FMVP</span>
+                    <span className="font-bold text-slate-800">{la.finalsMvps}회</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-white border border-slate-200/80">
+                    <span className="block text-[10px] text-slate-400">⭐ 올스타</span>
+                    <span className="font-bold text-slate-800">{la.allStars}회</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600 tabular-nums pt-0.5">
+                  <span>🛡️ DPOY {la.dpoys}회</span>
+                  <span>⚡ 식스맨 {la.sixthManAwards}회</span>
+                  <span>📈 MIP {la.mips}회</span>
+                  <span>🌱 신인왕 {la.roys}회</span>
+                  <span>🏅 올-리그 {la.allLeague1st + la.allLeague2nd + la.allLeague3rd}회</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* 2. 드래프트 동기 & 리그 라이벌 매치업 보드 */}
       <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
@@ -230,6 +307,7 @@ export function HistoryTab() {
                 <tr className="border-b border-slate-200 text-slate-500 font-bold">
                   <th className="py-3 px-2">연도(나이)</th>
                   <th className="py-3 px-2">리그 · 소속팀</th>
+                  <th className="py-3 px-2">팀 순위 · PO 결과</th>
                   <th className="py-3 px-2">역할</th>
                   <th className="py-3 px-2 text-right">OVR</th>
                   <th className="py-3 px-2 text-right">GP</th>
@@ -239,7 +317,7 @@ export function HistoryTab() {
                   <th className="py-3 px-2 text-right">APG</th>
                   <th className="py-3 px-2 text-right">FG%</th>
                   <th className="py-3 px-2 text-right">3P%</th>
-                  <th className="py-3 px-2">수상/비고</th>
+                  <th className="py-3 px-2">리그별 수상/비고</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -250,6 +328,11 @@ export function HistoryTab() {
                     </td>
                     <td className="py-3 px-2 font-bold text-slate-900 whitespace-nowrap">
                       {log.leagueName} · {log.teamShortName}
+                    </td>
+                    <td className="py-3 px-2 text-indigo-700 font-semibold whitespace-nowrap">
+                      {log.teamRank
+                        ? `정규 ${log.teamRank}위(${log.wins}승${log.losses}패) · ${log.playoffResult || '-'}`
+                        : `${log.wins}승 ${log.losses}패`}
                     </td>
                     <td className="py-3 px-2 text-slate-600 whitespace-nowrap">
                       {log.role}
@@ -278,15 +361,15 @@ export function HistoryTab() {
                     </td>
                     <td className="py-3 px-2 text-amber-600 font-semibold whitespace-nowrap">
                       {[
-                        log.wonChampionship ? '💍우승' : null,
-                        log.wonFinalsMvp ? '👑파이널MVP' : null,
-                        log.wonMvp ? '🏆MVP' : null,
-                        log.wonDpoy ? '🛡️DPOY' : null,
-                        log.wonSixthMan ? '⚡식스맨' : null,
-                        log.wonMip ? '📈MIP' : null,
-                        log.wonRookieOfYear ? '🌱신인왕' : null,
-                        log.allStarSelected ? '⭐올스타' : null,
-                        log.allLeagueTeam ? `🏅올리그(${log.allLeagueTeam})` : null,
+                        log.wonChampionship ? `[${log.leagueName}] 💍우승` : null,
+                        log.wonFinalsMvp ? `[${log.leagueName}] 👑파이널MVP` : null,
+                        log.wonMvp ? `[${log.leagueName}] 🏆MVP` : null,
+                        log.wonDpoy ? `[${log.leagueName}] 🛡️DPOY` : null,
+                        log.wonSixthMan ? `[${log.leagueName}] ⚡식스맨` : null,
+                        log.wonMip ? `[${log.leagueName}] 📈MIP` : null,
+                        log.wonRookieOfYear ? `[${log.leagueName}] 🌱신인왕` : null,
+                        log.allStarSelected ? `[${log.leagueName}] ⭐올스타` : null,
+                        log.allLeagueTeam ? `[${log.leagueName}] 🏅올리그(${log.allLeagueTeam})` : null,
                         log.injuredGamesMissed > 0 ? `🩹결장${log.injuredGamesMissed}G` : null,
                       ]
                         .filter(Boolean)

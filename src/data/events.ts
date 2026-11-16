@@ -263,30 +263,32 @@ export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
   ],
 };
 
+import { rollCombinatorialEncounter } from '../engine/encounterEngine';
+
 export const ASIAN_GAMES_MILITARY_EVENT: CareerEvent = {
   id: 'EVT_ASIAN_GAMES_GOLD',
   title: '🇰🇷 아시안게임 남자농구 국가대표 차출 & 결승전',
-  subtitle: '병역특례(예술·체육요원) 혜택이 걸린 운명의 한판',
+  subtitle: '병역특례(예술·체육요원) 혜택이 걸린 운명의 결승전',
   description:
-    '태극마크를 달고 출전한 아시안게임 결승전! 숙적과의 결승 4쿼터 막판, 대표팀의 주축 선수로서 금메달과 병역특례 혜택을 동시에 거머쥘 절호의 기회가 찾아왔어요.',
+    '태극마크를 달고 출전한 아시안게임 결승전! 숙적과의 결승 무대에서 대표팀의 에이스로서 금메달과 병역특례 혜택을 동시에 거머쥘 절호의 기회가 찾아왔어요.',
   category: 'MILITARY',
   choices: [
     {
-      label: '모든 에너지를 쏟아부어 결승전 클러치 지배!',
-      description: '공수 양면에서 코트를 지배하며 대한민국의 금메달을 이끌어요!',
+      label: '🏀 [실시간 결승 중계] 태극마크를 달고 결승전 코트에 직접 나선다! (1Q~4Q 전술 지휘)',
+      description: '실시간 쿼터별 라이브 중계를 통해 직접 전술을 선택하며 금메달과 병역특례에 도전해요!',
+      effectSummary: '📡 아시안게임 결승전 라이브 중계 돌입 (승리 시 금메달 & 병역특례 + 능력치 상승)',
+      statChanges: { ins: 1, out: 1, ply: 1 },
+      trustDelta: 6,
+      draftStockDelta: 6,
+      startAsianGamesFinal: true,
+    },
+    {
+      label: '⚡ [즉시 결과 진행] 모든 에너지를 쏟아부어 결승전 클러치 지배!',
+      description: '공수 양면에서 코트를 지배하며 대한민국의 금메달을 즉시 이끌어요!',
       effectSummary: '🎖️ 아시안게임 금메달 & 병역특례 획득! · 전 능력치 +1 · 스카우트 주목도 +8',
       statChanges: { ins: 1, out: 1, ply: 1, def: 1, reb: 1, phy: 1 },
       trustDelta: 8,
       draftStockDelta: 8,
-      grantMilitaryExemption: true,
-    },
-    {
-      label: '팀원들을 살리는 헌신적인 수비와 리바운드 집중',
-      description: '궂은일을 도맡아 팀 승리의 일등공신이 되어 금메달을 목에 걸어요!',
-      effectSummary: '🎖️ 아시안게임 금메달 & 병역특례 획득! · DEF +2, REB +1',
-      statChanges: { def: 2, reb: 1 },
-      trustDelta: 10,
-      draftStockDelta: 6,
       grantMilitaryExemption: true,
     },
   ],
@@ -569,12 +571,16 @@ export function rollSeasonEvent(
     return ASIAN_GAMES_MILITARY_EVENT;
   }
 
-  // 4) 포지션별 전용 분기점 이벤트 (32% 확률)
-  if (rng() < 0.32) {
-    const pool = POSITION_EVENTS[career.primaryPos] || POSITION_EVENTS.PG;
-    const picked = pool[Math.floor(rng() * pool.length)];
-    return picked;
+  // 4) 예약된 연쇄(Chain) 이벤트가 있으면 즉시 발동
+  if (career.pendingChainEvent) {
+    return rollCombinatorialEncounter(career, rng);
+  }
+
+  // 5) 4축 조합형 랜덤 인카운터 엔진 (중복 0%, 최근 2시즌 카테고리 쿨다운, 48종 시나리오 풀)
+  if (rng() < 0.48) {
+    return rollCombinatorialEncounter(career, rng);
   }
 
   return null;
 }
+

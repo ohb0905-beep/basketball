@@ -5,17 +5,24 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   Briefcase,
+  ChevronDown,
+  ChevronUp,
+  FastForward,
+  ListOrdered,
   Lock,
   Newspaper,
   Play,
+  Radio,
   Sparkles,
   Star,
+  Swords,
   Trophy,
 } from 'lucide-react';
 import { LEAGUE_CONFIG } from '../../data/leagues';
 import { useCareerStore } from '../../store/useCareerStore';
 import { OffseasonOption } from '../../types/game';
 import { TeamEmblem } from '../common/TeamEmblem';
+import { LiveGameBroadcast } from './LiveGameBroadcast';
 
 function formatSalaryOffer(amountUsd?: number): string | null {
   if (!amountUsd || amountUsd <= 0) return null;
@@ -34,9 +41,13 @@ export function SeasonTab() {
   const selectOffseasonOption = useCareerStore((s) => s.selectOffseasonOption);
   const triggerMidSeasonCrossroads = useCareerStore((s) => s.triggerMidSeasonCrossroads);
   const requestTrade = useCareerStore((s) => s.requestTrade);
+  const advancePlayoffBracketRound = useCareerStore((s) => s.advancePlayoffBracketRound);
+  const skipPlayoffsToEnd = useCareerStore((s) => s.skipPlayoffsToEnd);
+  const startFinalsLiveBroadcast = useCareerStore((s) => s.startFinalsLiveBroadcast);
 
   const [isSimulating, setIsSimulating] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [showFullStandings, setShowFullStandings] = useState(false);
   const [statusMessage, setStatusMessage] = useState(
     '시즌 개막 준비가 완료되었어요. 버튼을 눌러 이번 시즌을 진행해 보세요!'
   );
@@ -44,6 +55,7 @@ export function SeasonTab() {
   const midSeasonDone = career?.midSeasonEventTriggeredThisYear ?? false;
   const hasPendingEvent = career?.pendingEvent !== null;
   const offseasonLocked = career?.offseasonLocked ?? false;
+  const seasonPhase = career?.seasonPhase ?? 'REGULAR_SEASON';
 
   // 전반기 50% 반환점 모달 선택 완료 후 자동으로 후반기(50% -> 100%) 재개
   useEffect(() => {
@@ -117,8 +129,21 @@ export function SeasonTab() {
     setIsSimulating(true);
   };
 
+  const standings = career.currentStandings || [];
+  const displayedStandings = showFullStandings ? standings : standings.slice(0, 8);
+  const bracket = career.playoffBracket;
+  const championEntry =
+    bracket?.championTeamId
+      ? standings.find((s) => s.team.id === bracket.championTeamId)
+      : null;
+
   return (
     <div className="space-y-6">
+      {/* 0. 실시간 결승전 쿼터별 생중계 모드 */}
+      {seasonPhase === 'LIVE_FINAL_BROADCAST' && career.liveGame && (
+        <LiveGameBroadcast />
+      )}
+
       {/* 1. 실시간 시즌 진행 게이지 카드 */}
       <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -133,7 +158,11 @@ export function SeasonTab() {
               <span>수비 저항치 LDR {leagueInfo.ldr}</span>
             </div>
             <h2 className="text-lg font-extrabold text-slate-900">
-              {career.offseasonLocked
+              {seasonPhase === 'POSTSEASON_BRACKET'
+                ? '🔥 정규시즌 종료! 아래 플레이오프 토너먼트 대진표나 에이전트 데스크를 확인해 주세요.'
+                : seasonPhase === 'LIVE_FINAL_BROADCAST'
+                ? '📡 결승전 실시간 중계가 진행 중이에요! 쿼터 작전을 지시하거나 스킵할 수 있어요.'
+                : career.offseasonLocked
                 ? '시즌 결산이 완료되었어요! 아래 에이전트 데스크에서 다음 진로를 결정해 주세요.'
                 : statusMessage}
             </h2>
@@ -157,7 +186,7 @@ export function SeasonTab() {
         {/* 게이지 바 (0% ~ 100%) */}
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs text-slate-500 tabular-nums">
-            <span>시즌 진행도 (50% 반환점 이벤트 포함)</span>
+            <span>시즌 진행도 (50% 반환점 이벤트 · 정규시즌 순위 · PO 토너먼트)</span>
             <span className="font-bold text-slate-800">
               {career.offseasonLocked ? '100% (오프시즌)' : `${progress}%`}
             </span>
@@ -194,6 +223,134 @@ export function SeasonTab() {
           </div>
         )}
       </section>
+
+      {/* 1.5 플레이오프 토너먼트 래더 브래킷 */}
+      {bracket && bracket.rounds.length > 0 && (
+        <section
+          data-testid="playoff-bracket-section"
+          className="bg-white border-2 border-indigo-500 rounded-2xl p-6 shadow-xs space-y-5"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-600">
+                <Swords className="w-4 h-4" />
+                포스트시즌 토너먼트 대진표 ({leagueInfo.name} Playoff Bracket)
+              </div>
+              <h3 className="text-lg font-extrabold text-slate-900 mt-1">
+                {championEntry
+                  ? `🏆 최종 우승 구단: ${championEntry.team.name} (본인 결과: ${bracket.playoffResultLabel})`
+                  : bracket.playerReachedFinals
+                  ? '🔥 대망의 파이널 결승 진출! 실시간 쿼터별 생중계로 우승 반지에 도전하세요!'
+                  : `현재 ${bracket.currentRound}라운드 진행 중 · 본인 소속팀 상태: ${bracket.playoffResultLabel}`}
+              </h3>
+            </div>
+
+            {!bracket.championTeamId && (
+              <div className="flex flex-wrap items-center gap-2">
+                {!bracket.playerReachedFinals && (
+                  <button
+                    type="button"
+                    onClick={advancePlayoffBracketRound}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shadow-xs cursor-pointer transition-colors"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    🏀 다음 라운드 경기 진행
+                  </button>
+                )}
+
+                {bracket.playerReachedFinals && (
+                  <button
+                    type="button"
+                    onClick={startFinalsLiveBroadcast}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shadow-xs cursor-pointer transition-colors animate-pulse"
+                  >
+                    <Radio className="w-3.5 h-3.5" />
+                    📡 파이널 결승전 실시간 중계 입장
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={skipPlayoffsToEnd}
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer transition-colors"
+                >
+                  <FastForward className="w-3.5 h-3.5" />
+                  ⏩ 플레이오프 전체 스킵
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {bracket.rounds.map((seriesList, rIdx) => {
+              const rLabel =
+                seriesList[0]?.roundLabel || `${rIdx + 1}라운드`;
+              return (
+                <div
+                  key={rIdx}
+                  className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                    <span className="text-xs font-extrabold text-slate-800">
+                      {rLabel}
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-semibold">
+                      {seriesList.length}개 매치업
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {seriesList.map((m) => (
+                      <div
+                        key={m.id}
+                        className={`p-3 rounded-xl border text-xs space-y-1.5 ${
+                          m.involvesPlayer
+                            ? 'bg-orange-50/70 border-orange-400 ring-1 ring-orange-400'
+                            : 'bg-white border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`font-bold truncate ${
+                              m.winnerId === m.higherSeed.team.id
+                                ? 'text-slate-900 font-extrabold'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            #{m.higherSeed.rank} {m.higherSeed.team.name}
+                          </span>
+                          <span className="font-mono font-black text-slate-900">
+                            {m.higherSeedWins}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`font-bold truncate ${
+                              m.winnerId === m.lowerSeed.team.id
+                                ? 'text-slate-900 font-extrabold'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            #{m.lowerSeed.rank} {m.lowerSeed.team.name}
+                          </span>
+                          <span className="font-mono font-black text-slate-900">
+                            {m.lowerSeedWins}
+                          </span>
+                        </div>
+                        {m.summaryLog.length > 0 && (
+                          <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                            {m.summaryLog[m.summaryLog.length - 1]}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* 2. 오프시즌 에이전트 데스크 (시즌 종료 직후에만 활성화) */}
       {career.offseasonLocked && (
@@ -310,18 +467,110 @@ export function SeasonTab() {
         </section>
       )}
 
+      {/* 2.5 정규시즌 구단 순위표 (Standings) */}
+      {standings.length > 0 && (
+        <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <ListOrdered className="w-5 h-5 text-orange-600" />
+                {lastSeason ? `${lastSeason.year}시즌` : `${career.seasonYear}시즌`} {leagueInfo.name} 정규시즌 최종 순위표
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                소속팀 성적: 정규 {lastSeason?.teamRank || '-'}위 / 총 {standings.length}개 구단 ·{' '}
+                <strong className="text-indigo-600">{lastSeason?.playoffResult || '-'}</strong>
+              </p>
+            </div>
+            {standings.length > 8 && (
+              <button
+                type="button"
+                onClick={() => setShowFullStandings((v) => !v)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                {showFullStandings ? (
+                  <>
+                    <ChevronUp className="w-3.5 h-3.5" /> 상위 8개 구단만 보기
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-3.5 h-3.5" /> 전체 {standings.length}개 구단 순위 펼치기
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs tabular-nums">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500 font-bold">
+                  <th className="py-2.5 px-3">순위</th>
+                  <th className="py-2.5 px-3">구단명</th>
+                  <th className="py-2.5 px-3 text-right">전력</th>
+                  <th className="py-2.5 px-3 text-right">승</th>
+                  <th className="py-2.5 px-3 text-right">패</th>
+                  <th className="py-2.5 px-3 text-right">승률</th>
+                  <th className="py-2.5 px-3 text-right">게임차(GB)</th>
+                  <th className="py-2.5 px-3 text-right">포스트시즌</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {displayedStandings.map((row) => (
+                  <tr
+                    key={row.team.id}
+                    className={
+                      row.isPlayerTeam
+                        ? 'bg-orange-50/80 font-extrabold text-slate-900'
+                        : 'hover:bg-slate-50 text-slate-700'
+                    }
+                  >
+                    <td className="py-2.5 px-3 font-black">
+                      {row.rank}위
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span className="font-bold">{row.team.name}</span>
+                      {row.isPlayerTeam && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded bg-orange-600 text-white text-[10px] font-black">
+                          MY TEAM
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 text-right text-slate-500">{row.team.rating}</td>
+                    <td className="py-2.5 px-3 text-right font-bold">{row.wins}</td>
+                    <td className="py-2.5 px-3 text-right">{row.losses}</td>
+                    <td className="py-2.5 px-3 text-right font-mono">
+                      {row.winPct.toFixed(3)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right text-slate-500">
+                      {row.gb === 0 ? '-' : row.gb.toFixed(1)}
+                    </td>
+                    <td className="py-2.5 px-3 text-right">
+                      {row.qualifiedPlayoffs ? (
+                        <span className="text-indigo-600 font-bold">PO 진출</span>
+                      ) : (
+                        <span className="text-slate-400">탈락</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* 3. 직전 시즌 스포츠 뉴스 헤드라인 & 박스스코어 리포트 */}
       {lastSeason ? (
         <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
           {/* 스포츠 뉴스 헤드라인 배너 */}
           <div className="p-5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <div className="flex items-center justify-between text-xs text-slate-500">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
               <span className="font-bold text-orange-600 flex items-center gap-1.5">
                 <Newspaper className="w-4 h-4" />
                 스포츠 뉴스 톱 헤드라인
               </span>
-              <span className="tabular-nums">
-                {lastSeason.year}시즌 결산 · 팀 성적 {lastSeason.wins}승 {lastSeason.losses}패
+              <span className="tabular-nums font-semibold">
+                {lastSeason.year}시즌 결산 · 정규 {lastSeason.teamRank}위/{lastSeason.totalLeagueTeams}팀 ({lastSeason.wins}승 {lastSeason.losses}패) · {lastSeason.playoffResult}
                 {lastSeason.injuredGamesMissed > 0
                   ? ` · 🩹 부상 결장 ${lastSeason.injuredGamesMissed}G`
                   : ''}

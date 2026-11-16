@@ -304,9 +304,13 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
   let summaryComment =
     '비록 화려한 스포트라이트는 짧았지만, 벤치 끝자리에서 흘린 땀방울만큼은 누구보다 진실했어요.';
 
+  const finalsMvps = career.totals.finalsMvps || 0;
+
+  // GOAT 필수 조건: NBA MVP >= 3 AND NBA 우승 >= 3 AND 파이널 MVP >= 2 (점수 합산 우회 진입 완전 금지)
   if (
-    (career.totals.nbaMvps >= 2 && career.totals.nbaChampionships >= 2) ||
-    legacyScore >= 9500
+    career.totals.nbaMvps >= 3 &&
+    career.totals.nbaChampionships >= 3 &&
+    finalsMvps >= 2
   ) {
     tierId = 'GOAT';
     tierTitle = '🐐 GOAT (역대 최고 농구 황제)';
@@ -315,9 +319,9 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
       '농구 역사의 모든 페이지를 새로 써 내려간 위대한 전설이에요! 당신의 이름은 영원히 코트 위에 살아 숨 쉴 거예요.';
   } else if (
     career.totals.nbaMvps >= 1 ||
-    career.totals.nbaChampionships >= 2 ||
-    career.totals.nbaAllStars >= 5 ||
-    legacyScore >= 5800
+    (career.totals.nbaChampionships >= 2 && career.totals.nbaAllStars >= 4) ||
+    career.totals.nbaAllStars >= 6 ||
+    career.totals.nbaPoints >= 15000
   ) {
     tierId = 'FIRST_BALLOT_HOF';
     tierTitle = '🏛️ 네이스미스 명예의 전당 퍼스트 발롯';
@@ -326,14 +330,23 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
       '세계 최고의 무대 NBA를 지배하며 시대를 풍미한 슈퍼스타예요! 첫 투표 만에 만장일치급으로 명예의 전당에 헌액되었어요.';
   } else if (
     career.totals.nbaAllStars >= 1 ||
-    career.totals.nbaPoints >= 4500 ||
-    career.totals.nbaGp >= 250
+    career.totals.nbaChampionships >= 1 ||
+    career.totals.nbaPoints >= 6000
   ) {
     tierId = 'NBA_ALL_STAR';
-    tierTitle = '⭐ 자랑스러운 NBA 올스타 & 리거';
+    tierTitle = '⭐ 자랑스러운 NBA 올스타 & 챔피언';
     tierEmoji = '⭐';
     summaryComment =
-      '바늘구멍 같은 NBA 무대에서 당당히 살아남아 세계 최정상 선수들과 어깨를 나란히 한 자랑스러운 커리어예요!';
+      '바늘구멍 같은 NBA 무대에서 올스타·챔피언 반열에 올라 세계 최정상 선수들과 어깨를 나란히 한 자랑스러운 커리어예요!';
+  } else if (
+    career.totals.nbaGp >= 120 ||
+    career.totals.nbaPoints >= 1500
+  ) {
+    tierId = 'NBA_VETERAN';
+    tierTitle = '🏀 당당한 NBA 정식 리거 & 베테랑';
+    tierEmoji = '🏀';
+    summaryComment =
+      '세계 최고의 농구 무대 NBA 코트를 수년간 누비며 값진 족적을 남긴 정식 빅리거예요!';
   } else if (
     career.totals.championships >= 2 ||
     career.totals.mvps >= 1 ||

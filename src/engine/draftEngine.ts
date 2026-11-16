@@ -9,11 +9,13 @@ import {
   CombineState,
   ContractType,
   OffseasonOption,
+  Position,
   RolePromiseType,
   TeamInfo,
 } from '../types/game';
 import { checkRetirementEligibility } from './retirementEngine';
 import { getContractDefaultSalary } from './seasonSimulator';
+import { calculateHeightMismatchPenalty } from './statCalculator';
 
 export interface HighSchoolProspectEvaluation {
   stars: 1 | 2 | 3 | 4 | 5;
@@ -101,6 +103,10 @@ export function evaluateHighSchoolProspect(
       : 0;
   const championships = hsLogs.filter((l) => l.wonChampionship).length;
   const mvps = hsLogs.filter((l) => l.wonMvp || l.wonDpoy).length;
+  const mismatch = calculateHeightMismatchPenalty(
+    career.heightCm,
+    career.primaryPos
+  );
 
   const compositeScore = Number(
     (
@@ -110,7 +116,8 @@ export function evaluateHighSchoolProspect(
       avgApg * 1.15 +
       avgStk * 2.2 +
       championships * 8 +
-      mvps * 10
+      mvps * 10 -
+      mismatch.scoutingPenalty * 0.6
     ).toFixed(1)
   );
 
@@ -157,10 +164,7 @@ export interface ScoutingEvaluationResult {
 }
 
 /**
- * 다차원 구단 스카우팅 AI 엔진 (리그 수준 환산 League Translation & Per-36 효율 모델)
- * - 상위 리그(NBA 등)에서 짧은 출전 시간으로 볼륨 스탯이 낮았더라도,
- *   하위 리그(KBL, 해외, G리그) 구단은 리그 수비 저항(LDR) 환산 비율과 OVR 우위를 반영해 즉시 전력감으로 높이 평가함!
- * - 반면 동일/상위 리그(특히 NBA) 구단은 실제 코트 위 Per-36 효율과 최소 실전 기여도를 냉정하게 검증함.
+ * 다차원 구단 스카우팅 AI 엔진 (리그 수준 환산 League Translation & Per-36 효율 모델 + 신장 미스매치 물리 검증)
  */
 export function evaluateTeamScouting(
   career: CareerState,
@@ -173,15 +177,26 @@ export function evaluateTeamScouting(
 
   const currentLeagueCfg = LEAGUE_CONFIG[career.league];
   const targetLeagueCfg = LEAGUE_CONFIG[targetTeam.league];
+  const mismatch = calculateHeightMismatchPenalty(
+    career.heightCm,
+    career.primaryPos
+  );
 
-  // ① 리그 수준 환산(League Translation) 계수
-  // 상위 리그(예: NBA LDR 84)에서 하위 리그(예: KBL LDR 65)로 내려갈 때 실전 가치를 대폭 가산
   const ldrRatio = Math.pow(currentLeagueCfg.ldr / targetLeagueCfg.ldr, 1.45);
   const isSteppingDownLeague = currentLeagueCfg.ldr >= targetLeagueCfg.ldr + 6;
 
-  // ② 직전 1~2시즌 실전 볼륨 + Per-36 생산성 + 슈팅 효율을 리그 환산 비율과 결합
   let realGameCompetence = true;
   let translatedPerfScore = 13.5;
+
+  // 심각한 포지션 신장 미스매치(예: 168cm 센터)는 상위 프로/NBA 스카우팅에서 즉시 실격 판정
+  if (
+    mismatch.isSevereMismatch &&
+    (targetTeam.league === 'NBA' ||
+      targetTeam.league === 'GLEAGUE' ||
+      targetTeam.league === 'OVERSEAS')
+  ) {
+    realGameCompetence = false;
+  }
 
   if (lastLog) {
     const calcRawImpact = (log: typeof lastLog) =>
@@ -206,13 +221,10 @@ export function evaluateTeamScouting(
     const shootingEfficiency =
       (lastLog.fgPct - 43.0) * 0.42 + (lastLog.tpPct - 33.0) * 0.3;
 
-    // 타겟 리그 수준으로 환산된 실전 기대치
     translatedPerfScore =
       (weightedImpact * ldrRatio + shootingEfficiency) *
       (0.78 + currentLeagueCfg.prestige * 0.28);
 
-    // 동일하거나 더 높은 리그로 지원할 때는 직전 시즌 실전 효율과 기여도가 기준 미달이면 탈락
-    // 단, 상위 리그(NBA 등)에서 하위 리그(KBL/해외/G리그)로 내려갈 때는 OVR이 타겟 리그 기준을 충족하면 실전 경쟁력을 인정!
     const ovrEdgeOverTargetLeague = career.ovr - targetLeagueCfg.ldr;
     const effectiveCompetenceIndex =
       weightedImpact * ldrRatio +
@@ -231,7 +243,6 @@ export function evaluateTeamScouting(
     }
   }
 
-  // ③ 나이, 잠재력, 성장 DNA 및 구단 전술 스타일(preferredStyle) 개성 반영
   const teamDirection = targetTeam.direction || 'PLAYOFF_HUNT';
   const preferredStyle = targetTeam.preferredStyle || 'BALANCED';
   const dna = career.growthDna || 'STANDARD';
@@ -246,7 +257,6 @@ export function evaluateTeamScouting(
       ? 4.5
       : 0;
 
-  // 구단 선호 전술 스타일별 선수 스탯 궁합 보너스
   let tacticalStyleBonus = 0;
   if (preferredStyle === 'PACE_AND_SPACE') {
     tacticalStyleBonus =
@@ -282,7 +292,6 @@ export function evaluateTeamScouting(
       Math.max(0, career.age - (dna === 'IRONMAN' ? 34 : 32)) * 1.9;
   }
 
-  // ④ 구단 보강 포지션 니즈 적합도
   const needed = targetTeam.neededPositions || [];
   const positionFitBonus =
     needed.includes(career.primaryPos)
@@ -301,13 +310,13 @@ export function evaluateTeamScouting(
     agePotentialScore +
     positionFitBonus +
     scoutVariance -
+    mismatch.scoutingPenalty -
     (realGameCompetence ? 0 : 22);
 
   const scoutingScore = Number(
     Math.max(10, Math.min(99, rawScoutingScore)).toFixed(1)
   );
 
-  // 동적 오퍼 커트라인 (구단 전력과 리그 위상에 비례)
   const baseLeagueBar =
     targetTeam.league === 'NBA'
       ? 64
@@ -318,7 +327,6 @@ export function evaluateTeamScouting(
     teamDirection === 'CONTENDER' ? 6 : teamDirection === 'PLAYOFF_HUNT' ? 3 : -1;
   const threshold = baseLeagueBar + directionOffset;
 
-  // 만 34세 이상 노장이 타겟 리그 기준에 크게 미달하고 환산 생산성도 낮으면 탈락
   const veteranDeclineGap = career.ovr - targetLeagueCfg.ldr;
   if (career.age >= 34 && veteranDeclineGap <= -7 && translatedPerfScore < 9.0) {
     realGameCompetence = false;
@@ -364,7 +372,9 @@ export function evaluateTeamScouting(
     recommendedContract,
     promisedRole,
     promisedRoleLabel,
-    rejectionReason: !realGameCompetence
+    rejectionReason: mismatch.isSevereMismatch
+      ? `${career.heightCm}cm 신장으로 ${career.primaryPos} 포지션 수행 불가 (신장 미스매치 감점 -${mismatch.scoutingPenalty}점)`
+      : !realGameCompetence
       ? '직전 시즌 리그 환산 Per-36 생산성 및 실전 효율 기준 미달'
       : scoutingScore < threshold
       ? `구단 스카우팅 기준 점수(${threshold}점) 미달 (현재 ${scoutingScore}점)`
@@ -373,10 +383,12 @@ export function evaluateTeamScouting(
 }
 
 /**
- * NBA 드래프트 예상 지명 순위 공식 (실전 성적 및 리그 수준 환산 반영)
+ * NBA 드래프트 예상 지명 순위 공식 (실전 성적, 리그 수준 환산 및 포지션별 신장 미스매치 반영)
  */
 export function calculateProjectedNbaPick(
   career: Pick<CareerState, 'ovr' | 'draftStock' | 'league'> & {
+    heightCm?: number;
+    primaryPos?: Position;
     seasonLogs?: CareerState['seasonLogs'];
   },
   combineBonus: number = 0
@@ -387,6 +399,11 @@ export function calculateProjectedNbaPick(
       ? career.seasonLogs[career.seasonLogs.length - 1]
       : null;
 
+  const mismatch =
+    career.heightCm && career.primaryPos
+      ? calculateHeightMismatchPenalty(career.heightCm, career.primaryPos)
+      : { scoutingPenalty: 0 };
+
   const per36Pts = lastLog ? (lastLog.ppg * 36) / Math.max(10, lastLog.mpg) : 14;
   const lowPerfPenalty =
     lastLog && per36Pts < 10.5 && lastLog.mpg < 12.0 ? -12 : 0;
@@ -395,7 +412,8 @@ export function calculateProjectedNbaPick(
     (career.ovr - (LEAGUE_CONFIG.NBA.ldr - 16)) * 3.5 +
     career.draftStock * leagueConfig.prestige * 0.45 +
     combineBonus +
-    lowPerfPenalty;
+    lowPerfPenalty -
+    mismatch.scoutingPenalty;
   const rawPick = Math.round(75 - nbaReadyScore);
   const projectedPick = Math.max(1, Math.min(75, rawPick));
   const undraftedRisk = projectedPick > 58;
