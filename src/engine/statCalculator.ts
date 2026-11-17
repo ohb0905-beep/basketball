@@ -1,5 +1,6 @@
 import { getHeightModifiers, POSITION_ARCHETYPES } from '../data/archetypes';
 import {
+  BiomechanicalProfile,
   CareerState,
   GrowthDna,
   PlayerStats,
@@ -12,70 +13,204 @@ import {
 } from '../types/game';
 
 /**
- * 생체역학적(Biomechanical) 신장-포지션별 6대 스탯 물리적 상한선 계산
- * - 예: 168cm 선수가 C(센터, 권장 204~220cm)나 PF(권장 198~210cm)로 뛸 경우,
- *   아무리 훈련해도 INS(골밑), REB(리바운드), DEF(림 프로텍션)가 55~60 이상 오를 수 없음.
- * - 반면 168~178cm 단신 선수가 PG로 뛸 때는 OUT, PLY, PHY 상한이 99까지 열려 기술과 스피드로 승부 가능.
+ * [유기적 물리 엔진] 3대 연속 생체역학 지수 산출 (calculateBiomechanicalProfile)
+ * - 단방향/고정 숫자 하드코딩 없이 165cm~225cm 모든 신장과 5대 포지션(PG~C)에 대해
+ *   ① 타점 및 림 장악력 지수 (reachLeverage)
+ *   ② 무게중심 및 기민성 지수 (centerOfGravityAgility)
+ *   ③ 포지션 전술 대비 신체 물리 부하 지수 (positionalPhysicsStrain)
+ *   를 연속 함수로 계산합니다.
+ */
+export function calculateBiomechanicalProfile(
+  heightCm: number,
+  pos: Position
+): BiomechanicalProfile {
+  const clampVal = (v: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, v));
+
+  const [minH, maxH] = POSITION_ARCHETYPES[pos].recommendedHeightRange;
+  const optCenterH = (minH + maxH) / 2;
+
+  // ① 타점 및 림 장악력 지수 (신장에 비례하여 연속 증가: 165cm -> ~0.36, 195cm -> ~0.91, 220cm -> ~1.36)
+  const reachLeverage = Number(
+    clampVal(0.36 + ((heightCm - 165) / 55) * 1.0, 0.25, 1.45).toFixed(3)
+  );
+
+  // ② 무게중심 및 볼핸들링/방향전환 기민성 지수 (신장이 커질수록 드리블 탄성 궤적 길어짐 & 무게중심 상승으로 연속 감소)
+  const centerOfGravityAgility = Number(
+    clampVal(1.32 - ((heightCm - 168) / 52) * 0.92, 0.34, 1.35).toFixed(3)
+  );
+
+  // 포지션별 골밑 경합 비중 vs 퍼리미터 볼핸들링/가로수비 비중 (연속 가중치)
+  const interiorDemandWeight: Record<Position, number> = {
+    PG: 0.15,
+    SG: 0.28,
+    SF: 0.52,
+    PF: 0.82,
+    C: 1.0,
+  };
+  const perimeterAgilityWeight: Record<Position, number> = {
+    PG: 1.0,
+    SG: 0.82,
+    SF: 0.62,
+    PF: 0.32,
+    C: 0.15,
+  };
+
+  // 포지션 권장 신장 범위 대비 연속 편차 (cm)
+  const rawDeficit = Math.max(0, minH - heightCm);
+  const rawExcess = Math.max(0, heightCm - maxH);
+
+  // 포지션 최적 타점 대비 부족분 & 포지션 요구 기민성 대비 부족분
+  const expectedReach = 0.36 + ((optCenterH - 165) / 55) * 1.0;
+  const reachGap = Math.max(0, expectedReach - reachLeverage);
+
+  const expectedAgility = 1.32 - ((optCenterH - 168) / 52) * 0.92;
+  const agilityGap = Math.max(0, expectedAgility - centerOfGravityAgility);
+
+  // ③ 포지션 전술 요구치 대비 신체 물리 부하 지수 (positionalPhysicsStrain: 0.0 ~ 1.25 연속 곡선)
+  const interiorStrain =
+    reachGap * interiorDemandWeight[pos] * 1.45 +
+    (rawDeficit / 28) * interiorDemandWeight[pos];
+  const perimeterStrain =
+    agilityGap * perimeterAgilityWeight[pos] * 1.55 +
+    (rawExcess / 26) * perimeterAgilityWeight[pos];
+
+  const positionalPhysicsStrain = Number(
+    clampVal(interiorStrain + perimeterStrain, 0, 1.35).toFixed(3)
+  );
+
+  // 실전 리바운드 & 블록슛 경합 배율 (타점 지수와 포지션 골밑 매치업 난이도 결합)
+  const rebMultiplier = Number(
+    clampVal(
+      1.0 -
+        reachGap * (0.65 + interiorDemandWeight[pos] * 0.85) +
+        Math.max(0, reachLeverage - expectedReach) * 0.25,
+      0.28,
+      1.28
+    ).toFixed(2)
+  );
+
+  const blkMultiplier = Number(
+    clampVal(
+      1.0 -
+        reachGap * (0.85 + interiorDemandWeight[pos] * 0.95) +
+        Math.max(0, reachLeverage - expectedReach) * 0.35,
+      0.15,
+      1.35
+    ).toFixed(2)
+  );
+
+  // 골밑 야투 컨테스트 보정 (%p): 단신이 빅맨 매치업 시 블록/컨테스트에 막혀 야투율 급락
+  const insideFgModifier = Number(
+    clampVal(
+      (reachLeverage - expectedReach) * (6.5 + interiorDemandWeight[pos] * 9.5) -
+        perimeterStrain * 5.2,
+      -15.5,
+      4.5
+    ).toFixed(2)
+  );
+
+  // 초장신 선수가 볼핸들러(PG/SG/SF) 수행 시 드리블 궤적 노출에 따른 턴오버율 페널티
+  const tovRatePenalty = Number(
+    clampVal(
+      agilityGap * perimeterAgilityWeight[pos] * 4.8 +
+        (rawExcess / 10) * perimeterAgilityWeight[pos] * 1.15,
+      0,
+      4.5
+    ).toFixed(2)
+  );
+
+  // 외곽 스텝백/돌파 수비 시 무게중심 한계로 인한 Blow-by 수비 감점
+  const perimeterDefPenalty = Number(
+    clampVal(
+      agilityGap * perimeterAgilityWeight[pos] * 9.5 +
+        reachGap * interiorDemandWeight[pos] * 8.5,
+      0,
+      14.0
+    ).toFixed(2)
+  );
+
+  // 거구 선수의 풀코트 트랜지션 가감속 시 체력 소모 및 하체 부하 배율
+  const staminaDrainMultiplier = Number(
+    clampVal(
+      1.0 +
+        Math.max(0, (heightCm - 200) / 35) * 0.28 +
+        positionalPhysicsStrain * 0.32,
+      0.92,
+      1.65
+    ).toFixed(2)
+  );
+
+  return {
+    reachLeverage,
+    centerOfGravityAgility,
+    positionalPhysicsStrain,
+    rebMultiplier,
+    blkMultiplier,
+    insideFgModifier,
+    tovRatePenalty,
+    perimeterDefPenalty,
+    staminaDrainMultiplier,
+  };
+}
+
+/**
+ * 훈련 효율 탄력성(Growth Elasticity) — 신체 조건과 역행하는 능력치 훈련 시 연속적인 수확체감(Diminishing Returns) 적용
+ * - 인위적인 하드 캡(cap = 55) 대신, 신체 프레임의 자연 평형점을 넘어설수록 훈련 상승 효율이 연속적인 시그모이드 곡선으로 감소합니다.
+ */
+export function getBiomechanicalGrowthElasticity(
+  heightCm: number,
+  pos: Position,
+  currentStats: PlayerStats
+): PlayerStats {
+  const bio = calculateBiomechanicalProfile(heightCm, pos);
+  const clampE = (v: number) => Number(Math.max(0.14, Math.min(1.18, v)).toFixed(3));
+
+  // 신장 기반 자연 평형점 (이 지점 위로는 신체 한계 극복에 훨씬 많은 노력이 필요하여 수확체감 발생)
+  const insEquilibrium = 52 + bio.reachLeverage * 36;
+  const rebEquilibrium = 48 + bio.reachLeverage * 40;
+  const defEquilibrium =
+    54 +
+    (pos === 'C' || pos === 'PF'
+      ? bio.reachLeverage * 34
+      : bio.centerOfGravityAgility * 32);
+  const plyEquilibrium = 52 + bio.centerOfGravityAgility * 38;
+  const outEquilibrium = 60 + bio.centerOfGravityAgility * 30;
+  const phyEquilibrium =
+    55 + (bio.reachLeverage * 0.45 + bio.centerOfGravityAgility * 0.55) * 34;
+
+  const calcDiminishing = (statVal: number, eq: number) => {
+    const over = Math.max(0, statVal - eq);
+    return clampE(1.0 / (1.0 + Math.pow(over / 14, 1.65)) - bio.positionalPhysicsStrain * 0.18);
+  };
+
+  return {
+    ins: calcDiminishing(currentStats.ins, insEquilibrium),
+    out: calcDiminishing(currentStats.out, outEquilibrium),
+    ply: calcDiminishing(currentStats.ply, plyEquilibrium),
+    def: calcDiminishing(currentStats.def, defEquilibrium),
+    reb: calcDiminishing(currentStats.reb, rebEquilibrium),
+    phy: calcDiminishing(currentStats.phy, phyEquilibrium),
+  };
+}
+
+/**
+ * 생체역학 평형 한계선 (연속 수확체감 적용 후 극단적 오버플로우만 완만하게 제어)
  */
 export function getBiomechanicalStatCaps(
   heightCm: number,
   pos: Position
 ): PlayerStats {
-  const [minH, maxH] = POSITION_ARCHETYPES[pos].recommendedHeightRange;
-  const deficitCm = Math.max(0, minH - heightCm);
-  const excessCm = Math.max(0, heightCm - maxH);
-
-  // 절대 신장에 따른 골밑/리바운드 물리 한계 + 포지션 권장 신장 미달 페널티 결합
-  const shortInteriorDrag = Math.max(0, 185 - heightCm);
-  const mismatchDrag = deficitCm > 5 ? (deficitCm - 5) * 1.15 : 0;
-
-  const insCap = Math.max(
-    54,
-    Math.min(99, Math.round(99 - shortInteriorDrag * 0.75 - mismatchDrag * 0.95))
-  );
-  const rebCap = Math.max(
-    52,
-    Math.min(99, Math.round(99 - shortInteriorDrag * 1.15 - mismatchDrag * 1.05))
-  );
-  const defCap = Math.max(
-    56,
-    Math.min(
-      99,
-      Math.round(
-        99 -
-          (pos === 'C' || pos === 'PF' ? shortInteriorDrag * 0.85 : 0) -
-          mismatchDrag * 0.9
-      )
-    )
-  );
-
-  // 초장신 선수가 가드 포지션을 볼 때 볼핸들링/민첩성 상한 제한
-  const tallPerimeterDrag = Math.max(0, heightCm - 206);
-  const excessMismatchDrag = excessCm > 5 ? (excessCm - 5) * 1.1 : 0;
-
-  const plyCap = Math.max(
-    58,
-    Math.min(99, Math.round(99 - tallPerimeterDrag * 1.2 - excessMismatchDrag * 0.95))
-  );
-  const outCap = Math.max(
-    64,
-    Math.min(99, Math.round(99 - tallPerimeterDrag * 0.7 - excessMismatchDrag * 0.6))
-  );
-  const phyCap = Math.max(
-    60,
-    Math.min(
-      99,
-      Math.round(99 - tallPerimeterDrag * 1.1 - Math.max(deficitCm, excessCm) * 0.45)
-    )
-  );
+  const bio = calculateBiomechanicalProfile(heightCm, pos);
+  const clampCap = (v: number) => Math.max(54, Math.min(99, Math.round(v)));
 
   return {
-    ins: insCap,
-    out: outCap,
-    ply: plyCap,
-    def: defCap,
-    reb: rebCap,
-    phy: phyCap,
+    ins: clampCap(58 + bio.reachLeverage * 38 - bio.positionalPhysicsStrain * 14),
+    out: clampCap(66 + bio.centerOfGravityAgility * 32 - bio.positionalPhysicsStrain * 8),
+    ply: clampCap(58 + bio.centerOfGravityAgility * 38 - bio.tovRatePenalty * 4.2),
+    def: clampCap(60 + (bio.reachLeverage + bio.centerOfGravityAgility) * 22 - bio.perimeterDefPenalty * 1.2),
+    reb: clampCap(54 + bio.reachLeverage * 41 - bio.positionalPhysicsStrain * 15),
+    phy: clampCap(60 + bio.centerOfGravityAgility * 34 - (bio.staminaDrainMultiplier - 1) * 22),
   };
 }
 
@@ -96,7 +231,7 @@ export function enforceBiomechanicalCaps(
 }
 
 /**
- * 실제 경기 시뮬레이션 및 구단 스카우팅에 적용되는 신장-포지션 미스매치 물리 페널티
+ * 실제 경기 시뮬레이션 및 구단 스카우팅에 적용되는 양방향 생체역학 물리 지표 래퍼
  */
 export function calculateHeightMismatchPenalty(
   heightCm: number,
@@ -107,38 +242,40 @@ export function calculateHeightMismatchPenalty(
   rebMultiplier: number;
   blkMultiplier: number;
   fgPctPenalty: number;
+  tovRatePenalty: number;
+  positionalPhysicsStrain: number;
   scoutingPenalty: number;
   isSevereMismatch: boolean;
 } {
   const [minH, maxH] = POSITION_ARCHETYPES[pos].recommendedHeightRange;
   const deficitCm = Math.max(0, minH - heightCm);
   const excessCm = Math.max(0, heightCm - maxH);
+  const bio = calculateBiomechanicalProfile(heightCm, pos);
 
-  // 168~178cm 단신 가드가 PG를 볼 때는 deficitCm가 0~7cm 수준으로 정상 범주
-  const effectiveDeficit = Math.max(0, deficitCm - 4);
-  const effectiveExcess = Math.max(0, excessCm - 5);
-
-  const rebMultiplier = Number(
-    Math.max(0.32, 1.0 - effectiveDeficit * 0.022).toFixed(2)
-  );
-  const blkMultiplier = Number(
-    Math.max(0.18, 1.0 - effectiveDeficit * 0.028).toFixed(2)
-  );
   const fgPctPenalty = Number(
-    Math.min(14.0, effectiveDeficit * 0.38 + effectiveExcess * 0.22).toFixed(1)
+    Math.max(
+      0,
+      -bio.insideFgModifier + bio.tovRatePenalty * 1.45 + bio.positionalPhysicsStrain * 4.5
+    ).toFixed(1)
   );
   const scoutingPenalty = Number(
-    (effectiveDeficit * 1.35 + effectiveExcess * 1.1).toFixed(1)
+    (
+      bio.positionalPhysicsStrain * 22.0 +
+      bio.tovRatePenalty * 2.8 +
+      bio.perimeterDefPenalty * 0.85
+    ).toFixed(1)
   );
 
   return {
     deficitCm,
     excessCm,
-    rebMultiplier,
-    blkMultiplier,
+    rebMultiplier: bio.rebMultiplier,
+    blkMultiplier: bio.blkMultiplier,
     fgPctPenalty,
+    tovRatePenalty: bio.tovRatePenalty,
+    positionalPhysicsStrain: bio.positionalPhysicsStrain,
     scoutingPenalty,
-    isSevereMismatch: deficitCm >= 14 || excessCm >= 14,
+    isSevereMismatch: bio.positionalPhysicsStrain >= 0.48,
   };
 }
 
@@ -151,7 +288,7 @@ const ADJACENT_POSITIONS: Record<Position, Position[]> = {
 };
 
 /**
- * 주포지션 전향 가능 여부 판정 (인접 포지션 또는 해금된 부포지션만 허용 + 극단적 신장 미스매치 차단)
+ * 주포지션 전향 가능 여부 판정 (인접 포지션 또는 해금된 부포지션만 허용 + 생체역학적 부하 한계 체크)
  */
 export function canSwitchToPosition(
   currentPrimary: Position,
@@ -178,11 +315,18 @@ export function canSwitchToPosition(
     };
   }
 
-  const [minH, maxH] = POSITION_ARCHETYPES[targetPos].recommendedHeightRange;
-  if (heightCm < minH - 11 || heightCm > maxH + 11) {
+  const targetBio = calculateBiomechanicalProfile(heightCm, targetPos);
+  const currentBio = calculateBiomechanicalProfile(heightCm, currentPrimary);
+  // 현재 포지션보다 물리 부하가 줄어드는 방향(정상 포지션 찾아가기)은 언제나 허용하고,
+  // 극단적 역행 전향(positionalPhysicsStrain >= 0.52)만 차단
+  if (
+    targetBio.positionalPhysicsStrain >= 0.52 &&
+    targetBio.positionalPhysicsStrain > currentBio.positionalPhysicsStrain
+  ) {
+    const [minH, maxH] = POSITION_ARCHETYPES[targetPos].recommendedHeightRange;
     return {
       allowed: false,
-      reason: `신장 ${heightCm}cm는 ${targetPos} 권장 신장(${minH}~${maxH}cm)과 물리적 차이가 너무 커서 전향할 수 없어요.`,
+      reason: `신장 ${heightCm}cm는 ${targetPos} 포지션의 생체역학적 권장 범위(${minH}~${maxH}cm)와 물리적 부하 차이가 너무 커서 전향할 수 없어요.`,
     };
   }
 

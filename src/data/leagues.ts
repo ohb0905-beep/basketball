@@ -1,10 +1,24 @@
-import { LeagueConfig, LeagueId } from '../types/game';
+import { LeagueId } from '@/src/types/game';
 
-export const LEAGUE_CONFIG: Record<LeagueId, LeagueConfig> = {
+export interface LeagueConfig {
+  id: LeagueId;
+  name: string;
+  shortName: string;
+  gamesPerSeason: number;
+  games: number;
+  ldr: number;
+  growthCap: number;
+  prestige: number;
+  country: string;
+  badgeColor: string;
+}
+
+export const LEAGUES: Record<LeagueId, LeagueConfig> = {
   HIGH_SCHOOL: {
     id: 'HIGH_SCHOOL',
-    name: '한국 고교농구',
+    name: '한국 고교농구 (대한중고농구연맹)',
     shortName: '고교농구',
+    gamesPerSeason: 30,
     games: 30,
     ldr: 45,
     growthCap: 60,
@@ -14,8 +28,9 @@ export const LEAGUE_CONFIG: Record<LeagueId, LeagueConfig> = {
   },
   U_LEAGUE: {
     id: 'U_LEAGUE',
-    name: '한국 대학 U-리그',
+    name: '한국 대학농구 U-리그 (KUBF)',
     shortName: 'U-리그',
+    gamesPerSeason: 32,
     games: 32,
     ldr: 55,
     growthCap: 66,
@@ -27,6 +42,7 @@ export const LEAGUE_CONFIG: Record<LeagueId, LeagueConfig> = {
     id: 'KBL',
     name: '한국프로농구 (KBL)',
     shortName: 'KBL',
+    gamesPerSeason: 54,
     games: 54,
     ldr: 66,
     growthCap: 74,
@@ -36,8 +52,9 @@ export const LEAGUE_CONFIG: Record<LeagueId, LeagueConfig> = {
   },
   OVERSEAS: {
     id: 'OVERSEAS',
-    name: '해외 프로 (B.리그/NBL)',
+    name: '해외 프로리그 (B.리그 / NBL / 유로리그)',
     shortName: '해외프로',
+    gamesPerSeason: 56,
     games: 56,
     ldr: 71,
     growthCap: 77,
@@ -49,6 +66,7 @@ export const LEAGUE_CONFIG: Record<LeagueId, LeagueConfig> = {
     id: 'GLEAGUE',
     name: 'NBA G리그',
     shortName: 'G리그',
+    gamesPerSeason: 50,
     games: 50,
     ldr: 73,
     growthCap: 78,
@@ -58,8 +76,9 @@ export const LEAGUE_CONFIG: Record<LeagueId, LeagueConfig> = {
   },
   NCAA: {
     id: 'NCAA',
-    name: '미국 대학 (NCAA D1)',
+    name: '미국 대학농구 (NCAA Division 1)',
     shortName: 'NCAA D1',
+    gamesPerSeason: 35,
     games: 35,
     ldr: 74,
     growthCap: 79,
@@ -69,8 +88,9 @@ export const LEAGUE_CONFIG: Record<LeagueId, LeagueConfig> = {
   },
   NBA: {
     id: 'NBA',
-    name: 'NBA',
+    name: 'NBA (National Basketball Association)',
     shortName: 'NBA',
+    gamesPerSeason: 82,
     games: 82,
     ldr: 84,
     growthCap: 99,
@@ -78,7 +98,9 @@ export const LEAGUE_CONFIG: Record<LeagueId, LeagueConfig> = {
     country: '미국',
     badgeColor: '#EA580C',
   },
-} as const;
+};
+
+export const LEAGUE_CONFIG = LEAGUES;
 
 export const LEAGUE_ORDER: LeagueId[] = [
   'HIGH_SCHOOL',

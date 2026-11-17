@@ -1,15 +1,7 @@
 'use client';
 
 import React from 'react';
-import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Dumbbell,
-  MessageSquare,
-  RotateCcw,
-  Target,
-} from 'lucide-react';
+import { ArrowLeft, CheckCircle2, MessageSquare, Sparkles, Target, Users, Zap } from 'lucide-react';
 import { useCareerStore } from '../../store/useCareerStore';
 import { PlayerStats } from '../../types/game';
 
@@ -18,24 +10,28 @@ const COMBINE_DRILLS: {
   title: string;
   desc: string;
   statKey: keyof PlayerStats;
+  icon: React.ComponentType<{ className?: string }>;
 }[] = [
   {
     id: 'DRILL_SHOOTING',
-    title: '3점 무빙 & 스팟업 슈팅 드릴',
-    desc: 'NBA 3점 라인(7.24m) 거리에서 25개 연속 슈팅 테스트를 진행해요.',
+    title: '3점 & 무빙 슈팅 쇼케이스',
+    desc: 'NBA 스카우트진 앞에서 무빙 3점슛과 클러치 슈팅 정확도를 증명해요 (OUT +1, 드래프트 보너스).',
     statKey: 'out',
+    icon: Target,
   },
   {
-    id: 'DRILL_AGILITY',
-    title: '레인 어질리티 & 맥스 버티컬 점프',
-    desc: '폭발적인 서전트 점프와 코트 왕복 스프린트 기록을 측정해요.',
+    id: 'DRILL_ATHLETIC',
+    title: '맥스 버티컬 & 레인 어질리티 측정',
+    desc: '서전트 점프와 셔틀런에서 폭발적인 운동능력을 기록해요 (PHY +1, 드래프트 보너스).',
     statKey: 'phy',
+    icon: Zap,
   },
   {
     id: 'DRILL_SCRIMMAGE',
-    title: '5대5 풀코트 쇼케이스 스크리미지',
-    desc: '스카우트들 앞에서 픽앤롤 전개와 수비 로테이션 이해도를 증명해요.',
+    title: '5대5 실전 스크리미지 픽앤롤 리딩',
+    desc: '실전 스크리미지에서 노련한 경기 운영과 패스 센스를 입증해요 (PLY +1, 드래프트 보너스).',
     statKey: 'ply',
+    icon: Users,
   },
 ];
 
@@ -49,215 +45,159 @@ export function DraftCombine() {
   if (!career || !career.combineState) return null;
 
   const cs = career.combineState;
-  const drillsLeft = Math.max(0, 2 - cs.completedDrills.length);
+  const projectedRound = cs.projectedPick <= 30 ? '1라운드' : cs.projectedPick <= 58 ? '2라운드' : '언드래프트 위험';
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      {/* 상단 시카고 컴바인 헤더 */}
-      <section className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+    <div className="max-w-4xl mx-auto px-4 py-10 space-y-6 text-slate-900">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={withdrawFromDraft}
+          className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 px-4 py-2.5 rounded-xl transition shadow-2xs cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          드래프트 참가 철회 및 에이전트 데스크로 복귀
+        </button>
+        <span className="text-xs font-black text-amber-600 uppercase tracking-wider">
+          CHICAGO NBA DRAFT COMBINE
+        </span>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+        <div className="flex items-start justify-between flex-wrap gap-4 border-b border-slate-200 pb-5">
           <div>
-            <span className="text-xs font-extrabold text-orange-600">
-              미국 일리노이주 시카고 · 윈트러스트 아레나
-            </span>
-            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
-              🏀 NBA 드래프트 시카고 컴바인 (Draft Combine)
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold mb-2">
+              <Sparkles className="w-3.5 h-3.5" />
+              {career.seasonYear} NBA 드래프트 공식 컴바인
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-slate-900">
+              드래프트 컴바인 쇼케이스 &amp; 구단 면접
             </h1>
-            <p className="text-sm text-slate-600 mt-1">
-              #{career.jerseyNumber} {career.name} ({career.primaryPos} · {career.heightCm}cm · OVR{' '}
-              {career.ovr})
+            <p className="text-sm text-slate-600 mt-1 max-w-xl">
+              {cs.scoutingReport}
             </p>
           </div>
 
-          <div className="px-5 py-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-center shrink-0">
-            <span className="block text-xs font-bold text-slate-500">
-              현재 예상 지명 순위
-            </span>
-            <span
-              className={`block text-3xl font-black mt-0.5 tabular-nums ${
-                cs.projectedPick <= 30
-                  ? 'text-emerald-600'
-                  : cs.projectedPick <= 58
-                  ? 'text-orange-600'
-                  : 'text-rose-600'
-              }`}
-            >
-              {cs.projectedPick > 60 ? '60순위 밖 (Undrafted 권역)' : `전체 ${cs.projectedPick}순위`}
-            </span>
-            <span className="block text-[11px] text-slate-400">
-              {cs.projectedPick <= 14
-                ? '로터리 픽 유력'
-                : cs.projectedPick <= 30
-                ? '1라운드 보장 계약 권역'
-                : cs.projectedPick <= 58
-                ? '2라운드 지명 권역'
-                : '언드래프티 위험 구간'}
-            </span>
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-right">
+            <div className="text-xs font-bold text-slate-500">현재 예상 지명 순위</div>
+            <div className="text-2xl font-black text-orange-600 mt-0.5 tabular-nums">
+              예상 #{cs.projectedPick}순위
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {projectedRound}
+            </div>
           </div>
         </div>
 
-        {/* 스카우트 총평 & 언드래프티 경고 배너 */}
-        <p className="text-sm text-slate-700 leading-relaxed">{cs.scoutingReport}</p>
-
-        {cs.undraftedRisk && (
-          <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-extrabold text-amber-900">
-                  ⚠️ 언드래프티 위험 경고 (예상 순위 {cs.projectedPick}순위 &gt; 58순위)
-                </p>
-                <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
-                  현재 예상 순위가 58순위 밖이어서 지명되지 못할 위험이 높아요! 컴바인 측정 후에도
-                  순위가 낮다면 드래프트 신청을 철회하고 소속팀/대학으로 복귀해 기량을 더 쌓을 수 있어요.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={withdrawFromDraft}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              ↩️ 드래프트 신청 철회하고 소속팀/대학 복귀
-            </button>
-          </div>
-        )}
-      </section>
-
-      {/* 중반: 컴바인 측정 드릴 (2종 선택) & 구단 단장 면접 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <section className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+        {/* 1. 쇼케이스 측정 종목 (최대 2개 수행 가능) */}
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-              <Dumbbell className="w-5 h-5 text-orange-600" />
-              1. 컴바인 코트 워크아웃 드릴 (남은 횟수: {drillsLeft}회)
+            <h2 className="text-sm font-black text-slate-800">
+              1. 컴바인 피지컬·스킬 드릴 측정 ({cs.completedDrills.length} / 2 완료)
             </h2>
-            <span className="text-xs text-slate-500">최대 2개 종목 참가 가능</span>
+            <span className="text-xs text-slate-500">최대 2개 종목 선택 가능</span>
           </div>
 
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3">
             {COMBINE_DRILLS.map((drill) => {
+              const Icon = drill.icon;
               const done = cs.completedDrills.includes(drill.id);
-              const disabled = done || drillsLeft === 0;
+              const disabled = done || cs.completedDrills.length >= 2;
               return (
                 <button
                   key={drill.id}
                   type="button"
                   disabled={disabled}
                   onClick={() => runCombineDrill(drill.id, drill.title, drill.statKey)}
-                  className={`w-full p-4 rounded-xl border text-left transition-all flex items-center justify-between gap-4 ${
+                  className={`p-4 rounded-2xl border text-left transition flex items-start gap-4 ${
                     done
-                      ? 'border-emerald-300 bg-emerald-50/40'
+                      ? 'border-emerald-300 bg-emerald-50/70'
                       : disabled
-                      ? 'border-slate-200 bg-slate-50 opacity-55 cursor-not-allowed'
-                      : 'border-slate-200 bg-white hover:border-orange-500 cursor-pointer'
+                      ? 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+                      : 'border-slate-200 bg-slate-50 hover:border-orange-400 hover:bg-white cursor-pointer'
                   }`}
                 >
-                  <div>
-                    <p className="text-sm font-extrabold text-slate-900">
-                      {drill.title}
-                    </p>
-                    <p className="text-xs text-slate-600 mt-0.5">{drill.desc}</p>
+                  <div className="p-3 rounded-xl bg-white border border-slate-200 text-orange-600">
+                    <Icon className="w-5 h-5" />
                   </div>
-                  {done ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 shrink-0">
-                      <CheckCircle2 className="w-4 h-4" />
-                      측정 완료
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-600 shrink-0">
-                      <Target className="w-4 h-4" />
-                      참가하기
-                    </span>
-                  )}
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-base font-black text-slate-900">{drill.title}</span>
+                      {done && (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> 측정 완료
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1 leading-relaxed">{drill.desc}</p>
+                  </div>
                 </button>
               );
             })}
           </div>
-        </section>
+        </div>
 
-        {/* 우측: NBA 구단 단장 면접 */}
-        <section className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4 flex flex-col justify-between">
-          <div className="space-y-3">
-            <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 text-orange-600" />
-              2. NBA 프런트 & 단장 심층 면접
+        {/* 2. 구단 단장단 심층 인터뷰 */}
+        <div className="space-y-3 pt-2 border-t border-slate-200">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-black text-slate-800 flex items-center gap-1.5">
+              <MessageSquare className="w-4 h-4 text-amber-600" />
+              2. NBA 구단 단장단 심층 인터뷰
             </h2>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              “NBA 무대는 이전까지 경험한 리그보다 수비 저항(LDR 84)이 훨씬 높습니다. 루키 시즌
-              벤치에서 시작하더라도 팀에 어떻게 기여하겠습니까?”
-            </p>
-
-            {cs.interviewCompleted ? (
-              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                단장단 면접을 성공적으로 마쳐 드래프트 주가가 상승했어요!
-              </div>
-            ) : (
-              <div className="space-y-2.5 pt-1">
-                <button
-                  type="button"
-                  onClick={() => completeCombineInterview('CONFIDENT')}
-                  className="w-full p-3.5 rounded-xl border border-slate-200 hover:border-orange-500 text-left transition-colors cursor-pointer"
-                >
-                  <span className="block text-xs font-extrabold text-slate-900">
-                    🔥 “어떤 수비 앞에서도 제 득점력과 승부욕을 증명해 보이겠어요!”
-                  </span>
-                  <span className="block text-[11px] text-slate-500 mt-0.5">
-                    스타성 어필 · 예상 순위 큰 폭 상승
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => completeCombineInterview('TEAM_FIRST')}
-                  className="w-full p-3.5 rounded-xl border border-slate-200 hover:border-orange-500 text-left transition-colors cursor-pointer"
-                >
-                  <span className="block text-xs font-extrabold text-slate-900">
-                    🛡️ “수비와 리바운드, 궂은일부터 완벽히 해내는 팀 퍼스트 선수가 될게요!”
-                  </span>
-                  <span className="block text-[11px] text-slate-500 mt-0.5">
-                    감독 신뢰도 및 워크에씩 호평
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => completeCombineInterview('ANALYTICAL')}
-                  className="w-full p-3.5 rounded-xl border border-slate-200 hover:border-orange-500 text-left transition-colors cursor-pointer"
-                >
-                  <span className="block text-xs font-extrabold text-slate-900">
-                    🧠 “스페이싱과 전술 이해도로 코트 위 마진(+-)을 끌어올리겠어요!”
-                  </span>
-                  <span className="block text-[11px] text-slate-500 mt-0.5">
-                    현대 농구 BQ 어필
-                  </span>
-                </button>
-              </div>
+            {cs.interviewCompleted && (
+              <span className="text-xs font-bold text-emerald-600">인터뷰 완료</span>
             )}
           </div>
 
-          {/* 하단 액션 버튼 (드래프트 철회 vs 바클레이스 센터 입장) */}
-          <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row gap-3">
-            <button
-              type="button"
-              onClick={withdrawFromDraft}
-              className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
-            >
-              ↩️ 드래프트 철회 후 소속팀 복귀
-            </button>
-            <button
-              type="button"
-              onClick={proceedToDraftLive}
-              className="flex-1 py-3 px-4 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs inline-flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            >
-              브루클린 지명식장 입장하기
-              <ArrowRight className="w-4 h-4" />
-            </button>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {[
+              {
+                id: 'CONFIDENT' as const,
+                label: '🔥 당당한 에이스 포부',
+                desc: '“이번 드래프트 최고의 스틸 픽이 될 자신이 있어요!”',
+              },
+              {
+                id: 'TEAM_FIRST' as const,
+                label: '🤝 헌신적인 팀 퍼스트',
+                desc: '“수비와 궂은일부터 팀 승리에 필요한 모든 역할을 해낼게요.”',
+              },
+              {
+                id: 'ANALYTICAL' as const,
+                label: '🧠 전술 이해도 어필',
+                desc: '“현대 농구의 스페이싱과 스위치 수비 시스템을 완벽히 이해하고 있어요.”',
+              },
+            ].map((ans) => (
+              <button
+                key={ans.id}
+                type="button"
+                disabled={cs.interviewCompleted}
+                onClick={() => completeCombineInterview(ans.id)}
+                className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 hover:border-amber-400 hover:bg-white disabled:opacity-50 text-left transition cursor-pointer"
+              >
+                <div className="text-xs font-black text-slate-900">{ans.label}</div>
+                <p className="text-[11px] text-slate-600 mt-1">{ans.desc}</p>
+              </button>
+            ))}
           </div>
-        </section>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+          <button
+            type="button"
+            onClick={withdrawFromDraft}
+            className="w-full sm:w-auto px-6 py-4 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-bold text-sm transition cursor-pointer"
+          >
+            드래프트 참가 철회 (복귀 오퍼 선택)
+          </button>
+
+          <button
+            type="button"
+            onClick={proceedToDraftLive}
+            className="w-full sm:flex-1 py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-black text-base transition shadow-md shadow-amber-500/20 cursor-pointer"
+          >
+            브루클린 바클레이스 센터 · NBA 드래프트 본무대 입장하기
+          </button>
+        </div>
       </div>
     </div>
   );

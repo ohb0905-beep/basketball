@@ -48,6 +48,7 @@ export function SeasonTab() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [showFullStandings, setShowFullStandings] = useState(false);
+  const [standingsConfTab, setStandingsConfTab] = useState<'ALL' | 'EAST' | 'WEST'>('ALL');
   const [statusMessage, setStatusMessage] = useState(
     '시즌 개막 준비가 완료되었어요. 버튼을 눌러 이번 시즌을 진행해 보세요!'
   );
@@ -130,7 +131,15 @@ export function SeasonTab() {
   };
 
   const standings = career.currentStandings || [];
-  const displayedStandings = showFullStandings ? standings : standings.slice(0, 8);
+  const filteredStandings =
+    career.league === 'NBA' && standingsConfTab !== 'ALL'
+      ? standings
+          .filter((s) => (s.conference || s.team.conference) === standingsConfTab)
+          .sort((a, b) => (a.conferenceRank || a.rank) - (b.conferenceRank || b.rank))
+      : standings;
+  const displayedStandings = showFullStandings
+    ? filteredStandings
+    : filteredStandings.slice(0, 8);
   const bracket = career.playoffBracket;
   const championEntry =
     bracket?.championTeamId
@@ -201,21 +210,47 @@ export function SeasonTab() {
           </div>
         </div>
 
-        {/* 구단 역할 약속 위반 시 공식 트레이드 요청 배너 */}
-        {career.brokenRolePromise && (
-          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* 구단 역할 약속 위반 또는 다년 계약 중 트레이드 요청 배너 */}
+        {(career.brokenRolePromise ||
+          (career.contractYearsLeft >= 1 &&
+            (career.league === 'NBA' ||
+              career.league === 'KBL' ||
+              career.league === 'OVERSEAS'))) && (
+          <div
+            className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+              career.brokenRolePromise
+                ? 'bg-rose-50 border-rose-200'
+                : 'bg-slate-50 border-slate-200'
+            }`}
+          >
             <div className="space-y-0.5">
-              <p className="text-xs font-extrabold text-rose-700">
-                🚨 구단 역할 보장 약속 위반 감지
+              <p
+                className={`text-xs font-extrabold ${
+                  career.brokenRolePromise ? 'text-rose-700' : 'text-slate-800'
+                }`}
+              >
+                {career.brokenRolePromise
+                  ? '🚨 구단 역할 보장 약속 위반 감지'
+                  : `📋 다년 계약 진행 중 (잔여 ${career.contractYearsLeft}년) · 공식 트레이드 요청 가능`}
               </p>
-              <p className="text-xs text-rose-900">
-                계약 당시 약속받은 주전/에이스 출전 시간이 지켜지지 않았어요. 프런트에 공식 트레이드를 요청해 주전 자리가 비어 있는 새 구단으로 이적할 수 있어요.
+              <p
+                className={`text-xs ${
+                  career.brokenRolePromise ? 'text-rose-900' : 'text-slate-600'
+                }`}
+              >
+                {career.brokenRolePromise
+                  ? '계약 당시 약속받은 주전/에이스 출전 시간이 지켜지지 않았어요. 프런트에 공식 트레이드를 요청해 주전 자리가 비어 있는 새 구단으로 이적할 수 있어요.'
+                  : '현재 구단의 팀 방향성이나 출전 기회에 만족하지 못한다면, 프런트에 공식 트레이드를 요청해 포지션 니즈가 있는 타 구단으로 이적할 수 있어요.'}
               </p>
             </div>
             <button
               type="button"
               onClick={requestTrade}
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold shrink-0 cursor-pointer transition-colors"
+              className={`inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-white text-xs font-extrabold shrink-0 cursor-pointer transition-colors ${
+                career.brokenRolePromise
+                  ? 'bg-rose-600 hover:bg-rose-700'
+                  : 'bg-slate-800 hover:bg-slate-900'
+              }`}
             >
               <ArrowRightLeft className="w-3.5 h-3.5" />
               공식 트레이드 요청하기
@@ -281,7 +316,13 @@ export function SeasonTab() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div
+            className={`grid grid-cols-1 gap-4 ${
+              bracket.rounds.length >= 4
+                ? 'md:grid-cols-2 lg:grid-cols-4'
+                : 'md:grid-cols-3'
+            }`}
+          >
             {bracket.rounds.map((seriesList, rIdx) => {
               const rLabel =
                 seriesList[0]?.roundLabel || `${rIdx + 1}라운드`;
@@ -309,6 +350,17 @@ export function SeasonTab() {
                             : 'bg-white border-slate-200'
                         }`}
                       >
+                        {m.conference && m.conference !== 'FINALS' && (
+                          <span
+                            className={`inline-block text-[10px] font-black px-1.5 py-0.5 rounded ${
+                              m.conference === 'EAST'
+                                ? 'bg-blue-50 text-blue-700'
+                                : 'bg-rose-50 text-rose-700'
+                            }`}
+                          >
+                            {m.conference === 'EAST' ? 'EAST' : 'WEST'}
+                          </span>
+                        )}
                         <div className="flex items-center justify-between gap-2">
                           <span
                             className={`font-bold truncate ${
@@ -317,7 +369,8 @@ export function SeasonTab() {
                                 : 'text-slate-600'
                             }`}
                           >
-                            #{m.higherSeed.rank} {m.higherSeed.team.name}
+                            #{m.higherSeed.conferenceRank || m.higherSeed.rank}{' '}
+                            {m.higherSeed.team.name}
                           </span>
                           <span className="font-mono font-black text-slate-900">
                             {m.higherSeedWins}
@@ -331,7 +384,8 @@ export function SeasonTab() {
                                 : 'text-slate-600'
                             }`}
                           >
-                            #{m.lowerSeed.rank} {m.lowerSeed.team.name}
+                            #{m.lowerSeed.conferenceRank || m.lowerSeed.rank}{' '}
+                            {m.lowerSeed.team.name}
                           </span>
                           <span className="font-mono font-black text-slate-900">
                             {m.lowerSeedWins}
@@ -477,27 +531,53 @@ export function SeasonTab() {
                 {lastSeason ? `${lastSeason.year}시즌` : `${career.seasonYear}시즌`} {leagueInfo.name} 정규시즌 최종 순위표
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                소속팀 성적: 정규 {lastSeason?.teamRank || '-'}위 / 총 {standings.length}개 구단 ·{' '}
+                소속팀 성적: 전체 {lastSeason?.teamRank || '-'}위 / 총 {standings.length}개 구단 ·{' '}
                 <strong className="text-indigo-600">{lastSeason?.playoffResult || '-'}</strong>
               </p>
             </div>
-            {standings.length > 8 && (
-              <button
-                type="button"
-                onClick={() => setShowFullStandings((v) => !v)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
-              >
-                {showFullStandings ? (
-                  <>
-                    <ChevronUp className="w-3.5 h-3.5" /> 상위 8개 구단만 보기
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="w-3.5 h-3.5" /> 전체 {standings.length}개 구단 순위 펼치기
-                  </>
-                )}
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {career.league === 'NBA' && (
+                <div className="inline-flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
+                  {(
+                    [
+                      { id: 'ALL', label: '전체 (30)' },
+                      { id: 'EAST', label: '동부 컨퍼런스 (15)' },
+                      { id: 'WEST', label: '서부 컨퍼런스 (15)' },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setStandingsConfTab(tab.id)}
+                      className={`px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                        standingsConfTab === tab.id
+                          ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {filteredStandings.length > 8 && (
+                <button
+                  type="button"
+                  onClick={() => setShowFullStandings((v) => !v)}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                >
+                  {showFullStandings ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" /> 상위 8개 구단만 보기
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" /> 전체 {filteredStandings.length}개 구단 순위 펼치기
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -506,6 +586,9 @@ export function SeasonTab() {
                 <tr className="border-b border-slate-200 text-slate-500 font-bold">
                   <th className="py-2.5 px-3">순위</th>
                   <th className="py-2.5 px-3">구단명</th>
+                  {career.league === 'NBA' && (
+                    <th className="py-2.5 px-3">컨퍼런스</th>
+                  )}
                   <th className="py-2.5 px-3 text-right">전력</th>
                   <th className="py-2.5 px-3 text-right">승</th>
                   <th className="py-2.5 px-3 text-right">패</th>
@@ -525,7 +608,9 @@ export function SeasonTab() {
                     }
                   >
                     <td className="py-2.5 px-3 font-black">
-                      {row.rank}위
+                      {career.league === 'NBA' && standingsConfTab !== 'ALL'
+                        ? `${row.conferenceRank || row.rank}위`
+                        : `${row.rank}위`}
                     </td>
                     <td className="py-2.5 px-3">
                       <span className="font-bold">{row.team.name}</span>
@@ -535,6 +620,21 @@ export function SeasonTab() {
                         </span>
                       )}
                     </td>
+                    {career.league === 'NBA' && (
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
+                            (row.conference || row.team.conference) === 'EAST'
+                              ? 'bg-blue-50 text-blue-700'
+                              : 'bg-rose-50 text-rose-700'
+                          }`}
+                        >
+                          {(row.conference || row.team.conference) === 'EAST'
+                            ? `동부 #${row.conferenceRank || '-'}`
+                            : `서부 #${row.conferenceRank || '-'}`}
+                        </span>
+                      </td>
+                    )}
                     <td className="py-2.5 px-3 text-right text-slate-500">{row.team.rating}</td>
                     <td className="py-2.5 px-3 text-right font-bold">{row.wins}</td>
                     <td className="py-2.5 px-3 text-right">{row.losses}</td>

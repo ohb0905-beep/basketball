@@ -1,206 +1,126 @@
 'use client';
 
 import React from 'react';
-import { ArrowRight, PlayCircle, RotateCcw } from 'lucide-react';
+import { ArrowRight, Play, ShieldAlert, Sparkles, TrendingUp, Trophy } from 'lucide-react';
+import { LEAGUE_CONFIG } from '../../data/leagues';
 import { useCareerStore } from '../../store/useCareerStore';
-import { TeamEmblem } from '../common/TeamEmblem';
+import { BestFiveCourt } from './BestFiveCourt';
 
-interface HeroSectionProps {
-  onRequestResetModal: () => void;
-}
-
-export function HeroSection({ onRequestResetModal }: HeroSectionProps) {
+export function HeroSection() {
   const career = useCareerStore((s) => s.career);
   const setView = useCareerStore((s) => s.setView);
-  const espnApiConnected = useCareerStore((s) => s.espnApiConnected);
+  const resetActiveCareer = useCareerStore((s) => s.resetActiveCareer);
 
   return (
-    <section className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-10 shadow-xs">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-        {/* 좌측 타이틀 & CTA */}
-        <div className="lg:col-span-7 space-y-5">
-          <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
-            <span className="text-orange-600 font-bold">농구 선수 육성 시뮬레이션</span>
-            <span aria-hidden="true">·</span>
-            <span>고교 벤치에서 NBA 영구결번까지</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              {espnApiConnected ? 'ESPN 공식 구단 로고 연동됨' : '7대 리그 오픈월드 커리어'}
-            </span>
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-between relative overflow-hidden">
+      {/* 코트 라인 배경 그래픽 (밝은 화이트/오렌지 코트 라인) */}
+      <div className="absolute inset-0 pointer-events-none opacity-45">
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[900px] h-[900px] rounded-full border-[3px] border-orange-200/70" />
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[420px] h-[420px] rounded-full border-[2px] border-amber-200/60" />
+      </div>
+
+      <main className="relative z-10 max-w-7xl mx-auto px-4 pt-10 pb-16 w-full space-y-10">
+        <section className="bg-white border border-slate-200 rounded-3xl p-8 sm:p-12 shadow-xs">
+          {/* 상단 메타 텍스트 */}
+          <div className="flex items-center gap-2 text-orange-600 text-xs font-extrabold tracking-wider uppercase mb-4">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Basketball Career Simulation · 고교 농구부에서 NBA 영구결번까지</span>
           </div>
 
-          <h1
-            className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight break-keep"
-            style={{ textWrap: 'balance' }}
-          >
-            차가운 벤치 끝자리에서 시작해, 코트 위의 전설이 되어 봐요
+          {/* 메인 헤드라인 */}
+          <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-slate-900 leading-[1.08] mb-5">
+            벤치 끝자락에서 시작해
+            <br />
+            <span className="text-orange-600">
+              전설의 MVP가 되다
+            </span>
           </h1>
 
-          <p className="text-base text-slate-600 leading-relaxed max-w-2xl break-keep">
-            한국 고교농구 후보 선수로 출발해 대학 U-리그, KBL, 해외 리그, NCAA D1, G리그를 거쳐
-            꿈의 무대 NBA에 도전해요. 상대 리그 수비 저항치(LDR)와 투웨이 생존 경쟁, 30대 에이징
-            커브를 이겨내고 영구결번의 주인공이 되어 보세요.
+          <p className="text-base sm:text-lg text-slate-600 max-w-2xl leading-relaxed mb-8">
+            만 17세 고교 신입생으로 입학해 한국 대학 U-리그, KBL, 해외 리그, 미국 NCAA D1, G리그를 거쳐
+            세계 최고 무대인 NBA 파이널 MVP와 명예의 전당에 도전하세요. 양방향 생체역학 물리 엔진과
+            전 리그 실제 구단·학교 공식 앰블럼이 살아 숨 쉬는 농구 커리어 시뮬레이션입니다.
           </p>
 
-          <div className="pt-2 flex flex-wrap items-center gap-3">
-            {career ? (
-              <>
-                <button
-                  type="button"
-                  data-start="true"
-                  onClick={() => setView('DASHBOARD')}
-                  className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <PlayCircle className="w-4 h-4" />
-                  #{career.jerseyNumber} {career.name} 커리어 이어하기
-                </button>
-                <button
-                  type="button"
-                  onClick={onRequestResetModal}
-                  className="inline-flex items-center gap-2 px-5 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-sm transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  새 선수로 처음부터 시작하기
-                </button>
-              </>
-            ) : (
+          {/* CTA 버튼 그룹 */}
+          <div className="flex flex-wrap items-center gap-3.5">
+            <button
+              type="button"
+              onClick={() => {
+                if (career) {
+                  resetActiveCareer();
+                } else {
+                  setView('CREATE');
+                }
+              }}
+              className="inline-flex items-center gap-2.5 bg-orange-600 hover:bg-orange-700 text-white font-black px-7 py-4 rounded-2xl text-base shadow-sm transition transform hover:-translate-y-0.5 cursor-pointer"
+            >
+              <Play className="w-5 h-5 fill-current" />
+              새 선수 생성하기
+            </button>
+
+            {career && (
               <button
                 type="button"
-                data-start="true"
-                onClick={() => setView('CREATE')}
-                className="inline-flex items-center gap-2 px-7 py-4 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-base transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+                onClick={() => setView(career.retirementReason ? 'RETIREMENT' : 'DASHBOARD')}
+                className="inline-flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold px-6 py-4 rounded-2xl text-base border border-slate-200 transition cursor-pointer"
               >
-                새 선수 생성하고 데뷔하기
-                <ArrowRight className="w-5 h-5" />
+                진행 중인 커리어 이어하기 ({career.name} · {LEAGUE_CONFIG[career.league].shortName} · 만 {career.age}세 · OVR {career.ovr})
+                <ArrowRight className="w-4 h-4 text-orange-600" />
               </button>
             )}
           </div>
+        </section>
 
-          <p className="text-xs text-slate-400 pt-1">
-            단축키 안내: 홈 화면에서 Enter 또는 Space 키를 누르면 바로 시작해요 · 모든 기록은 브라우저에 자동 저장돼요
-          </p>
-        </div>
+        {/* 올타임 베스트 5 하프코트 & 명예의 전당 보드 */}
+        <BestFiveCourt />
 
-        {/* 우측 커스텀 인라인 SVG 엠블럼 & 진행 중 선수 요약 카드 */}
-        <div className="lg:col-span-5">
-          {career ? (
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-6 space-y-4">
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span className="font-semibold text-orange-600">현재 진행 중인 선수</span>
-                <span className="tabular-nums">{career.seasonYear}시즌 · 만 {career.age}세</span>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <TeamEmblem team={career.team} size="lg" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs text-slate-500 truncate">{career.team.name}</p>
-                  <h2 className="text-xl font-extrabold text-slate-900 truncate">
-                    #{career.jerseyNumber} {career.name}
-                  </h2>
-                  <p className="text-xs font-medium text-slate-600 mt-0.5">
-                    {career.heightCm}cm · {career.primaryPos}
-                    {career.secondaryPos ? `/${career.secondaryPos}` : ''} · {career.role}
-                  </p>
-                </div>
-                <div className="text-right shrink-0">
-                  <span className="block text-xs text-slate-400 font-medium">OVR</span>
-                  <span className="text-3xl font-black text-orange-600 tabular-nums">
-                    {career.ovr}
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-200 text-center">
-                <div>
-                  <span className="block text-xs text-slate-500">통산 경기</span>
-                  <span className="text-base font-bold text-slate-900 tabular-nums">
-                    {career.totals.gp}G
-                  </span>
-                </div>
-                <div>
-                  <span className="block text-xs text-slate-500">통산 득점</span>
-                  <span className="text-base font-bold text-slate-900 tabular-nums">
-                    {career.totals.points.toLocaleString()}점
-                  </span>
-                </div>
-                <div>
-                  <span className="block text-xs text-slate-500">우승 / MVP</span>
-                  <span className="text-base font-bold text-amber-600 tabular-nums">
-                    {career.totals.championships}회 / {career.totals.mvps}회
-                  </span>
-                </div>
-              </div>
+        {/* 핵심 시스템 3대 특징 카드 */}
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
+            <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600 mb-4">
+              <TrendingUp className="w-5 h-5" />
             </div>
-          ) : (
-            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-6 flex flex-col items-center text-center">
-              {/* 커스텀 인라인 SVG 타이틀 엠블럼 */}
-              <svg
-                viewBox="0 0 220 140"
-                className="w-52 h-32 mb-3"
-                role="img"
-                aria-label="벤치에서 MVP까지 코트 엠블럼"
-              >
-                <rect
-                  x="10"
-                  y="10"
-                  width="200"
-                  height="120"
-                  rx="16"
-                  fill="#FFFFFF"
-                  stroke="#E2E8F0"
-                  strokeWidth="2"
-                />
-                {/* 하프코트 라인 */}
-                <path
-                  d="M40 130 V55 A70 70 0 0 1 180 55 V130"
-                  fill="none"
-                  stroke="#CBD5E1"
-                  strokeWidth="2"
-                />
-                <rect
-                  x="82"
-                  y="70"
-                  width="56"
-                  height="60"
-                  fill="#FFF7ED"
-                  stroke="#EA580C"
-                  strokeWidth="2"
-                />
-                <circle
-                  cx="110"
-                  cy="70"
-                  r="20"
-                  fill="none"
-                  stroke="#EA580C"
-                  strokeWidth="2"
-                  strokeDasharray="4 4"
-                />
-                {/* 농구공 + 크라운 심볼 */}
-                <circle
-                  cx="110"
-                  cy="45"
-                  r="18"
-                  fill="#EA580C"
-                />
-                <path
-                  d="M95 40 Q110 48 125 40 M95 50 Q110 42 125 50 M110 27 V63"
-                  fill="none"
-                  stroke="#FFFFFF"
-                  strokeWidth="1.8"
-                />
-              </svg>
+            <h3 className="text-lg font-extrabold text-slate-900 mb-2">
+              7대 리그 &amp; 동·서부 컨퍼런스
+            </h3>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              한국 고교 24개교 → U리그 12개교 → KBL 10구단 / 해외리그 / NCAA D1 24개교 / G리그 20구단 →
+              NBA 동·서부 30구단으로 이어지는 리얼한 리그 생태계를 구현했습니다.
+            </p>
+          </div>
 
-              <p className="text-sm font-bold text-slate-900">
-                하드코어 농구 커리어 시뮬레이터
-              </p>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                7개 리그 단계별 수비 저항치(LDR) · 시카고 드래프트 컴바인 · 투웨이 생존 심사 ·
-                30대 에이징 커브와 구단 영구결번 시스템이 준비되어 있어요.
-              </p>
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mb-4">
+              <ShieldAlert className="w-5 h-5" />
             </div>
-          )}
-        </div>
-      </div>
-    </section>
+            <h3 className="text-lg font-extrabold text-slate-900 mb-2">
+              양방향 생체역학 &amp; 포지션 밸런스
+            </h3>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              타점·림 장악력 지수(Reach)와 무게중심·볼 키핑 민첩성 지수(CoG)가 경기 야투율, 턴오버,
+              리바운드, 블록, 성장 탄력성에 연속 함수로 반영됩니다.
+            </p>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 mb-4">
+              <Trophy className="w-5 h-5" />
+            </div>
+            <h3 className="text-lg font-extrabold text-slate-900 mb-2">
+              4년 주기 아시안게임 &amp; 영구결번
+            </h3>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              4년마다 열리는 아시안게임 본선 토너먼트(조별리그·8강·4강·결승) 제패를 통한 병역특례와
+              프로 구단 영구결번 및 명예의 전당 헌액까지 경험할 수 있습니다.
+            </p>
+          </div>
+        </section>
+      </main>
+
+      <footer className="relative z-10 bg-white border-t border-slate-200 py-5 px-4 text-center text-xs text-slate-500">
+        From Bench to MVP · Basketball Career Simulator Engine
+      </footer>
+    </div>
   );
 }

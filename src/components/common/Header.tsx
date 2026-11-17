@@ -1,129 +1,196 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { UserPlus, PlayCircle, RotateCcw } from 'lucide-react';
+import { Award, Home, RotateCcw, Trophy } from 'lucide-react';
+import { generateLeagueFallbackSvgDataUri } from '../../data/logoFallbacks';
+import {
+  ALL_TEAMS,
+  ASIAN_NATIONAL_TEAMS,
+  GLEAGUE_TEAMS,
+  NBA_TEAMS,
+  NCAA_TEAMS,
+} from '../../data/teams';
 import { useCareerStore } from '../../store/useCareerStore';
 
 interface HeaderProps {
-  onRequestResetModal: () => void;
+  onRequestResetModal?: () => void;
 }
 
-export function Header({ onRequestResetModal }: HeaderProps) {
-  const view = useCareerStore((s) => s.view);
-  const career = useCareerStore((s) => s.career);
-  const hofList = useCareerStore((s) => s.hofList);
-  const setView = useCareerStore((s) => s.setView);
-  const setEspnLogos = useCareerStore((s) => s.setEspnLogos);
-  const espnApiConnected = useCareerStore((s) => s.espnApiConnected);
+const CLIENT_LOGO_CACHE_KEY = 'bench_to_mvp_logo_cache_v2';
+const CLIENT_LOGO_CACHE_TTL = 60 * 60 * 1000; // 1시간
 
-  // 앱 실행 시 서버 API 라우트를 통해 ESPN 공식 Public API에서 NBA 및 NCAA 로고 동기화 (CORS 방지)
+export function Header({ onRequestResetModal }: HeaderProps = {}) {
+  const {
+    view,
+    career,
+    hofList,
+    setView,
+    resetActiveCareer,
+    setEspnLogos,
+  } = useCareerStore();
+
+  // 전 리그 크롤링 API (/api/league-sync) 및 로컬 스토리지 캐싱 + 리그별 SVG 폴백 초기화
   useEffect(() => {
-    if (espnApiConnected) return;
-    let cancelled = false;
-
-    async function syncEspnLogos() {
-      try {
-        const res = await fetch('/api/espn-logos');
-        if (res.ok) {
-          const data = await res.json();
-          if (!cancelled && data?.logos && Object.keys(data.logos).length > 0) {
-            setEspnLogos(data.logos);
-          }
-        }
-      } catch {
-        // 오프라인 폴백 처리
+    const baseLogos: Record<string, string> = {};
+    for (const t of [...ALL_TEAMS, ...ASIAN_NATIONAL_TEAMS]) {
+      const svgFallback = generateLeagueFallbackSvgDataUri(t);
+      baseLogos[`FALLBACK_${t.id}`] = svgFallback;
+      baseLogos[t.id] = t.logoUrl || svgFallback;
+    }
+    for (const t of NBA_TEAMS) {
+      if (t.espnAbbr) {
+        const url = `https://a.espncdn.com/i/teamlogos/nba/500/${t.espnAbbr.toLowerCase()}.png`;
+        baseLogos[t.id] = url;
+        if (t.espnId) baseLogos[`ESPN_NBA_${t.espnId}`] = url;
+      }
+    }
+    for (const t of NCAA_TEAMS) {
+      if (t.espnId) {
+        const url = `https://a.espncdn.com/i/teamlogos/ncaa/500/${t.espnId}.png`;
+        baseLogos[t.id] = url;
+        baseLogos[`ESPN_NCAA_${t.espnId}`] = url;
+      }
+    }
+    for (const t of GLEAGUE_TEAMS) {
+      if (t.espnAbbr) {
+        const url = `https://a.espncdn.com/i/teamlogos/nba-development/500/${t.espnAbbr.toLowerCase()}.png`;
+        baseLogos[t.id] = url;
+        if (t.espnId) baseLogos[`ESPN_GLEAGUE_${t.espnId}`] = url;
       }
     }
 
-    syncEspnLogos();
-    return () => {
-      cancelled = true;
-    };
-  }, [espnApiConnected, setEspnLogos]);
+    // 클라이언트 캐시 우선 로드
+    try {
+      const rawCache = window.localStorage.getItem(CLIENT_LOGO_CACHE_KEY);
+      if (rawCache) {
+        const parsed = JSON.parse(rawCache);
+        if (
+          parsed &&
+          typeof parsed.timestamp === 'number' &&
+          Date.now() - parsed.timestamp < CLIENT_LOGO_CACHE_TTL &&
+          parsed.logos
+        ) {
+          setEspnLogos({ ...baseLogos, ...parsed.logos });
+        } else {
+          setEspnLogos(baseLogos);
+        }
+      } else {
+        setEspnLogos(baseLogos);
+      }
+    } catch {
+      setEspnLogos(baseLogos);
+    }
+
+    fetch('/api/league-sync')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.logos) {
+          const merged: Record<string, string> = { ...baseLogos, ...data.logos };
+          if (data.fallbacks) {
+            for (const [id, fb] of Object.entries(data.fallbacks)) {
+              merged[`FALLBACK_${id}`] = String(fb);
+            }
+          }
+          for (const t of NCAA_TEAMS) {
+            if (t.espnId && data.logos[`ESPN_NCAA_${t.espnId}`]) {
+              merged[t.id] = data.logos[`ESPN_NCAA_${t.espnId}`];
+            }
+          }
+          for (const t of NBA_TEAMS) {
+            if (t.espnId && data.logos[`ESPN_NBA_${t.espnId}`]) {
+              merged[t.id] = data.logos[`ESPN_NBA_${t.espnId}`];
+            }
+          }
+          for (const t of GLEAGUE_TEAMS) {
+            if (t.espnId && data.logos[`ESPN_GLEAGUE_${t.espnId}`]) {
+              merged[t.id] = data.logos[`ESPN_GLEAGUE_${t.espnId}`];
+            }
+          }
+          setEspnLogos(merged);
+          try {
+            window.localStorage.setItem(
+              CLIENT_LOGO_CACHE_KEY,
+              JSON.stringify({ timestamp: Date.now(), logos: merged })
+            );
+          } catch {
+            // 스토리지 용량 초과 시 무시
+          }
+        }
+      })
+      .catch(() => {
+        // 네트워크 차단 시 사전 생성된 공식 URL 및 리그별 SVG 이니셜 폴백 유지
+      });
+  }, [setEspnLogos]);
 
   return (
-    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-slate-200">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-8">
-        {/* Zone 1: Brand Title */}
+    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
         <button
-          type="button"
           onClick={() => setView('HOME')}
-          className="text-lg font-extrabold tracking-tight text-slate-900 hover:text-orange-600 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          className="flex items-center gap-2.5 text-left group cursor-pointer"
         >
-          벤치에서 MVP까지
+          <div className="w-9 h-9 rounded-xl bg-orange-600 flex items-center justify-center shadow-xs group-hover:bg-orange-700 transition-colors">
+            <Trophy className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-black tracking-tight text-base sm:text-lg text-slate-900">
+                벤치에서 MVP까지
+              </span>
+              <span className="hidden sm:inline text-xs font-bold text-orange-600">
+                · PRO EDITION
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 hidden sm:block">
+              고교 코트에서 NBA 명예의 전당까지 · 리얼 농구 커리어 시뮬레이션
+            </p>
+          </div>
         </button>
 
-        {/* Zone 2: Concise Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
-          <button
-            type="button"
-            onClick={() => setView('HOME')}
-            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              view === 'HOME' ? 'text-orange-600 font-semibold' : ''
-            }`}
-          >
-            올타임 베스트 5 ({hofList.length}명 헌액)
-          </button>
-
-          {career && (
+        <div className="flex items-center gap-2">
+          {hofList.length > 0 && (
             <button
-              type="button"
-              onClick={() => setView('DASHBOARD')}
-              className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                view === 'DASHBOARD' ? 'text-orange-600 font-semibold' : ''
-              }`}
+              onClick={() => setView('HOME')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-amber-800 transition-colors cursor-pointer"
             >
-              진행 중인 커리어 (#{career.jerseyNumber} {career.name})
+              <Award className="w-3.5 h-3.5 text-amber-600" />
+              <span>명예의 전당 ({hofList.length})</span>
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={() => {
-              if (career) {
-                onRequestResetModal();
-              } else {
-                setView('CREATE');
-              }
-            }}
-            className={`hover:text-slate-900 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              view === 'CREATE' ? 'text-orange-600 font-semibold' : ''
-            }`}
-          >
-            새 선수 육성
-          </button>
-        </nav>
-
-        {/* Zone 3: 1 Primary Action */}
-        <div className="flex items-center gap-3 shrink-0">
-          {career ? (
-            view === 'DASHBOARD' ? (
-              <button
-                type="button"
-                onClick={onRequestResetModal}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                새 선수 만들기
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setView('DASHBOARD')}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <PlayCircle className="w-3.5 h-3.5" />
-                커리어 이어하기
-              </button>
-            )
-          ) : (
+          {career && view !== 'DASHBOARD' && !career.retirementReason && (
             <button
-              type="button"
-              onClick={() => setView('CREATE')}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-orange-600 hover:bg-orange-700 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              onClick={() => setView('DASHBOARD')}
+              className="px-3.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition-colors cursor-pointer"
             >
-              <UserPlus className="w-3.5 h-3.5" />
-              선수 생성하기
+              커리어 복귀 ({career.name})
+            </button>
+          )}
+
+          {view !== 'HOME' && (
+            <button
+              onClick={() => setView('HOME')}
+              className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 transition-colors cursor-pointer"
+              title="홈 화면"
+            >
+              <Home className="w-4 h-4" />
+            </button>
+          )}
+
+          {career && (
+            <button
+              onClick={() => {
+                if (onRequestResetModal) {
+                  onRequestResetModal();
+                } else {
+                  resetActiveCareer();
+                }
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-xs font-semibold text-slate-700 hover:text-rose-700 transition-colors cursor-pointer"
+              title="새 선수 키우기"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">새 커리어</span>
             </button>
           )}
         </div>
@@ -131,3 +198,5 @@ export function Header({ onRequestResetModal }: HeaderProps) {
     </header>
   );
 }
+
+export default Header;

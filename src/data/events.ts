@@ -267,29 +267,29 @@ import { rollCombinatorialEncounter } from '../engine/encounterEngine';
 
 export const ASIAN_GAMES_MILITARY_EVENT: CareerEvent = {
   id: 'EVT_ASIAN_GAMES_GOLD',
-  title: '🇰🇷 아시안게임 남자농구 국가대표 차출 & 결승전',
-  subtitle: '병역특례(예술·체육요원) 혜택이 걸린 운명의 결승전',
+  title: '🇰🇷 아시안게임 남자농구 국가대표 최종 엔트리 차출 (4년 주기)',
+  subtitle: '조별리그(3경기) → 8강 → 4강 토너먼트 돌파 시 결승전 & 금메달 병역특례 도전',
   description:
-    '태극마크를 달고 출전한 아시안게임 결승전! 숙적과의 결승 무대에서 대표팀의 에이스로서 금메달과 병역특례 혜택을 동시에 거머쥘 절호의 기회가 찾아왔어요.',
+    '4년마다 열리는 아시안게임 남자농구 국가대표팀 최종 12인 엔트리에 발탁되었어요! 조별리그와 8강·4강 토너먼트를 모두 통과해 결승전에서 우승(금메달)을 차지해야만 병역특례(예술·체육요원) 혜택을 받을 수 있어요.',
   category: 'MILITARY',
   choices: [
     {
-      label: '🏀 [실시간 결승 중계] 태극마크를 달고 결승전 코트에 직접 나선다! (1Q~4Q 전술 지휘)',
-      description: '실시간 쿼터별 라이브 중계를 통해 직접 전술을 선택하며 금메달과 병역특례에 도전해요!',
-      effectSummary: '📡 아시안게임 결승전 라이브 중계 돌입 (승리 시 금메달 & 병역특례 + 능력치 상승)',
+      label: '🇰🇷 태극마크를 달고 아시안게임 본선 토너먼트(조별리그 → 8강 → 4강) 출전!',
+      description:
+        '조별리그부터 4강까지 아시아 강호들과 진검승부를 펼쳐요. 4강 승리 시 대망의 결승전 실시간 중계로 직행해요!',
+      effectSummary:
+        '🏀 아시안게임 풀 토너먼트 진행 (4강 승리 시 결승전 라이브 중계 진입 · 결승 우승 시에만 병역특례 부여)',
       statChanges: { ins: 1, out: 1, ply: 1 },
       trustDelta: 6,
       draftStockDelta: 6,
-      startAsianGamesFinal: true,
+      enterAsianGamesTournament: true,
     },
     {
-      label: '⚡ [즉시 결과 진행] 모든 에너지를 쏟아부어 결승전 클러치 지배!',
-      description: '공수 양면에서 코트를 지배하며 대한민국의 금메달을 즉시 이끌어요!',
-      effectSummary: '🎖️ 아시안게임 금메달 & 병역특례 획득! · 전 능력치 +1 · 스카우트 주목도 +8',
-      statChanges: { ins: 1, out: 1, ply: 1, def: 1, reb: 1, phy: 1 },
-      trustDelta: 8,
-      draftStockDelta: 8,
-      grantMilitaryExemption: true,
+      label: '🏥 소속팀 비시즌 훈련 및 부상 관리에 전념 (대표팀 차출 고사)',
+      description: '아시안게임에 불참하고 개인 기량 연마와 컨디션 관리에 집중해요 (병역특례 기회 패스).',
+      effectSummary: 'PHY +2, OUT +1 · 대표팀 불참 (병역 미필 유지)',
+      statChanges: { phy: 2, out: 1 },
+      trustDelta: 2,
     },
   ],
 };
@@ -559,14 +559,15 @@ export function rollSeasonEvent(
     }
   }
 
-  // 3) 아시안게임 병역특례 이벤트: 미필 상태 & OVR >= 66 & 21~26세 사이일 때 제한적 확률(28%)로 발생
+  // 3) 아시안게임 국가대표 차출 이벤트: 실제 4년 주기(2026, 2030, 2034, 2038...)에만 발동 & 미필 상태 & OVR >= 65 & 20~26세
+  const isAsianGamesYear = career.seasonYear % 4 === 2;
   if (
+    isAsianGamesYear &&
     !career.militaryExempt &&
     career.militaryServiceSeasonsLeft === 0 &&
-    career.age >= 21 &&
+    career.age >= 20 &&
     career.age <= 26 &&
-    career.ovr >= 66 &&
-    rng() < 0.28
+    career.ovr >= 65
   ) {
     return ASIAN_GAMES_MILITARY_EVENT;
   }

@@ -15,7 +15,10 @@ import {
 } from '../types/game';
 import { checkRetirementEligibility } from './retirementEngine';
 import { getContractDefaultSalary } from './seasonSimulator';
-import { calculateHeightMismatchPenalty } from './statCalculator';
+import {
+  calculateBiomechanicalProfile,
+  calculateHeightMismatchPenalty,
+} from './statCalculator';
 
 export interface HighSchoolProspectEvaluation {
   stars: 1 | 2 | 3 | 4 | 5;
@@ -177,6 +180,7 @@ export function evaluateTeamScouting(
 
   const currentLeagueCfg = LEAGUE_CONFIG[career.league];
   const targetLeagueCfg = LEAGUE_CONFIG[targetTeam.league];
+  const bio = calculateBiomechanicalProfile(career.heightCm, career.primaryPos);
   const mismatch = calculateHeightMismatchPenalty(
     career.heightCm,
     career.primaryPos
@@ -188,15 +192,13 @@ export function evaluateTeamScouting(
   let realGameCompetence = true;
   let translatedPerfScore = 13.5;
 
-  // 심각한 포지션 신장 미스매치(예: 168cm 센터)는 상위 프로/NBA 스카우팅에서 즉시 실격 판정
-  if (
-    mismatch.isSevereMismatch &&
-    (targetTeam.league === 'NBA' ||
-      targetTeam.league === 'GLEAGUE' ||
-      targetTeam.league === 'OVERSEAS')
-  ) {
-    realGameCompetence = false;
-  }
+  // [자연 도태 스카우팅 (Natural Selection)]
+  // 신장 숫자만으로 무조건 하드밴하지 않고, 생체역학 물리 부하(positionalPhysicsStrain, tovRatePenalty, perimeterDefPenalty)와
+  // 실전 코트 효율(야투율, 36분 환산 생산성, 포지션별 리바운드/어시스트 효율)을 결합해 평가합니다.
+  const bioEfficiencyDrag =
+    bio.positionalPhysicsStrain * 14.5 +
+    bio.tovRatePenalty * 2.2 +
+    bio.perimeterDefPenalty * 0.55;
 
   if (lastLog) {
     const calcRawImpact = (log: typeof lastLog) =>
@@ -219,16 +221,29 @@ export function evaluateTeamScouting(
       : lastCombined;
 
     const shootingEfficiency =
-      (lastLog.fgPct - 43.0) * 0.42 + (lastLog.tpPct - 33.0) * 0.3;
+      (lastLog.fgPct - 43.0) * 0.45 + (lastLog.tpPct - 33.0) * 0.3;
+
+    // 포지션별 필수 실전 역할 검증 (빅맨은 리바운드/블록 효율, 포인트가드는 어시스트/턴오버 억제 효율)
+    const scale36 = 36 / Math.max(10.5, lastLog.mpg);
+    const roleSpecificPenalty =
+      (career.primaryPos === 'C' || career.primaryPos === 'PF') &&
+      lastLog.rpg * scale36 < 5.2
+        ? (5.2 - lastLog.rpg * scale36) * 1.8
+        : career.primaryPos === 'PG' &&
+          (lastLog.apg * scale36 < 4.2 || bio.tovRatePenalty >= 1.8)
+        ? bio.tovRatePenalty * 2.4
+        : 0;
 
     translatedPerfScore =
-      (weightedImpact * ldrRatio + shootingEfficiency) *
+      (weightedImpact * ldrRatio + shootingEfficiency - roleSpecificPenalty) *
       (0.78 + currentLeagueCfg.prestige * 0.28);
 
     const ovrEdgeOverTargetLeague = career.ovr - targetLeagueCfg.ldr;
     const effectiveCompetenceIndex =
       weightedImpact * ldrRatio +
-      shootingEfficiency * 1.15 +
+      shootingEfficiency * 1.15 -
+      roleSpecificPenalty -
+      bioEfficiencyDrag * 0.65 +
       (isSteppingDownLeague ? Math.max(0, ovrEdgeOverTargetLeague * 1.4) : 0);
 
     const minCompetenceRequired =
@@ -241,6 +256,14 @@ export function evaluateTeamScouting(
     if (effectiveCompetenceIndex < minCompetenceRequired) {
       realGameCompetence = false;
     }
+  } else if (
+    bioEfficiencyDrag >= 11.0 &&
+    (targetTeam.league === 'NBA' ||
+      targetTeam.league === 'GLEAGUE' ||
+      targetTeam.league === 'OVERSEAS')
+  ) {
+    // 경기 기록이 없거나 부족한 상태에서 극단적 물리 부하 포지션을 고집할 경우 실전 경쟁력 미달
+    realGameCompetence = false;
   }
 
   const teamDirection = targetTeam.direction || 'PLAYOFF_HUNT';
@@ -971,28 +994,31 @@ export function generateOffseasonOptions(
     });
     teamOffersCount += 1;
 
-    // 만약 구단이 약속한 역할(Role Promise)을 어겼다면 오프시즌 공식 트레이드 이적 요구 선택지 활성화!
-    if (career.brokenRolePromise) {
-      const sameLeagueAlt = (
-        career.league === 'NBA'
-          ? nbaTeams
-          : career.league === 'KBL'
-          ? kblTeams
-          : career.league === 'OVERSEAS'
-          ? overseasTeams
-          : gleagueTeams
-      )
-        .filter((t) => t.id !== career.team.id)
-        .sort((a, b) => a.rating - b.rating)[0];
+    // 만약 구단이 약속한 역할(Role Promise)을 어겼거나 다년 계약 중 새로운 도전을 원할 경우 공식 트레이드 이적 요구 선택지 제공!
+    const sameLeaguePoolForTrade = (
+      career.league === 'NBA'
+        ? nbaTeams
+        : career.league === 'KBL'
+        ? kblTeams
+        : career.league === 'OVERSEAS'
+        ? overseasTeams
+        : gleagueTeams
+    ).filter((t) => t.id !== career.team.id);
 
-      if (sameLeagueAlt) {
+    const tradeTarget =
+      sameLeaguePoolForTrade.find((t) =>
+        t.neededPositions?.includes(career.primaryPos)
+      ) || sameLeaguePoolForTrade.sort((a, b) => a.rating - b.rating)[0];
+
+    if (tradeTarget) {
+      if (career.brokenRolePromise) {
         options.push({
-          id: `OPT_DEMAND_TRADE_${sameLeagueAlt.id}`,
-          title: `🚨 [역할 약속 위반 트레이드 요구] ${sameLeagueAlt.name}(으)로 전격 이적`,
-          subtitle: `출전 시간 약속을 어긴 원소속팀을 떠나, 주전 스타터 보장을 약속한 ${sameLeagueAlt.name} 구단으로 트레이드 이적해요!`,
+          id: `OPT_DEMAND_TRADE_${tradeTarget.id}`,
+          title: `🚨 [역할 약속 위반 트레이드 요구] ${tradeTarget.name}(으)로 전격 이적`,
+          subtitle: `출전 시간 약속을 어긴 원소속팀을 떠나, 주전 스타터 보장을 약속한 ${tradeTarget.name} 구단으로 트레이드 이적해요!`,
           badgeText: '트레이드 이적 (주전 보장)',
-          targetLeague: sameLeagueAlt.league,
-          targetTeam: sameLeagueAlt,
+          targetLeague: tradeTarget.league,
+          targetTeam: tradeTarget,
           contractType: career.contractType,
           contractYears: career.contractYearsLeft,
           annualSalary: career.annualSalary,
@@ -1000,8 +1026,28 @@ export function generateOffseasonOptions(
           promisedRoleLabel: ROLE_PROMISE_LABELS.STARTER_GUARANTEE,
           actionType: 'SIGN_TEAM',
         });
-        teamOffersCount += 1;
+      } else {
+        const tradePromise = determineTeamRolePromise(
+          career,
+          tradeTarget,
+          career.contractType
+        );
+        options.push({
+          id: `OPT_CONTRACT_REQUEST_TRADE_${tradeTarget.id}`,
+          title: `🔄 [공식 트레이드 이적 요청] ${tradeTarget.name}(으)로 트레이드 추진`,
+          subtitle: `잔여 계약(${career.contractYearsLeft}년)을 유지한 채 ${career.primaryPos} 포지션 보강을 원하는 ${tradeTarget.name} 구단으로 이적을 요청해요 · [${tradePromise.promisedRoleLabel}]`,
+          badgeText: '구단 트레이드 요청',
+          targetLeague: tradeTarget.league,
+          targetTeam: tradeTarget,
+          contractType: career.contractType,
+          contractYears: career.contractYearsLeft,
+          annualSalary: career.annualSalary,
+          promisedRole: tradePromise.promisedRole,
+          promisedRoleLabel: tradePromise.promisedRoleLabel,
+          actionType: 'REQUEST_TRADE',
+        });
       }
+      teamOffersCount += 1;
     }
   } else if (career.contractYearsLeft === 0 && !isOutOfLeague) {
     // 2) 계약 만료(FA) 상태: 원소속팀 재계약 심사 (프랜차이즈의 심장 특성 보유 시 우대)
@@ -1160,18 +1206,19 @@ export function generateOffseasonOptions(
   if (career.league !== 'NBA' && !isOutOfLeague) {
     const per36Pts = lastLog
       ? (lastLog.ppg * 36) / Math.max(12, lastLog.mpg)
-      : 0;
+      : 15;
     if (
-      career.age <= 22 &&
+      career.age <= 24 &&
       career.totals.nbaGp === 0 &&
-      per36Pts >= 16.5 &&
-      career.draftStock >= 44
+      (per36Pts >= 14.5 || career.ovr >= 68) &&
+      career.draftStock >= 36
     ) {
       options.push({
         id: 'OPT_PRO_TO_NBA_DRAFT',
         title: '🏀 NBA 신인드래프트 참가 신청 (시카고 컴바인 진출)',
-        subtitle: '프로 무대에서 입증한 실전 기록을 바탕으로 NBA 드래프트에 도전장을 던져요!',
-        badgeText: 'NBA 드래프트',
+        subtitle:
+          '프로 무대에서 입증한 실전 기록을 바탕으로 시카고 컴바인과 NBA 드래프트 지명에 도전장을 던져요!',
+        badgeText: 'NBA 드래프트 도전',
         targetLeague: 'NBA',
         contractType: 'NBA_STANDARD',
         contractYears: 4,

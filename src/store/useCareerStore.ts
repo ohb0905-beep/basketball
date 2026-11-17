@@ -26,6 +26,8 @@ import {
   advancePlayoffRound,
   createLiveFinalGame,
   createPlayoffBracket,
+  evaluateRealisticFinalsMvp,
+  simulateAsianGamesTournament,
   simulateLiveQuarter,
   skipEntirePlayoffs,
   skipLiveGameToEnd,
@@ -958,16 +960,44 @@ export const useCareerStore = create<CareerStoreState>()(
           standings
         );
 
-        // 만약 결승 라운드에 플레이어가 진출했고 아직 결승 승자가 미확정이면 실시간 파이널 중계 진입 가능
         const logs = [...career.seasonLogs];
+        const nextTotals = { ...career.totals };
+        const nextMilestones = [...career.milestones];
+
         if (logs.length > 0) {
           const lastIdx = logs.length - 1;
           const prevLog = logs[lastIdx];
-          const wonChamp = updatedBracket.championTeamId === prevLog.teamId;
+          const wonChamp =
+            Boolean(updatedBracket.championTeamId) &&
+            updatedBracket.championTeamId === prevLog.teamId;
+          const wonFmvp = wonChamp
+            ? evaluateRealisticFinalsMvp(career, wonChamp)
+            : false;
+
+          if (wonChamp && !prevLog.wonChampionship) {
+            nextTotals.championships += 1;
+            if (prevLog.league === 'NBA') nextTotals.nbaChampionships += 1;
+            if (wonFmvp) {
+              nextTotals.finalsMvps = (nextTotals.finalsMvps || 0) + 1;
+            }
+            nextMilestones.push({
+              id: `MS_CHAMP_${prevLog.year}_${Date.now()}`,
+              year: prevLog.year,
+              age: prevLog.age,
+              title: `💍 ${prevLog.leagueName} 챔피언십 우승${
+                wonFmvp ? ' & 파이널 MVP!' : '!'
+              }`,
+              description: `${prevLog.teamName} 소속으로 포스트시즌 토너먼트 정상에 등극했어요!`,
+              type: 'CHAMPIONSHIP',
+              teamName: prevLog.teamName,
+            });
+          }
+
           logs[lastIdx] = {
             ...prevLog,
             playoffResult: updatedBracket.playoffResultLabel,
             wonChampionship: wonChamp || prevLog.wonChampionship,
+            wonFinalsMvp: wonFmvp || prevLog.wonFinalsMvp,
           };
         }
 
@@ -976,6 +1006,8 @@ export const useCareerStore = create<CareerStoreState>()(
             ...career,
             playoffBracket: updatedBracket,
             seasonLogs: logs,
+            totals: nextTotals,
+            milestones: nextMilestones,
             seasonPhase: updatedBracket.championTeamId
               ? 'OFFSEASON'
               : 'POSTSEASON_BRACKET',
@@ -995,16 +1027,37 @@ export const useCareerStore = create<CareerStoreState>()(
         );
 
         const logs = [...career.seasonLogs];
-        let nextTotals = { ...career.totals };
+        const nextTotals = { ...career.totals };
+        const nextMilestones = [...career.milestones];
+
         if (logs.length > 0) {
           const lastIdx = logs.length - 1;
           const prevLog = logs[lastIdx];
-          const wonChamp = finishedBracket.championTeamId === prevLog.teamId;
+          const wonChamp =
+            Boolean(finishedBracket.championTeamId) &&
+            finishedBracket.championTeamId === prevLog.teamId;
+          const wonFmvp = wonChamp
+            ? evaluateRealisticFinalsMvp(career, wonChamp)
+            : false;
           const wasChampBefore = prevLog.wonChampionship;
 
           if (wonChamp && !wasChampBefore) {
             nextTotals.championships += 1;
             if (prevLog.league === 'NBA') nextTotals.nbaChampionships += 1;
+            if (wonFmvp) {
+              nextTotals.finalsMvps = (nextTotals.finalsMvps || 0) + 1;
+            }
+            nextMilestones.push({
+              id: `MS_CHAMP_${prevLog.year}_${Date.now()}`,
+              year: prevLog.year,
+              age: prevLog.age,
+              title: `💍 ${prevLog.leagueName} 챔피언십 우승${
+                wonFmvp ? ' & 파이널 MVP!' : '!'
+              }`,
+              description: `${prevLog.teamName} 소속으로 포스트시즌 토너먼트 정상에 등극했어요!`,
+              type: 'CHAMPIONSHIP',
+              teamName: prevLog.teamName,
+            });
           } else if (!wonChamp && wasChampBefore) {
             nextTotals.championships = Math.max(0, nextTotals.championships - 1);
             if (prevLog.league === 'NBA') {
@@ -1019,6 +1072,7 @@ export const useCareerStore = create<CareerStoreState>()(
             ...prevLog,
             playoffResult: finishedBracket.playoffResultLabel,
             wonChampionship: wonChamp,
+            wonFinalsMvp: wonFmvp,
           };
         }
 
@@ -1028,6 +1082,7 @@ export const useCareerStore = create<CareerStoreState>()(
             playoffBracket: finishedBracket,
             seasonLogs: logs,
             totals: nextTotals,
+            milestones: nextMilestones,
             seasonPhase: 'OFFSEASON',
           },
           toast: {
@@ -1327,28 +1382,74 @@ export const useCareerStore = create<CareerStoreState>()(
           }
         }
 
-        // 아시안게임 결승전 실시간 라이브 중계 시작
+        // 아시안게임 본선 풀 토너먼트(조별리그 → 8강 → 4강) 및 결승전 실시간 라이브 중계 진입
         let nextLiveGame = career.liveGame || null;
         let nextSeasonPhase = career.seasonPhase || 'OFFSEASON';
-        if (choice.startAsianGamesFinal) {
-          const agOpponent: TeamInfo = {
-            id: 'AG_FINAL_OPP',
-            name: '아시아 최강 라이벌 대표팀',
-            shortName: '결승 상대국',
-            city: '개최지 아레나',
-            league: 'OVERSEAS',
-            rating: 72,
-            primaryColor: '#DC2626',
-            secondaryColor: '#FACC15',
-            prestigeDesc: '아시안게임 금메달을 놓고 맞붙는 결승전 숙적이에요.',
-            direction: 'CONTENDER',
-          };
-          nextLiveGame = createLiveFinalGame(
-            career,
-            agOpponent,
-            'ASIAN_GAMES_FINAL'
+        let nextSeasonLogs = [...career.seasonLogs];
+        let agToastTitle: string | null = null;
+        let agToastDesc: string | null = null;
+        let agToastTone: ToastMessage['tone'] = 'emerald';
+
+        if (choice.enterAsianGamesTournament || choice.startAsianGamesFinal) {
+          const tourney = simulateAsianGamesTournament(career);
+          const matchSummaries = tourney.matches.map(
+            (m) =>
+              `[${m.stageLabel}] 대한민국 ${m.korScore}:${m.oppScore} ${m.opponentName} (${
+                m.won ? '승' : '패'
+              } · 본인 ${m.playerPts}점 ${m.playerReb}리바운드 ${m.playerAst}도움)`
           );
-          nextSeasonPhase = 'LIVE_FINAL_BROADCAST';
+
+          if (nextSeasonLogs.length > 0) {
+            const lastIdx = nextSeasonLogs.length - 1;
+            nextSeasonLogs[lastIdx] = {
+              ...nextSeasonLogs[lastIdx],
+              narrativeLog: [
+                tourney.summaryHeadline,
+                ...matchSummaries,
+                ...nextSeasonLogs[lastIdx].narrativeLog,
+              ],
+            };
+          }
+
+          if (tourney.reachedFinals && tourney.finalOpponent) {
+            nextLiveGame = createLiveFinalGame(
+              career,
+              tourney.finalOpponent,
+              'ASIAN_GAMES_FINAL'
+            );
+            nextSeasonPhase = 'LIVE_FINAL_BROADCAST';
+            nextMilestones.push({
+              id: `MS_AG_FINALS_${Date.now()}`,
+              year: career.seasonYear,
+              age: career.age,
+              title: `🇰🇷 ${career.seasonYear} 아시안게임 결승 진출! (vs ${tourney.finalOpponent.name})`,
+              description: `${matchSummaries.join(' / ')} · 결승전 실시간 중계에서 금메달과 병역특례에 도전해요!`,
+              type: 'SPECIAL',
+              teamName: '대한민국 국가대표팀',
+            });
+            agToastTitle = '📡 아시안게임 4강 돌파! 결승전 실시간 중계 입장!';
+            agToastDesc = tourney.summaryHeadline;
+            agToastTone = 'orange';
+          } else {
+            nextLiveGame = null;
+            nextSeasonPhase = 'OFFSEASON';
+            nextMilestones.push({
+              id: `MS_AG_ELIM_${Date.now()}`,
+              year: career.seasonYear,
+              age: career.age,
+              title: `🇰🇷 ${career.seasonYear} 아시안게임 ${
+                tourney.eliminatedStage === 'SEMIFINAL' ? '4강' : '8강'
+              } 탈락 (병역특례 무산)`,
+              description: `${matchSummaries.join(' / ')} · ${tourney.summaryHeadline}`,
+              type: 'MILITARY',
+              teamName: '대한민국 국가대표팀',
+            });
+            agToastTitle = `😢 아시안게임 ${
+              tourney.eliminatedStage === 'SEMIFINAL' ? '4강' : '8강'
+            } 탈락 (병역특례 획득 실패)`;
+            agToastDesc = tourney.summaryHeadline;
+            agToastTone = 'amber';
+          }
         }
 
         const updatedBase: CareerState = {
@@ -1378,6 +1479,7 @@ export const useCareerStore = create<CareerStoreState>()(
           pendingChainEvent: choice.nextChainEvent || career.pendingChainEvent || null,
           liveGame: nextLiveGame,
           seasonPhase: nextSeasonPhase,
+          seasonLogs: nextSeasonLogs,
           badges: evaluatePlayerBadges(
             nextStats,
             nextSecondary,
@@ -1400,15 +1502,15 @@ export const useCareerStore = create<CareerStoreState>()(
           },
           toast: {
             id: `TOAST_${Date.now()}`,
-            title: choice.startAsianGamesFinal
-              ? '📡 아시안게임 결승전 실시간 라이브 중계 시작!'
-              : choice.enlistSangmu
-              ? '🫡 국군체육부대(상무)에 입대했어요!'
-              : choice.executeTradeToContender
-              ? `✈️ ${nextTeam.name}(으)로 트레이드 이적 완료!`
-              : '선택 결과가 선수에게 반영되었어요!',
-            description: choice.effectSummary,
-            tone: 'emerald',
+            title:
+              agToastTitle ||
+              (choice.enlistSangmu
+                ? '🫡 국군체육부대(상무)에 입대했어요!'
+                : choice.executeTradeToContender
+                ? `✈️ ${nextTeam.name}(으)로 트레이드 이적 완료!`
+                : '선택 결과가 선수에게 반영되었어요!'),
+            description: agToastDesc || choice.effectSummary,
+            tone: agToastTone,
           },
         });
       },
@@ -1584,7 +1686,9 @@ export const useCareerStore = create<CareerStoreState>()(
             id: `MS_SIGN_${Date.now()}`,
             year: career.seasonYear,
             age: career.age,
-            title: `${nextTeam.name} (${LEAGUE_CONFIG[nextLeague].shortName}) 계약 체결`,
+            title: `${nextTeam.name} (${LEAGUE_CONFIG[nextLeague].shortName}) ${
+              option.actionType === 'REQUEST_TRADE' ? '트레이드 이적' : '계약 체결'
+            }`,
             description: `약속 역할 [${ROLE_PROMISE_LABELS[nextPromisedRole]}] · '${role}' 입지로 새로운 도전을 시작했어요.`,
             type: 'SPECIAL',
             teamName: nextTeam.name,
@@ -1622,7 +1726,9 @@ export const useCareerStore = create<CareerStoreState>()(
           toast: {
             id: `TOAST_${Date.now()}`,
             title: isTeamChanged
-              ? `${nextTeam.name} 계약을 완료했어요!`
+              ? `${nextTeam.name} ${
+                  option.actionType === 'REQUEST_TRADE' ? '트레이드 이적' : '계약'
+                }을 완료했어요!`
               : `${nextTeam.name}에서 새 시즌을 준비해요!`,
             description: `구단 약속 역할: ${ROLE_PROMISE_LABELS[nextPromisedRole]}`,
             tone: 'orange',
@@ -1719,23 +1825,47 @@ export const useCareerStore = create<CareerStoreState>()(
         const { career } = get();
         if (!career) return;
 
+        // NBA 드래프트 신청을 철회해도 오프시즌 에이전트 데스크 선택권(잔류/타 구단 오퍼/KBL 드래프트 등)을 유지!
+        const allOptions = generateOffseasonOptions(career);
+        const remainingOptions = allOptions.filter(
+          (opt) => opt.actionType !== 'ENTER_NBA_DRAFT'
+        );
+        const fallbackOptions: OffseasonOption[] =
+          remainingOptions.length > 0
+            ? remainingOptions
+            : [
+                {
+                  id: 'OPT_WITHDRAW_STAY_FALLBACK',
+                  title: `${career.team.name} 복귀 및 1시즌 추가 활약`,
+                  subtitle:
+                    'NBA 드래프트 참가를 철회하고 소속팀에서 주전으로 한 시즌 더 실전 기량을 증명해요.',
+                  badgeText: '드래프트 철회 · 소속팀 복귀',
+                  targetLeague: career.league,
+                  targetTeam: career.team,
+                  contractType: career.contractType,
+                  contractYears: Math.max(1, career.contractYearsLeft || 1),
+                  annualSalary: career.annualSalary,
+                  actionType: 'STAY_TEAM',
+                },
+              ];
+
         const { role } = calculateRoleAndMpg(career);
         set({
           career: {
             ...career,
             combineState: null,
             draftResult: null,
-            offseasonLocked: false,
-            offseasonOptions: [],
-            contractYearsLeft: Math.max(1, career.contractYearsLeft),
+            offseasonLocked: true,
+            offseasonOptions: fallbackOptions,
+            seasonPhase: 'OFFSEASON',
             role,
           },
           view: 'DASHBOARD',
           toast: {
             id: `TOAST_${Date.now()}`,
-            title: '↩️ NBA 드래프트 참가를 철회하고 소속팀으로 복귀했어요.',
+            title: '↩️ NBA 드래프트 참가를 철회하고 에이전트 데스크로 복귀했어요.',
             description:
-              '한 시즌 더 주전으로 활약하며 실전 성적과 스카우트 주가를 끌어올려 봐요!',
+              '대학 잔류, KBL 드래프트, 또는 다른 리그 계약 오퍼 중에서 다음 진로를 자유롭게 선택해 주세요!',
             tone: 'amber',
           },
         });

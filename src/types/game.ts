@@ -155,18 +155,52 @@ export interface LeagueConfig {
   badgeColor: string;
 }
 
+export interface BiomechanicalProfile {
+  reachLeverage: number;          // ① 타점 및 림 장악력 지수 (0.25 ~ 1.45, 신장에 비례하여 연속 증가)
+  centerOfGravityAgility: number; // ② 무게중심 및 볼핸들링/방향전환 기민성 지수 (0.35 ~ 1.35, 신장이 커질수록 연속 감소)
+  positionalPhysicsStrain: number;// ③ 포지션 전술 요구치 대비 신체 물리 부하 지수 (0.0 ~ 1.0+)
+  rebMultiplier: number;          // 실전 리바운드 경합 배율
+  blkMultiplier: number;          // 실전 블록슛/림 프로텍팅 배율
+  insideFgModifier: number;       // 골밑 슛 컨테스트 극복 보정치 (%p)
+  tovRatePenalty: number;         // 장신 볼핸들러 드리블 궤적 노출로 인한 턴오버율 페널티
+  perimeterDefPenalty: number;    // 외곽 수비 돌파 허용(Blow-by) 페널티
+  staminaDrainMultiplier: number; // 풀코트 체력 소모 및 하체 부하 배율
+}
+
+export interface AsianGamesMatchLog {
+  stage: 'GROUP' | 'QUARTERFINAL' | 'SEMIFINAL';
+  stageLabel: string;
+  opponentName: string;
+  korScore: number;
+  oppScore: number;
+  playerPts: number;
+  playerReb: number;
+  playerAst: number;
+  won: boolean;
+}
+
+export interface AsianGamesTournamentResult {
+  reachedFinals: boolean;
+  eliminatedStage: 'QUARTERFINAL' | 'SEMIFINAL' | null;
+  finalOpponent: TeamInfo;
+  matches: AsianGamesMatchLog[];
+  summaryHeadline: string;
+}
+
 export interface TeamInfo {
   id: string;
   name: string;
   shortName: string;
   city: string;
   league: LeagueId;
-  rating: number; // 구단 전력 (동적으로 매 오프시즌 ±3 변동)
+  rating: number; // 구단 전력 (동적으로 매 오프시즌 변동)
   primaryColor: string;
   secondaryColor: string;
   espnAbbr?: string;
   espnId?: string;
   logoUrl?: string;
+  conference?: 'EAST' | 'WEST';
+  division?: string;
   prestigeDesc: string;
   direction?: TeamDirection;
   neededPositions?: Position[];
@@ -178,6 +212,8 @@ export type AllLeagueTier = 1 | 2 | 3 | null;
 
 export interface StandingEntry {
   rank: number;
+  conference?: 'EAST' | 'WEST';
+  conferenceRank?: number;
   team: TeamInfo;
   wins: number;
   losses: number;
@@ -191,6 +227,7 @@ export interface PlayoffSeriesMatchup {
   id: string;
   roundNumber: number;
   roundLabel: string;
+  conference?: 'EAST' | 'WEST' | 'FINALS';
   bestOf: number;
   winsNeeded: number;
   higherSeed: StandingEntry;
@@ -384,6 +421,7 @@ export interface CareerEventChoice {
   triggerRetirement?: RetirementReason;
   grantMilitaryExemption?: boolean;
   startAsianGamesFinal?: boolean;
+  enterAsianGamesTournament?: boolean;
   enlistSangmu?: boolean;
   startFarewellTour?: boolean;
   executeTradeToContender?: boolean;
@@ -428,6 +466,7 @@ export interface OffseasonOption {
     | 'ENTER_NBA_DRAFT'
     | 'SUMMER_LEAGUE_SHOWCASE'
     | 'STAY_TEAM'
+    | 'REQUEST_TRADE'
     | 'RETIRE_VOLUNTARY'
     | 'START_FAREWELL_TOUR'
     | 'RETIRE_OUT_OF_LEAGUE'

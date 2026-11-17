@@ -5,16 +5,22 @@ import {
   NBA_TEAMS,
   KBL_TEAMS,
   NCAA_TEAMS,
+  HIGH_SCHOOL_TEAMS,
+  U_LEAGUE_TEAMS,
+  GLEAGUE_TEAMS,
+  ASIAN_NATIONAL_TEAMS,
   ALL_TEAMS,
 } from '../data/teams';
 import {
   applySpecialCampProgram,
+  calculateBiomechanicalProfile,
   calculateHeightMismatchPenalty,
   calculateOvr,
   canSwitchToPosition,
   createInitialStats,
   enforceBiomechanicalCaps,
   evaluateAcquiredTraits,
+  getBiomechanicalGrowthElasticity,
   getBiomechanicalStatCaps,
   getPreviewStatsAndOvrRange,
   rollInitialPotential,
@@ -30,7 +36,9 @@ import {
   checkPotentialBreakthrough,
   generateDraftRivals,
   getAwardsByLeague,
+  getLeagueBaselineTeamRating,
   simulateRivalsSeason,
+  simulateSeason,
 } from './seasonSimulator';
 import {
   calculateProjectedNbaPick,
@@ -48,7 +56,9 @@ import {
   advancePlayoffRound,
   createLiveFinalGame,
   createPlayoffBracket,
+  evaluateRealisticFinalsMvp,
   generateLeagueStandings,
+  simulateAsianGamesTournament,
   simulateLiveQuarter,
   skipEntirePlayoffs,
   skipLiveGameToEnd,
@@ -61,8 +71,9 @@ import {
 import {
   createAgentRetirementAdviceEvent,
   rollMidSeasonCrossroadsEvent,
+  rollSeasonEvent,
 } from '../data/events';
-import { CareerState, EncounterArchetypeCategory, SeasonBoxScore } from '../types/game';
+import { CareerState, SeasonBoxScore } from '../types/game';
 
 function buildInitialTeamRatingsMap(): Record<string, number> {
   const map: Record<string, number> = {};
@@ -207,7 +218,7 @@ function createSeasonLog(overrides: Partial<SeasonBoxScore> = {}): SeasonBoxScor
     wonMip: false,
     wonRookieOfYear: false,
     allStarSelected: true,
-    allLeagueTeam: '1ST',
+    allLeagueTeam: 1,
     singleGameHighPts: 48,
     salaryEarned: 35000,
     headline: '테스트 헤드라인',
@@ -870,38 +881,71 @@ test('11. 4-Axis Combinatorial Random Encounter Engine (48 Scenarios, Zero Dupli
   }
 });
 
-test('12. Biomechanical Physics (168cm Center Cap & Scouting Rejection) & Adjacent Position Switch', () => {
-  const shortCenterCaps = getBiomechanicalStatCaps(168, 'C');
+test('12. Bidirectional Continuous Biomechanical Physics (168cm C vs 220cm PG vs 180cm PG) & Adjacent Position Switch', () => {
+  const shortCenterBio = calculateBiomechanicalProfile(168, 'C');
+  const tallPgBio = calculateBiomechanicalProfile(220, 'PG');
+  const standardPgBio = calculateBiomechanicalProfile(188, 'PG');
+  const standardCenterBio = calculateBiomechanicalProfile(211, 'C');
+
+  // 1) Continuous reachLeverage & centerOfGravityAgility curves
   assert.ok(
-    shortCenterCaps.ins <= 58 && shortCenterCaps.reb <= 55 && shortCenterCaps.def <= 60,
-    `168cm Center must have strict biomechanical caps, got INS=${shortCenterCaps.ins}, REB=${shortCenterCaps.reb}`
+    standardCenterBio.reachLeverage > shortCenterBio.reachLeverage,
+    '211cm Center must have significantly higher reachLeverage than 168cm Center'
+  );
+  assert.ok(
+    standardPgBio.centerOfGravityAgility > tallPgBio.centerOfGravityAgility,
+    '188cm PG must have significantly higher centerOfGravityAgility than 220cm PG'
+  );
+  assert.ok(
+    shortCenterBio.positionalPhysicsStrain > 0.65 && tallPgBio.positionalPhysicsStrain > 0.55,
+    'Both extreme height-position mismatches (168cm C and 220cm PG) must exhibit high continuous positionalPhysicsStrain'
+  );
+  assert.ok(
+    tallPgBio.tovRatePenalty > standardPgBio.tovRatePenalty &&
+      tallPgBio.staminaDrainMultiplier > standardPgBio.staminaDrainMultiplier,
+    '220cm PG must suffer higher turnover rate penalty and stamina drain due to high center of gravity'
   );
 
-  const clamped = enforceBiomechanicalCaps(
-    { ins: 90, out: 85, ply: 85, def: 90, reb: 90, phy: 85 },
-    168,
-    'C'
+  // 2) Continuous diminishing returns elasticity instead of arbitrary hard-deletion
+  const highStats = { ins: 82, out: 82, ply: 82, def: 82, reb: 82, phy: 82 };
+  const shortCenterElasticity = getBiomechanicalGrowthElasticity(168, 'C', highStats);
+  const standardCenterElasticity = getBiomechanicalGrowthElasticity(211, 'C', highStats);
+  assert.ok(
+    standardCenterElasticity.reb > shortCenterElasticity.reb &&
+      standardCenterElasticity.ins > shortCenterElasticity.ins,
+    '211cm C must have much higher REB/INS training growth elasticity at high stats than 168cm C'
   );
-  assert.ok(clamped.ins <= 58);
-  assert.ok(clamped.reb <= 55);
 
   const penalty = calculateHeightMismatchPenalty(168, 'C');
   assert.equal(penalty.isSevereMismatch, true);
-  assert.ok(penalty.rebMultiplier <= 0.45);
-  assert.ok(penalty.scoutingPenalty >= 40);
+  assert.ok(penalty.rebMultiplier < 0.7);
 
-  const shortCenterCareer = createBaseCareer({
+  // 3) Real-game efficiency natural selection in scouting (poor FG% & high strain rejected by NBA)
+  const inefficientMismatchCenter = createBaseCareer({
     heightCm: 168,
     primaryPos: 'C',
     secondaryPos: null,
     ovr: 68,
     league: 'KBL',
+    seasonLogs: [
+      createSeasonLog({
+        league: 'KBL',
+        gp: 36,
+        mpg: 22.0,
+        ppg: 6.2,
+        rpg: 2.1,
+        apg: 1.2,
+        bpg: 0.1,
+        fgPct: 37.5,
+        tpPct: 28.0,
+      }),
+    ],
   });
-  const nbaScout = evaluateTeamScouting(shortCenterCareer, NBA_TEAMS[0], () => 0.5);
+  const nbaScout = evaluateTeamScouting(inefficientMismatchCenter, NBA_TEAMS[0], () => 0.5);
   assert.equal(
     nbaScout.passesOfferThreshold,
     false,
-    '168cm Center must NEVER pass NBA scouting threshold'
+    '168cm Center with poor paint efficiency & rebounding must be naturally rejected by NBA scouting'
   );
 
   // Adjacent position switch validation
@@ -911,12 +955,11 @@ test('12. Biomechanical Physics (168cm Center Cap & Scouting Rejection) & Adjace
   const pgToSg = canSwitchToPosition('PG', 'SG', 185, null);
   assert.equal(pgToSg.allowed, true, 'Adjacent switch from PG to SG at 185cm must be allowed');
 
-  const shortSfToPf = canSwitchToPosition('SF', 'PF', 172, null);
-  assert.equal(shortSfToPf.allowed, false, '172cm player must be blocked from switching to PF due to height limit');
+  const shortSfToPf = canSwitchToPosition('SF', 'PF', 168, null);
+  assert.equal(shortSfToPf.allowed, false, '168cm player must be blocked from switching to PF due to excessive biomechanical strain');
 });
 
 test('13. Strict GOAT Legacy Criteria (No Legacy Score Shortcut without NBA MVP>=3, Rings>=3, FMVP>=2)', () => {
-  // High volume compiler with 12,000+ legacy points worth of stats & amateur/KBL trophies, but only 1 NBA MVP
   const compilerCareer = createBaseCareer({
     peakOvr: 94,
     totals: {
@@ -928,7 +971,7 @@ test('13. Strict GOAT Legacy Criteria (No Legacy Score Shortcut without NBA MVP>
       blocks: 600,
       nbaGp: 1100,
       nbaPoints: 29000,
-      championships: 6, // mostly amateur/KBL
+      championships: 6,
       nbaChampionships: 2,
       mvps: 5,
       nbaMvps: 1,
@@ -951,7 +994,6 @@ test('13. Strict GOAT Legacy Criteria (No Legacy Score Shortcut without NBA MVP>
   );
   assert.equal(compilerEval.tierId, 'FIRST_BALLOT_HOF');
 
-  // True GOAT with 3 NBA Championships, 3 NBA MVPs, 2 Finals MVPs
   const trueGoatCareer = createBaseCareer({
     peakOvr: 97,
     totals: {
@@ -964,3 +1006,226 @@ test('13. Strict GOAT Legacy Criteria (No Legacy Score Shortcut without NBA MVP>
   const trueGoatEval = evaluateCareerLegacy(trueGoatCareer);
   assert.equal(trueGoatEval.tierId, 'GOAT');
 });
+
+test('14. Expanded Real League Databases (24 HS, 12 U-League, 24 NCAA, 20 G-League, 30 NBA East/West, 8 Asian National)', () => {
+  assert.ok(HIGH_SCHOOL_TEAMS.length >= 24, `Expected >=24 Korean High School teams, got ${HIGH_SCHOOL_TEAMS.length}`);
+  assert.ok(U_LEAGUE_TEAMS.length >= 12, `Expected >=12 Korean University teams, got ${U_LEAGUE_TEAMS.length}`);
+  assert.ok(NCAA_TEAMS.length >= 24, `Expected >=24 NCAA D1 teams, got ${NCAA_TEAMS.length}`);
+  assert.ok(GLEAGUE_TEAMS.length >= 20, `Expected >=20 NBA G-League teams, got ${GLEAGUE_TEAMS.length}`);
+  assert.equal(NBA_TEAMS.length, 30, 'NBA must have all 30 franchises');
+  const eastTeams = NBA_TEAMS.filter((t) => t.conference === 'EAST');
+  const westTeams = NBA_TEAMS.filter((t) => t.conference === 'WEST');
+  assert.equal(eastTeams.length, 15, 'NBA Eastern Conference must have 15 teams');
+  assert.equal(westTeams.length, 15, 'NBA Western Conference must have 15 teams');
+  assert.ok(ASIAN_NATIONAL_TEAMS.length >= 8, 'FIBA Asia national rival pool must have >=8 teams');
+});
+
+test('15. Zero Regular-Season Spoilers, Realistic Finals MVP, and Unified Contender Win-Rate Formula', () => {
+  const topContender =
+    NBA_TEAMS.find((t) => t.rating >= 88) || NBA_TEAMS[0];
+  const rookieOnContender = createBaseCareer({
+    age: 20,
+    ovr: 71,
+    potential: 86,
+    league: 'NBA',
+    team: topContender,
+    contractType: 'NBA_STANDARD',
+    coachTrust: 55,
+    seasonLogs: [],
+  });
+
+  const sim = simulateSeason(rookieOnContender, () => 0.5);
+  // 1) Regular-season simulation must NEVER pre-spoil championship or Finals MVP
+  assert.equal(
+    sim.boxScore.wonChampionship,
+    false,
+    'simulateSeason must never pre-award wonChampionship before playoffs'
+  );
+  assert.equal(
+    sim.boxScore.wonFinalsMvp,
+    false,
+    'simulateSeason must never pre-award wonFinalsMvp before playoffs'
+  );
+  assert.ok(
+    sim.boxScore.playoffResult === 'PO 진출' || sim.boxScore.playoffResult === 'PO 탈락',
+    `Regular season playoffResult must only be PO 진출 or PO 탈락, got ${sim.boxScore.playoffResult}`
+  );
+
+  // 2) Unified team win-rate baseline: joining an 88+ contender as a rookie must NOT cause the team to collapse to 24th place
+  const baseline = getLeagueBaselineTeamRating('NBA', rookieOnContender.teamRatingsMap);
+  assert.ok(baseline >= 74 && baseline <= 88, `Expected NBA average baseline rating in 74..88, got ${baseline}`);
+  assert.ok(
+    sim.boxScore.wins >= 46 && (sim.boxScore.teamRank ?? 99) <= 12,
+    `Top contender (rating ${topContender.rating}) should remain a strong playoff team even with a rookie, got ${sim.boxScore.wins}W (Rank #${sim.boxScore.teamRank})`
+  );
+
+  // 3) Realistic Finals MVP: bench player (<24 MPG) must never win Finals MVP; true 1st option ace wins it
+  const benchChamp = createBaseCareer({
+    ovr: 73,
+    team: topContender,
+    seasonLogs: [createSeasonLog({ mpg: 15.0, ppg: 7.5, rpg: 2.5, apg: 1.8 })],
+  });
+  assert.equal(
+    evaluateRealisticFinalsMvp(benchChamp, true),
+    false,
+    'Bench player with 15 MPG must never win Finals MVP'
+  );
+
+  const aceChamp = createBaseCareer({
+    ovr: 92,
+    team: topContender,
+    seasonLogs: [createSeasonLog({ mpg: 36.5, ppg: 29.8, rpg: 8.4, apg: 6.5 })],
+  });
+  assert.equal(
+    evaluateRealisticFinalsMvp(aceChamp, true),
+    true,
+    'Superstar 1st-option ace leading championship team must win Finals MVP'
+  );
+});
+
+test('16. NBA East/West Conference Standings (1~15 per Conference) & 4-Round Conference Playoff Bracket', () => {
+  const nbaCareer = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 88,
+  });
+  const standings = generateLeagueStandings(nbaCareer, 55, 27, () => 0.5);
+  assert.equal(standings.length, 30);
+
+  const eastStandings = standings.filter((s) => s.conference === 'EAST');
+  const westStandings = standings.filter((s) => s.conference === 'WEST');
+  assert.equal(eastStandings.length, 15);
+  assert.equal(westStandings.length, 15);
+  assert.equal(eastStandings.filter((s) => s.qualifiedPlayoffs).length, 8);
+  assert.equal(westStandings.filter((s) => s.qualifiedPlayoffs).length, 8);
+
+  const bracket = createPlayoffBracket(nbaCareer, standings);
+  assert.equal(bracket.rounds[0].length, 8, 'NBA Round 1 must have 8 series (4 East + 4 West)');
+  assert.equal(
+    bracket.rounds[0].filter((m) => m.conference === 'EAST').length,
+    4
+  );
+  assert.equal(
+    bracket.rounds[0].filter((m) => m.conference === 'WEST').length,
+    4
+  );
+
+  const finished = skipEntirePlayoffs(bracket, nbaCareer, standings, () => 0.3);
+  assert.equal(finished.rounds.length, 4, 'Completed NBA Playoffs must have 4 rounds (R1, Conf Semis, Conf Finals, NBA Finals)');
+  assert.equal(finished.rounds[3].length, 1, 'NBA Finals must be a single East Champion vs West Champion series');
+  assert.ok(finished.championTeamId !== null);
+});
+
+test('17. Asian Games 4-Year Cycle & Full Tournament (Group -> QF -> SF -> Finals) + Multi-Year Trade Request', () => {
+  const nonAgYearCareer = createBaseCareer({
+    age: 22,
+    seasonYear: 2027, // 2027 % 4 !== 2
+    ovr: 72,
+    militaryExempt: false,
+    militaryServiceSeasonsLeft: 0,
+  });
+  const nonAgEvt = rollSeasonEvent(nonAgYearCareer, () => 0.01);
+  assert.notEqual(
+    nonAgEvt?.id,
+    'EVT_ASIAN_GAMES_GOLD',
+    'Asian Games event must NOT trigger on non-Asian-Games years (e.g. 2027)'
+  );
+
+  const agYearCareer = createBaseCareer({
+    age: 22,
+    seasonYear: 2030, // 2030 % 4 === 2
+    ovr: 72,
+    militaryExempt: false,
+    militaryServiceSeasonsLeft: 0,
+  });
+  const agEvt = rollSeasonEvent(agYearCareer, () => 0.99);
+  assert.equal(
+    agEvt?.id,
+    'EVT_ASIAN_GAMES_GOLD',
+    'Asian Games event must trigger on 4-year cycle years (2026, 2030, 2034...)'
+  );
+
+  // Tournament simulation when Korea wins QF & SF (low rng favors Korea)
+  const winTourney = simulateAsianGamesTournament(agYearCareer, () => 0.1);
+  assert.equal(winTourney.reachedFinals, true);
+  assert.ok(winTourney.finalOpponent !== null);
+  assert.equal(winTourney.matches.length, 5, 'Group Stage (3G) + QF (1G) + SF (1G) = 5 matches before Finals');
+
+  // Tournament simulation when Korea loses in QF or SF (high rng favors opponent)
+  const loseTourney = simulateAsianGamesTournament(agYearCareer, () => 0.99);
+  assert.equal(loseTourney.reachedFinals, false);
+  assert.ok(
+    loseTourney.eliminatedStage === 'QUARTERFINAL' ||
+      loseTourney.eliminatedStage === 'SEMIFINAL'
+  );
+
+  // Multi-year contract offseason options must include REQUEST_TRADE + NBA Draft entry for <=24yo KBL pro
+  const contractedKblYoung = createBaseCareer({
+    age: 22,
+    ovr: 70,
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    contractType: 'KBL_ROOKIE',
+    contractYearsLeft: 2,
+    totals: {
+      ...createBaseCareer().totals,
+      nbaGp: 0,
+    },
+  });
+  const multiYearOpts = generateOffseasonOptions(contractedKblYoung, () => 0.5);
+  assert.ok(
+    multiYearOpts.some((o) => o.actionType === 'REQUEST_TRADE'),
+    'Multi-year contracted pro player must have REQUEST_TRADE option in offseason'
+  );
+  assert.ok(
+    multiYearOpts.some((o) => o.actionType === 'ENTER_NBA_DRAFT'),
+    '22yo KBL pro with 0 NBA GP must be able to challenge NBA Draft'
+  );
+});
+
+test('18. All 135 Teams Have Official Crawled Logo Assets & League-Specific SVG Fallback Generator', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { generateLeagueFallbackSvgDataUri } = await import('../data/logoFallbacks');
+
+  const combined = [...ALL_TEAMS, ...ASIAN_NATIONAL_TEAMS];
+  assert.equal(combined.length, 135, 'Total teams across all leagues + Asian National Teams must be 135');
+
+  const seenLogos = new Set<string>();
+  for (const team of combined) {
+    assert.ok(team.logoUrl && team.logoUrl.length > 0, `Team ${team.id} must have a logoUrl`);
+    assert.ok(
+      !team.logoUrl.startsWith('data:image/svg+xml'),
+      `Team ${team.id} must not use generic inline data URI text crest as primary logoUrl`
+    );
+    seenLogos.add(team.logoUrl);
+
+    if (team.logoUrl.startsWith('/logos/')) {
+      const fullPath = path.join(process.cwd(), 'public', team.logoUrl);
+      assert.ok(fs.existsSync(fullPath), `Local crawled logo file must exist for ${team.id}: ${team.logoUrl}`);
+      const stat = fs.statSync(fullPath);
+      assert.ok(stat.size > 100, `Local crawled logo file for ${team.id} must be non-empty`);
+    }
+
+    // Verify league-specific fallback SVG generator produces valid SVG data URI
+    const fallbackUri = generateLeagueFallbackSvgDataUri(team);
+    assert.ok(
+      fallbackUri.startsWith('data:image/svg+xml;utf8,'),
+      `Fallback URI for ${team.id} must be a valid SVG data URI`
+    );
+    const decoded = decodeURIComponent(fallbackUri.replace('data:image/svg+xml;utf8,', ''));
+    assert.ok(decoded.includes('<svg') && decoded.includes('</svg>'), `Decoded SVG for ${team.id} must be valid SVG`);
+  }
+
+  assert.equal(seenLogos.size, 135, 'Every single one of the 135 teams must have its own distinct official logoUrl');
+
+  for (const gl of GLEAGUE_TEAMS) {
+    assert.ok(
+      gl.logoUrl?.includes('/nba-development/500/'),
+      `G-League team ${gl.id} must use official G-League logo CDN, not parent NBA logo`
+    );
+  }
+});
+
+
+

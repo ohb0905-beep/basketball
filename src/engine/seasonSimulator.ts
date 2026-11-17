@@ -29,12 +29,27 @@ import {
 } from './playoffEngine';
 import { applyAgingCurve } from './retirementEngine';
 import {
+  calculateBiomechanicalProfile,
   calculateHeightMismatchPenalty,
   calculateOvr,
   enforceBiomechanicalCaps,
   evaluateAcquiredTraits,
   evaluatePlayerBadges,
+  getBiomechanicalGrowthElasticity,
 } from './statCalculator';
+
+/**
+ * 리그 내 평균 구단 전력 산출 (seasonSimulator와 playoffEngine이 100% 동일한 기준선 공유)
+ */
+export function getLeagueBaselineTeamRating(
+  league: LeagueId,
+  ratingsMap?: Record<string, number>
+): number {
+  const teams = getTeamsByLeague(league, ratingsMap);
+  if (teams.length === 0) return LEAGUE_CONFIG[league].ldr;
+  const sum = teams.reduce((acc, t) => acc + t.rating, 0);
+  return Number((sum / teams.length).toFixed(2));
+}
 
 const AWARD_LEAGUE_PRIORITY: LeagueId[] = [
   'NBA',
@@ -665,12 +680,13 @@ export function calculateSeasonStatGrowth(
     };
 
     const fw = focusWeights[career.trainingFocus];
+    const elasticity = getBiomechanicalGrowthElasticity(heightCm, primaryPos, prev);
     const keys: (keyof PlayerStats)[] = ['ins', 'out', 'ply', 'def', 'reb', 'phy'];
     const nextStats: PlayerStats = { ...prev };
 
     for (const k of keys) {
       const w = fw[k] ?? 1.0;
-      const rawStep = baseGain * w * (0.65 + rng() * 0.55);
+      const rawStep = baseGain * w * elasticity[k] * (0.65 + rng() * 0.55);
       const gain = Math.max(0, Math.round(rawStep));
       const updated = Math.min(99, prev[k] + gain);
       nextStats[k] = updated;
@@ -784,7 +800,7 @@ export function calculateOrganicTrustDelta(params: {
 }
 
 /**
- * 유동적 시즌 수상 알고리즘 (고정 상수 배제, 리그 수비 저항치 LDR · 시즌 페이스 · 라이벌 분포 비교)
+ * 유동적 시즌 수상 알고리즘 (정규시즌 전용 — 우승/파이널 MVP 선반영 스포일러 원천 차단!)
  */
 export function evaluateFluidSeasonAwards(params: {
   career: CareerState;
@@ -812,15 +828,12 @@ export function evaluateFluidSeasonAwards(params: {
   const { career, role, gp, mpg, ppg, rpg, apg, spg, bpg, winRate, rng } = params;
   const leagueConfig = LEAGUE_CONFIG[career.league];
 
-  // 출석률 백분위 (시즌 약 68% 이상 소화 시 주요 타이틀 경쟁권)
   const attendanceRatio = gp / Math.max(1, leagueConfig.games);
   const eligibleForMajorAwards = attendanceRatio >= 0.67;
 
-  // 해당 시즌의 리그 평균 공격 페이스 변동치 (매 시즌 ±4% 유동 변화)
   const seasonPaceFactor = 0.96 + rng() * 0.08;
   const ldrScale = leagueConfig.ldr / 78;
 
-  // 리그 내 동적 경쟁자(가상 톱스타 및 라이벌) 벤치마크 산출
   const sameLeagueRivals = (career.rivals || []).filter(
     (r) => r.league === career.league
   );
@@ -864,7 +877,6 @@ export function evaluateFluidSeasonAwards(params: {
     }
   }
 
-  // 올해의 수비수(DPOY): 리그 LDR 및 시즌 수비 벤치마크 대비 상대 우위
   const dpoyScore =
     career.stats.def * 0.55 +
     spg * 7.5 +
@@ -878,7 +890,6 @@ export function evaluateFluidSeasonAwards(params: {
     dpoyScore >= dynamicDpoyBar &&
     winRate >= 0.51;
 
-  // 올해의 식스맨상(6MOY): 벤치/식스맨 역할 중 Per-36 효율 및 리그 상대 득점 기준
   const isBenchRole = role.includes('식스맨') || role.includes('로테이션');
   const dynamicSixthManBar = (9.5 + ldrScale * 4.8) * seasonPaceFactor;
   const wonSixthMan =
@@ -888,7 +899,6 @@ export function evaluateFluidSeasonAwards(params: {
     ppg >= dynamicSixthManBar &&
     winRate >= 0.47;
 
-  // 기량발전상(MIP): 동일 리그 직전 시즌 대비 상대 성장률(30%+ 상승 & 의미 있는 볼륨 점프)
   const prevLog =
     career.seasonLogs.length > 0
       ? career.seasonLogs[career.seasonLogs.length - 1]
@@ -904,7 +914,6 @@ export function evaluateFluidSeasonAwards(params: {
     currImpact - prevImpact >= 5.2 &&
     currImpact / Math.max(6, prevImpact) >= 1.28;
 
-  // 신인왕(ROY): 해당 리그 첫 시즌 소화 & 동기와 비교해 경쟁력 입증
   const hadPreviousSeasonInLeague = career.seasonLogs.some(
     (l) => l.league === career.league
   );
@@ -915,17 +924,9 @@ export function evaluateFluidSeasonAwards(params: {
     ppg >= dynamicRoyBar &&
     mpg >= 20.0;
 
-  // 우승 및 파이널 MVP (승부사 특성 보유 시 플레이오프 돌파 확률 보너스)
-  const clutchBonus = (career.traits || []).includes('CLUTCH_PERFORMER') ? 0.08 : 0;
-  const champProb =
-    winRate >= 0.6
-      ? Math.min(0.62, (winRate - 0.52) * 1.65 + clutchBonus)
-      : 0;
-  const wonChampionship = winRate >= 0.6 && rng() < champProb;
-  const wonFinalsMvp =
-    wonChampionship &&
-    (role.includes('에이스') ||
-      (role.includes('스타터') && perfScore >= dynamicAllStarBar * 0.96));
+  // 🚨 [스포일러 원천 차단] 정규시즌 시뮬레이션 시점에는 절대로 우승(wonChampionship)이나 파이널 MVP(wonFinalsMvp)를 선반영하지 않음!
+  const wonChampionship = false;
+  const wonFinalsMvp = false;
 
   return {
     allStarSelected,
@@ -942,8 +943,6 @@ export function evaluateFluidSeasonAwards(params: {
 
 /**
  * 잠재력 한계 돌파(Potential Breakthrough) 판정
- * - 아마추어(고교, 대학, NCAA) 시절에는 절대 발동하지 않음!
- * - 오직 프로 리그(NBA, KBL, OVERSEAS, GLEAGUE)에서 MIP 수상 또는 리그 최상위권 효율을 증명했을 때만 커리어 최대 2회(+1~+2) 희소하게 발동
  */
 export function checkPotentialBreakthrough(params: {
   career: CareerState;
@@ -982,7 +981,6 @@ export function checkPotentialBreakthrough(params: {
     career.league === 'OVERSEAS' ||
     career.league === 'GLEAGUE';
 
-  // 아마추어 리그(고교/대학/NCAA)에서는 잠재력 한계 돌파 절대 금지 & 프로에서도 최대 2회까지만 허용
   if (
     !isProLeague ||
     currentPot >= 95 ||
@@ -1048,7 +1046,7 @@ export interface SimulatedSeasonResult {
 }
 
 /**
- * 한 시즌 전체 시뮬레이션 실행
+ * 한 시즌 전체 시뮬레이션 실행 (정규시즌 전용 — 포스트시즌 스포일러 0% + 양방향 생체역학 + 팀 승률 공식 통일)
  */
 export function simulateSeason(
   career: CareerState,
@@ -1056,6 +1054,7 @@ export function simulateSeason(
 ): SimulatedSeasonResult {
   const leagueConfig = LEAGUE_CONFIG[career.league];
   const traits = career.traits || [];
+  const bio = calculateBiomechanicalProfile(career.heightCm, career.primaryPos);
   const mismatch = calculateHeightMismatchPenalty(
     career.heightCm,
     career.primaryPos
@@ -1064,7 +1063,6 @@ export function simulateSeason(
   const { role, mpg, gp, injuredGamesMissed, basePer36, roleIndex } =
     calculateRoleAndMpg(career, rng);
 
-  // 고유 특성 보정 (FA 로이드, 벤치의 에이스, 승부사)
   let traitOffMultiplier = 1.0;
   if (traits.includes('CONTRACT_YEAR_BOOST') && career.contractYearsLeft <= 1) {
     traitOffMultiplier += 0.07;
@@ -1076,13 +1074,22 @@ export function simulateSeason(
     traitOffMultiplier += 0.04;
   }
 
+  // 양방향 생체역학 공격 효율 보정 (단신 빅맨 컨테스트 저항 & 초장신 볼핸들러 드리블 노출 저항)
+  const bioOffMultiplier = Math.max(
+    0.58,
+    1.0 +
+      bio.insideFgModifier * 0.012 -
+      bio.tovRatePenalty * 0.055 -
+      bio.positionalPhysicsStrain * 0.18
+  );
+
   const { ppg, offEdge } = calculatePpg(
     career.stats,
     leagueConfig.ldr,
     mpg,
     basePer36,
     rng,
-    traitOffMultiplier
+    traitOffMultiplier * bioOffMultiplier
   );
 
   const rebEdge = Math.max(0.35, 1.0 + (career.stats.reb - leagueConfig.ldr) / 34);
@@ -1118,16 +1125,27 @@ export function simulateSeason(
       Number(
         (
           ((mpg / 36) * posRebBase * rebEdge + (rng() * 1.0 - 0.5)) *
-          mismatch.rebMultiplier
+          bio.rebMultiplier
         ).toFixed(1)
       )
     )
   );
+
+  // 초장신 볼핸들러(215~220cm PG/SG)의 경우 높은 무게중심과 긴 드리블 궤적으로 인해 스틸 허용/턴오버가 급증해 실효 어시스트가 깎임
+  const agilityAstFactor = Math.max(
+    0.45,
+    1.0 + (bio.centerOfGravityAgility - 0.85) * 0.25 - bio.tovRatePenalty * 0.12
+  );
   const apg = Math.max(
-    0.5,
+    0.4,
     Math.min(
       13.2,
-      Number(((mpg / 36) * posAstBase * plyEdge + (rng() * 0.9 - 0.45)).toFixed(1))
+      Number(
+        (
+          ((mpg / 36) * posAstBase * plyEdge + (rng() * 0.9 - 0.45)) *
+          agilityAstFactor
+        ).toFixed(1)
+      )
     )
   );
   const spg = Math.max(
@@ -1146,7 +1164,7 @@ export function simulateSeason(
       Number(
         (
           ((mpg / 36) * posBlkMult * defEdge + (rng() * 0.25 - 0.1)) *
-          mismatch.blkMultiplier
+          bio.blkMultiplier
         ).toFixed(1)
       )
     )
@@ -1155,18 +1173,25 @@ export function simulateSeason(
   const sniperBoost = traits.includes('SNIPER') ? 1.8 : 0;
   const fgPct = Number(
     Math.max(
-      32.0,
+      31.5,
       Math.min(
         64.5,
-        42.0 + (offEdge - 1.0) * 11.5 - mismatch.fgPctPenalty + rng() * 3.0
+        42.5 + (offEdge - 1.0) * 11.5 - mismatch.fgPctPenalty + rng() * 3.0
       )
     ).toFixed(1)
   );
   const outEdge = (career.stats.out - leagueConfig.ldr) / 35;
   const tpPct = Number(
     Math.max(
-      24.0,
-      Math.min(46.5, 33.0 + outEdge * 9.5 + sniperBoost + rng() * 2.5)
+      23.0,
+      Math.min(
+        46.5,
+        33.0 +
+          outEdge * 9.5 +
+          sniperBoost -
+          bio.positionalPhysicsStrain * 3.2 +
+          rng() * 2.5
+      )
     ).toFixed(1)
   );
 
@@ -1176,20 +1201,45 @@ export function simulateSeason(
     Math.min(72, Math.round(ppg * burstFactor + (career.stats.out >= 84 ? 5 : 2)))
   );
 
-  const defContribution = (career.stats.def - leagueConfig.ldr) * 0.15;
-  const clutchWinBonus = traits.includes('CLUTCH_PERFORMER') ? 1.5 : 0;
-  const playerWinContribution =
-    (roleIndex >= 2
-      ? (career.ovr - leagueConfig.ldr) * 0.42 + defContribution + clutchWinBonus
-      : (career.ovr - leagueConfig.ldr) * 0.14) -
-    mismatch.scoutingPenalty * 0.12;
-  const teamStrengthScore =
-    career.team.rating - leagueConfig.ldr + playerWinContribution;
-  const winRate = Math.max(
-    0.2,
-    Math.min(0.82, 0.48 + teamStrengthScore * 0.018 + (rng() * 0.1 - 0.05))
+  // 🏆 팀 승패 공식 통일 (playoffEngine.ts의 AI 구단 순위표 생성 공식과 100% 동일한 리그 평균 구단 전력 기준선 사용!)
+  // - 신인/벤치 선수가 강팀(예: 보스턴 92, 덴버 90)으로 이적했다고 해서 우승후보가 24위로 추락하는 버그를 원천 해결!
+  // - 선수가 리그 평균 이상이면 팀 승률 보너스를 주고, 신인/벤치일 때는 기존 주전 로스터가 팀 승률을 방어(-0.015 하한)하되,
+  //   생체역학 미스매치(168cm C, 220cm PG 등)를 고집하면 코트 마진이 하락함.
+  const leagueMeanRating = getLeagueBaselineTeamRating(
+    career.league,
+    career.teamRatingsMap
   );
-  const wins = Math.round(leagueConfig.games * winRate);
+  const dynamicTeamRating =
+    career.teamRatingsMap?.[career.team.id] ?? career.team.rating;
+  const directionMod =
+    career.team.direction === 'CONTENDER'
+      ? 0.055
+      : career.team.direction === 'REBUILDING'
+      ? -0.055
+      : 0;
+  const clutchWinBonus = traits.includes('CLUTCH_PERFORMER') ? 0.025 : 0;
+
+  const rawPlayerMargin = (career.ovr - leagueMeanRating) * (mpg / 36) * 0.0085;
+  const effectivePlayerBoost =
+    rawPlayerMargin >= 0
+      ? Math.min(0.14, rawPlayerMargin + (roleIndex >= 2 ? 0.02 : 0))
+      : Math.max(-0.015, rawPlayerMargin * 0.2);
+  const bioCourtDrag = bio.positionalPhysicsStrain * (mpg / 32) * 0.1;
+
+  const winRate = Math.max(
+    0.16,
+    Math.min(
+      0.86,
+      0.5 +
+        (dynamicTeamRating - leagueMeanRating) * 0.022 +
+        directionMod +
+        effectivePlayerBoost -
+        bioCourtDrag +
+        clutchWinBonus +
+        (rng() - 0.5) * 0.09
+    )
+  );
+  const wins = Math.max(1, Math.min(leagueConfig.games - 1, Math.round(leagueConfig.games * winRate)));
   const losses = leagueConfig.games - wins;
 
   // 리그 전체 정규시즌 순위표 생성 및 플레이오프 진출 판정
@@ -1198,12 +1248,9 @@ export function simulateSeason(
     standings.find((s) => s.isPlayerTeam) || standings[standings.length - 1];
   const teamRank = myStanding ? myStanding.rank : 1;
   const totalLeagueTeams = standings.length;
-  const playoffCutoff = getPlayoffCutoffByLeague(
-    career.league,
-    totalLeagueTeams
-  );
+  const qualifiedPlayoffs = Boolean(myStanding?.qualifiedPlayoffs);
 
-  // 유동적 시즌 수상 판정
+  // 유동적 정규시즌 수상 판정 (우승/파이널 MVP는 절대 선반영하지 않음)
   const awards = evaluateFluidSeasonAwards({
     career,
     role,
@@ -1218,34 +1265,8 @@ export function simulateSeason(
     rng,
   });
 
-  // 만약 정규시즌 순위가 플레이오프 컷오프 밖이면 우승 불가 처리
-  if (teamRank > playoffCutoff) {
-    awards.wonChampionship = false;
-    awards.wonFinalsMvp = false;
-  }
-
-  let playoffResult = 'PO 탈락';
-  if (awards.wonChampionship) {
-    playoffResult = '리그 우승';
-  } else if (teamRank <= playoffCutoff) {
-    if (career.league === 'NBA') {
-      playoffResult =
-        teamRank <= 2
-          ? '파이널 준우승'
-          : teamRank <= 4
-          ? '컨퍼런스 결승 탈락'
-          : '8강 PO 탈락';
-    } else if (
-      career.league === 'KBL' ||
-      career.league === 'OVERSEAS' ||
-      career.league === 'GLEAGUE'
-    ) {
-      playoffResult =
-        teamRank <= 2 ? '파이널 준우승' : teamRank <= 4 ? '4강 PO 탈락' : '6강 PO 탈락';
-    } else {
-      playoffResult = teamRank <= 2 ? '파이널 준우승' : '4강 PO 탈락';
-    }
-  }
+  // 정규시즌 종료 시점에는 오직 'PO 진출' 또는 'PO 탈락'만 기록 (포스트시즌 결과 스포일러 원천 차단!)
+  const playoffResult = qualifiedPlayoffs ? 'PO 진출' : 'PO 탈락';
 
   const salaryEarned =
     career.annualSalary > 0
@@ -1266,7 +1287,7 @@ export function simulateSeason(
     spg,
     bpg,
     singleGameHighPts,
-    wonChampionship: awards.wonChampionship,
+    wonChampionship: false,
     wonMvp: awards.wonMvp,
     allStarSelected: awards.allStarSelected,
     isFarewellTour: career.isFarewellTour,
@@ -1275,13 +1296,20 @@ export function simulateSeason(
   const headline = generateSeasonHeadline(headlineCtx);
   const narrativeLog = generateSeasonNarrativeLogs(headlineCtx, FAREWELL_TOUR_LOGS);
 
+  const rankDisplay =
+    career.league === 'NBA' && myStanding?.conference
+      ? `${myStanding.conference === 'EAST' ? '동부' : '서부'} ${
+          myStanding.conferenceRank ?? teamRank
+        }위 (전체 ${teamRank}위)`
+      : `전체 ${totalLeagueTeams}개 구단 중 정규 ${teamRank}위`;
+
   narrativeLog.unshift(
-    `📊 [정규시즌 순위] ${career.team.name}, ${wins}승 ${losses}패로 ${leagueConfig.shortName} 전체 ${totalLeagueTeams}개 구단 중 정규 ${teamRank}위 기록 (${playoffResult})`
+    `📊 [정규시즌 순위] ${career.team.name}, ${wins}승 ${losses}패로 ${leagueConfig.shortName} ${rankDisplay} 기록 (${playoffResult})`
   );
 
   if (mismatch.isSevereMismatch) {
     narrativeLog.push(
-      `⚠️ [신장 미스매치 경고] ${career.heightCm}cm의 신장으로 ${career.primaryPos} 포지션을 소화하며 골밑 경합과 블록슛, 야투 성공률에서 물리적 페널티를 겪었어요.`
+      `⚠️ [생체역학 물리 부하 경고] ${career.heightCm}cm의 신장으로 ${career.primaryPos} 포지션을 소화하며 실전 매치업 효율(야투율, 턴오버, 골밑/외곽 수비)에서 물리적 열세를 겪었어요.`
     );
   }
   if (injuredGamesMissed > 0) {
