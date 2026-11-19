@@ -32,7 +32,7 @@ export function RetirementCeremony() {
   const evaluation = career.legacyEvaluation || evaluateCareerLegacy(career);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10 space-y-8 text-slate-900">
+    <div className="max-w-2xl mx-auto px-4 py-6 space-y-6 text-slate-900">
       {/* 메인 헌액 배너 */}
       <div className="bg-white border-2 border-amber-300 rounded-3xl p-8 text-center shadow-sm space-y-4">
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs font-black tracking-widest uppercase">
@@ -44,7 +44,7 @@ export function RetirementCeremony() {
           #{career.jerseyNumber} {career.name} ({career.primaryPos})
         </h1>
         <p className="text-base sm:text-lg font-bold text-orange-600">
-          {evaluation.tierTitle}
+          {evaluation.tierEmoji} {evaluation.tierTitle}
         </p>
         <p className="text-sm text-slate-600 max-w-2xl mx-auto leading-relaxed">
           {evaluation.summaryComment}

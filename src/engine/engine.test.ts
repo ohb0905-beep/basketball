@@ -54,10 +54,12 @@ import {
 } from './retirementEngine';
 import {
   advancePlayoffRound,
+  batchAdvanceEarlyPlayoffRounds,
   createLiveFinalGame,
   createPlayoffBracket,
   evaluateRealisticFinalsMvp,
   generateLeagueStandings,
+  resolveClutchPossession,
   simulateAsianGamesTournament,
   simulateLiveQuarter,
   skipEntirePlayoffs,
@@ -70,6 +72,7 @@ import {
 } from './encounterEngine';
 import {
   createAgentRetirementAdviceEvent,
+  createVeteranReinventionEvent,
   rollMidSeasonCrossroadsEvent,
   rollSeasonEvent,
 } from '../data/events';
@@ -1226,6 +1229,80 @@ test('18. All 135 Teams Have Official Crawled Logo Assets & League-Specific SVG 
     );
   }
 });
+
+test('19. MVP/ROY Top 5 Voting Board, Playoff Batch & 4Q Clutch 1-Possession Choice, Personal Care & Veteran Reinvention', () => {
+  // 1) MVP & ROY Top 5 Voting Race Board
+  const rookieStar = createBaseCareer({
+    age: 20,
+    ovr: 83,
+    potential: 92,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    coachTrust: 88,
+    seasonLogs: [],
+  });
+  const sim = simulateSeason(rookieStar, () => 0.45);
+  assert.ok(sim.boxScore.mvpRace && sim.boxScore.mvpRace.length === 5, 'MVP race board must have Top 5 entries');
+  assert.ok(sim.boxScore.mvpRaceNarrative && sim.boxScore.mvpRaceNarrative.length > 10, 'MVP race must include narrative feedback');
+  assert.ok(sim.boxScore.royRace && sim.boxScore.royRace.length === 5, 'Rookie season must generate ROY Top 5 voting race');
+  const totalVoteShare = sim.boxScore.mvpRace.reduce((acc, r) => acc + r.firstPlaceVoteShare, 0);
+  assert.ok(Math.abs(totalVoteShare - 100) <= 1.0, `Top 5 vote share should sum to ~100%, got ${totalVoteShare}`);
+
+  // 2) Playoff 1~2R Batch Advance & 4Q Clutch 1-Possession Choice
+  const standings = generateLeagueStandings(rookieStar, 56, 26, () => 0.5);
+  const bracket = createPlayoffBracket(rookieStar, standings);
+  const batched = batchAdvanceEarlyPlayoffRounds(bracket, rookieStar, standings, () => 0.2);
+  assert.ok(
+    batched.rounds.length >= 2 || batched.playerEliminated,
+    'Batch advance must simulate early playoff rounds in one click'
+  );
+
+  let liveGame = createLiveFinalGame(rookieStar, NBA_TEAMS[1], 'LEAGUE_FINALS');
+  liveGame = simulateLiveQuarter(liveGame, rookieStar, 'ACE_HERO', () => 0.5); // 1Q
+  liveGame = simulateLiveQuarter(liveGame, rookieStar, 'ACE_HERO', () => 0.5); // 2Q
+  liveGame = simulateLiveQuarter(liveGame, rookieStar, 'ACE_HERO', () => 0.5); // 3Q
+  liveGame = simulateLiveQuarter(liveGame, rookieStar, 'ACE_HERO', () => 0.5); // 4Q -> pauses at 1:00 left
+  assert.equal(liveGame.pendingClutchPossession, true, '4th quarter must pause with 1 minute left for Clutch 1-Possession decision');
+  assert.equal(liveGame.isFinished, false);
+
+  const resolvedClutch = resolveClutchPossession(liveGame, rookieStar, 'ISO_WINNER', () => 0.1);
+  assert.equal(resolvedClutch.pendingClutchPossession, false);
+  assert.equal(resolvedClutch.isFinished, true);
+  assert.equal(resolvedClutch.finalOutcome?.won, true);
+
+  // 3) Biomech Lab Aging Slowdown & Veteran Reinvention BBIQ/Shooting Protection
+  const vetStats = { ins: 82, out: 88, ply: 86, def: 80, reb: 74, phy: 76 };
+  const normalAging = applyAgingCurve(35, vetStats, () => 0.8, {
+    growthDna: 'STANDARD',
+    careerMinutes: 28000,
+    hasBiomechLab: false,
+    veteranReinvented: false,
+  });
+  const reinventedAging = applyAgingCurve(35, vetStats, () => 0.8, {
+    growthDna: 'STANDARD',
+    careerMinutes: 28000,
+    hasBiomechLab: true,
+    veteranReinvented: true,
+  });
+  assert.ok(
+    reinventedAging.nextStats.out >= normalAging.nextStats.out &&
+      reinventedAging.nextStats.ply >= normalAging.nextStats.ply,
+    'Biomech Lab + Veteran Reinvention must protect OUT and PLY from aging decline'
+  );
+
+  // 4) Veteran Reinvention Event at age 33
+  const vet33 = createBaseCareer({
+    age: 33,
+    ovr: 82,
+    stats: { ins: 82, out: 80, ply: 78, def: 78, reb: 75, phy: 72 },
+    veteranReinventionOffered: false,
+  });
+  const vetEvt = createVeteranReinventionEvent(vet33);
+  assert.ok(vetEvt !== null);
+  assert.equal(vetEvt?.id, 'EVT_VETERAN_REINVENTION');
+  assert.equal(vetEvt?.choices.length, 2);
+});
+
 
 
 

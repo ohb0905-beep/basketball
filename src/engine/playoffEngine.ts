@@ -2,6 +2,7 @@ import {
   AsianGamesMatchLog,
   AsianGamesTournamentResult,
   CareerState,
+  ClutchChoiceId,
   LeagueId,
   LiveGameState,
   LiveQuarterLog,
@@ -754,6 +755,40 @@ export function advancePlayoffRound(
 }
 
 /**
+ * 플레이오프 1~2라운드(초반 라운드)를 원클릭으로 일괄 시뮬레이션하여 피로도를 줄이고,
+ * 탈락하거나 결승(또는 컨퍼런스 파이널)에 도달하면 멈춥니다.
+ */
+export function batchAdvanceEarlyPlayoffRounds(
+  bracket: PlayoffBracketState,
+  career: CareerState,
+  standings: StandingEntry[],
+  rng: () => number = Math.random
+): PlayoffBracketState {
+  let current = { ...bracket };
+  let guard = 0;
+  // 초반 라운드(결승 전 라운드들)를 일괄 진행하되, 플레이어가 탈락하거나 결승에 진출하면 즉시 정지
+  while (
+    !current.championTeamId &&
+    !current.playerEliminated &&
+    !current.playerReachedFinals &&
+    current.rounds.length > 0 &&
+    guard < 4
+  ) {
+    current = advancePlayoffRound(current, career, standings, rng, false);
+    guard++;
+    // NBA에서 컨퍼런스 파이널(3라운드)에 도달했으면 컨퍼런스 파이널 매치업을 먼저 확인할 수 있게 정지
+    if (
+      current.league === 'NBA' &&
+      current.currentRound === 3 &&
+      !current.playerEliminated
+    ) {
+      break;
+    }
+  }
+  return current;
+}
+
+/**
  * 플레이오프 전체를 끝까지 즉시 시뮬레이션합니다.
  */
 export function skipEntirePlayoffs(
@@ -887,12 +922,12 @@ export function simulateAsianGamesTournament(
 }
 
 /**
- * 결승전(리그 파이널 또는 아시안게임 결승) 실시간 쿼터별 중계 상태를 생성합니다.
+ * 결승전(리그 파이널, 컨퍼런스 파이널 7차전, 또는 아시안게임 결승) 실시간 쿼터별 중계 상태를 생성합니다.
  */
 export function createLiveFinalGame(
   career: CareerState,
   opponentTeam: TeamInfo,
-  gameType: 'LEAGUE_FINALS' | 'ASIAN_GAMES_FINAL'
+  gameType: 'LEAGUE_FINALS' | 'CONF_FINALS_GAME7' | 'ASIAN_GAMES_FINAL'
 ): LiveGameState {
   const isAsianGames = gameType === 'ASIAN_GAMES_FINAL';
   const playerTeam: TeamInfo = isAsianGames
@@ -913,6 +948,8 @@ export function createLiveFinalGame(
 
   const title = isAsianGames
     ? `${career.seasonYear} 아시안게임 남자농구 결승전 (병역특례 결정전)`
+    : gameType === 'CONF_FINALS_GAME7'
+    ? `${LEAGUE_CONFIG[career.league].shortName} 컨퍼런스 파이널 운명의 7차전`
     : `${LEAGUE_CONFIG[career.league].shortName} 챔피언십 파이널 최종전`;
 
   return {
@@ -927,6 +964,8 @@ export function createLiveFinalGame(
     oppScore: 0,
     currentTactic: 'UNSELFISH_PASS',
     momentum: 'NEUTRAL',
+    pendingClutchPossession: false,
+    clutchPossessionResolved: false,
     playerStats: {
       pts: 0,
       reb: 0,
@@ -944,8 +983,53 @@ export function createLiveFinalGame(
   };
 }
 
+function buildFinalOutcome(
+  liveGame: LiveGameState,
+  career: CareerState,
+  teamScore: number,
+  oppScore: number,
+  playerStats: LiveGameState['playerStats'],
+  customClutchNote?: string
+): NonNullable<LiveGameState['finalOutcome']> {
+  const won = teamScore > oppScore;
+  const gameScore =
+    playerStats.pts +
+    playerStats.reb * 1.2 +
+    playerStats.ast * 1.5 +
+    (playerStats.stl + playerStats.blk) * 2;
+  const wonFinalsMvp =
+    liveGame.gameType === 'LEAGUE_FINALS' &&
+    evaluateRealisticFinalsMvp(career, won, gameScore);
+  const grantedMilitaryExemption =
+    won && liveGame.gameType === 'ASIAN_GAMES_FINAL';
+
+  const baseHeadline =
+    liveGame.gameType === 'ASIAN_GAMES_FINAL'
+      ? won
+        ? `🏅 [아시안게임 금메달] ${career.name}, 결승전 ${playerStats.pts}점 ${playerStats.reb}리바운드 ${playerStats.ast}도움 맹활약! 금메달 및 병역특례 획득!`
+        : `🥈 [아시안게임 은메달] 대한민국, ${liveGame.opponentTeam.name}에 ${teamScore}-${oppScore} 석패... 아쉬운 준우승`
+      : liveGame.gameType === 'CONF_FINALS_GAME7'
+      ? won
+        ? `🔥 [컨퍼런스 파이널 7차전 승리] ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name}을 ${teamScore}-${oppScore}로 제압하고 대망의 파이널 진출!`
+        : `💔 [컨퍼런스 파이널 7차전 석패] ${liveGame.playerTeam.name}, 혈투 끝에 ${teamScore}-${oppScore} 패배... 파이널 문턱에서 탈락`
+      : won
+      ? `🏆 [챔피언 등극] ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name} 꺾고 정상 등극! ${career.name} ${playerStats.pts}점 활약${
+          wonFinalsMvp ? ' (파이널 MVP 수상!)' : ''
+        }`
+      : `💔 [파이널 준우승] ${liveGame.playerTeam.name}, 최종전 끝 ${teamScore}-${oppScore} 석패... 아쉬운 준우승`;
+
+  return {
+    won,
+    wonFinalsMvp,
+    grantedMilitaryExemption,
+    headline: customClutchNote ? `${baseHeadline} · ${customClutchNote}` : baseHeadline,
+  };
+}
+
 /**
  * 실시간 결승전 중계의 다음 쿼터(1Q -> 2Q -> 3Q -> 4Q -> 동점 시 OT)를 시뮬레이션합니다.
+ * - 4쿼터 종료 1분 전 점수 차가 6점 이내인 접전 상황이면 경기를 즉시 끝내지 않고
+ *   '클러치 마지막 1포제션 선택지(pendingClutchPossession: true)'를 발동합니다!
  */
 export function simulateLiveQuarter(
   liveGame: LiveGameState,
@@ -953,7 +1037,7 @@ export function simulateLiveQuarter(
   tactic?: LiveTacticId,
   rng: () => number = Math.random
 ): LiveGameState {
-  if (liveGame.isFinished) return liveGame;
+  if (liveGame.isFinished || liveGame.pendingClutchPossession) return liveGame;
 
   const chosenTactic = tactic || liveGame.currentTactic || 'UNSELFISH_PASS';
   const nextQ = liveGame.quarter + 1;
@@ -1020,7 +1104,7 @@ export function simulateLiveQuarter(
     },
   };
 
-  const mod = tacticMods[chosenTactic];
+  const mod = tacticMods[chosenTactic] || tacticMods.ACE_HERO;
   const traits = career.traits || [];
   const hasClutchTrait = traits.includes('CLUTCH_PERFORMER');
   const hasSniperTrait = traits.includes('SNIPER');
@@ -1130,7 +1214,7 @@ export function simulateLiveQuarter(
   const teamSupportPts = Math.round(
     baseQuarterPoints * (0.72 + rng() * 0.32) + qAst * 1.65 - qFga * 0.55
   );
-  const myQScore = Math.max(isOvertime ? 6 : 14, qPts + teamSupportPts);
+  let myQScore = Math.max(isOvertime ? 6 : 14, qPts + teamSupportPts);
 
   const oppAdvantage =
     (liveGame.opponentTeam.rating - (ldr + (ovr - ldr) * 0.5)) * 0.25;
@@ -1149,10 +1233,28 @@ export function simulateLiveQuarter(
     )
   );
 
-  const nextTeamScore = liveGame.teamScore + myQScore;
+  let nextTeamScore = liveGame.teamScore + myQScore;
   let nextOppScore = liveGame.oppScore + oppQScore;
 
-  if (nextQ >= 5 && nextTeamScore === nextOppScore) {
+  // 🔥 4쿼터 종료 1분 전 클러치 마지막 1포제션 드라마 연출:
+  // 4쿼터(nextQ === 4)이고 아직 클러치 선택을 하지 않았을 때,
+  // 종료 14.2초 전 1점(또는 2점) 열세의 극적인 원포제션 승부처로 진입!
+  let triggerClutchPossession = false;
+  let clutchSituationText: string | undefined = undefined;
+
+  if (nextQ === 4 && !liveGame.clutchPossessionResolved) {
+    triggerClutchPossession = true;
+    // 종료 14.2초 전 1점 뒤진(또는 2점 뒤진) 극적인 원포제션 상황으로 스코어링 조율
+    const deficit = rng() < 0.65 ? 1 : 2;
+    oppQScore = Math.max(12, nextTeamScore + deficit - liveGame.oppScore);
+    nextOppScore = liveGame.oppScore + oppQScore;
+    if (nextOppScore <= nextTeamScore) {
+      nextTeamScore = nextOppScore - deficit;
+      myQScore = Math.max(10, nextTeamScore - liveGame.teamScore);
+    }
+    const curDiff = nextOppScore - nextTeamScore;
+    clutchSituationText = `⏱️ 4쿼터 종료 14.2초 전! 스코어 ${nextTeamScore}:${nextOppScore} (${curDiff}점 차 열세) — 작전타임 직후 마지막 공격권이 ${career.name} 선수의 손에 들려 있어요!`;
+  } else if (nextQ >= 5 && nextTeamScore === nextOppScore) {
     if (ovr + (hasClutchTrait ? 4 : 0) >= liveGame.opponentTeam.rating) {
       oppQScore = Math.max(4, oppQScore - 2);
     } else {
@@ -1205,7 +1307,9 @@ export function simulateLiveQuarter(
     );
   }
 
-  if (qBlk > 0 || qStl > 0) {
+  if (triggerClutchPossession && clutchSituationText) {
+    pbp.push(`🚨 [클러치 타임 돌입] ${clutchSituationText}`);
+  } else if (qBlk > 0 || qStl > 0) {
     pbp.push(
       `🛡️ 결정적인 수비 하이라이트! ${career.name} 선수가 ${
         qBlk > 0 ? '호쾌한 블록슛' : '번개 같은 스틸'
@@ -1246,51 +1350,190 @@ export function simulateLiveQuarter(
     playByPlay: pbp,
   };
 
+  if (triggerClutchPossession) {
+    return {
+      ...liveGame,
+      quarter: nextQ,
+      isFinished: false,
+      pendingClutchPossession: true,
+      clutchSituationText,
+      teamScore: nextTeamScore,
+      oppScore: nextOppScore,
+      currentTactic: chosenTactic,
+      momentum: nextMomentum,
+      playerStats: updatedPlayerStats,
+      quarterLogs: [...liveGame.quarterLogs, logEntry],
+    };
+  }
+
   const isGameFinished = nextQ >= 4 && nextTeamScore !== nextOppScore;
 
   let finalOutcome: LiveGameState['finalOutcome'] = undefined;
   if (isGameFinished) {
-    const won = nextTeamScore > nextOppScore;
-    const gameScore =
-      updatedPlayerStats.pts +
-      updatedPlayerStats.reb * 1.2 +
-      updatedPlayerStats.ast * 1.5 +
-      (updatedPlayerStats.stl + updatedPlayerStats.blk) * 2;
-    const wonFinalsMvp =
-      liveGame.gameType === 'LEAGUE_FINALS' &&
-      evaluateRealisticFinalsMvp(career, won, gameScore);
-    const grantedMilitaryExemption =
-      won && liveGame.gameType === 'ASIAN_GAMES_FINAL';
-
-    const headline =
-      liveGame.gameType === 'ASIAN_GAMES_FINAL'
-        ? won
-          ? `🏅 [아시안게임 금메달] ${career.name}, 결승전 ${updatedPlayerStats.pts}점 ${updatedPlayerStats.reb}리바운드 ${updatedPlayerStats.ast}도움 맹활약! 금메달 및 병역특례 획득!`
-          : `🥈 [아시안게임 은메달] 대한민국, ${liveGame.opponentTeam.name}에 ${nextTeamScore}-${nextOppScore} 석패... 아쉬운 준우승`
-        : won
-        ? `🏆 [챔피언 등극] ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name} 꺾고 정상 등극! ${career.name} ${updatedPlayerStats.pts}점 활약${
-            wonFinalsMvp ? ' (파이널 MVP 수상!)' : ''
-          }`
-        : `💔 [파이널 준우승] ${liveGame.playerTeam.name}, 최종전 끝 ${nextTeamScore}-${nextOppScore} 석패... 아쉬운 준우승`;
-
-    finalOutcome = {
-      won,
-      wonFinalsMvp,
-      grantedMilitaryExemption,
-      headline,
-    };
+    finalOutcome = buildFinalOutcome(
+      liveGame,
+      career,
+      nextTeamScore,
+      nextOppScore,
+      updatedPlayerStats
+    );
   }
 
   return {
     ...liveGame,
     quarter: nextQ,
     isFinished: isGameFinished,
+    pendingClutchPossession: false,
     teamScore: nextTeamScore,
     oppScore: nextOppScore,
     currentTactic: chosenTactic,
     momentum: nextMomentum,
     playerStats: updatedPlayerStats,
     quarterLogs: [...liveGame.quarterLogs, logEntry],
+    finalOutcome,
+  };
+}
+
+/**
+ * 🔥 4쿼터 종료 직전 '클러치 마지막 1포제션' 선택지를 판정하여 최종 승패를 결정합니다.
+ * - 'ISO_WINNER': 내가 직접 아이솔레이션 위닝샷 시도 (INS/OUT 능력치 + CLUTCH_PERFORMER + 체력 반영)
+ * - 'KICKOUT_ASSIST': 더블팀을 유인해 코너 오픈 동료에게 킥아웃 패스 (PLY 능력치 + 팀 전력 + 기민성 반영)
+ */
+export function resolveClutchPossession(
+  liveGame: LiveGameState,
+  career: CareerState,
+  choice: ClutchChoiceId,
+  rng: () => number = Math.random
+): LiveGameState {
+  if (!liveGame.pendingClutchPossession || liveGame.isFinished) {
+    return liveGame;
+  }
+
+  const stats = career.stats;
+  const ldr =
+    liveGame.gameType === 'ASIAN_GAMES_FINAL'
+      ? 72
+      : LEAGUE_CONFIG[career.league].ldr;
+  const traits = career.traits || [];
+  const hasClutchTrait = traits.includes('CLUTCH_PERFORMER');
+  const hasSniperTrait = traits.includes('SNIPER');
+  const bio = calculateBiomechanicalProfile(career.heightCm, career.primaryPos);
+
+  const staminaMod =
+    liveGame.playerStats.stamina >= 50
+      ? 0.04
+      : liveGame.playerStats.stamina < 25
+      ? -0.08
+      : 0;
+  const clutchBonus = hasClutchTrait ? 0.14 : 0;
+
+  let successProb = 0.5;
+  if (choice === 'ISO_WINNER') {
+    const scoringSkill = Math.max(stats.ins, stats.out) * 0.65 + Math.min(stats.ins, stats.out) * 0.35;
+    successProb = clamp(
+      0.48 +
+        (scoringSkill - ldr) * 0.012 +
+        clutchBonus +
+        (hasSniperTrait ? 0.05 : 0) +
+        staminaMod -
+        bio.positionalPhysicsStrain * 0.12,
+      0.22,
+      0.86
+    );
+  } else {
+    const passSkill = stats.ply * 0.7 + liveGame.playerTeam.rating * 0.3;
+    successProb = clamp(
+      0.5 +
+        (passSkill - ldr) * 0.012 +
+        clutchBonus * 0.8 +
+        staminaMod -
+        bio.tovRatePenalty * 0.08,
+      0.25,
+      0.86
+    );
+  }
+
+  const succeeded = rng() < successProb;
+  const nextStats = { ...liveGame.playerStats };
+  let nextTeamScore = liveGame.teamScore;
+  let nextOppScore = liveGame.oppScore;
+  let clutchPlayLine = '';
+  let customClutchNote = '';
+
+  // 승리하기 위해 필요한 득점 (1~2점 열세이므로 3점 버저비터 또는 앤드원 3점 플레이로 역전승!)
+  const pointsAdded = 3;
+
+  if (choice === 'ISO_WINNER') {
+    nextStats.fga += 1;
+    nextStats.tpa += 1;
+    if (succeeded) {
+      nextStats.fgm += 1;
+      nextStats.tpm += 1;
+      nextStats.pts += pointsAdded;
+      nextTeamScore += pointsAdded;
+      if (nextTeamScore <= nextOppScore) {
+        nextTeamScore = nextOppScore + 1;
+      }
+      clutchPlayLine = `🚨 [버저비터 위닝샷 작렬!] 종료 버저와 함께 ${career.name} 선수가 수비수 두 명 위로 솟구쳐 올라 던진 역전 클러치 3점포가 그물을 가릅니다! (${nextTeamScore}:${nextOppScore})`;
+      customClutchNote = `${career.name} 경기 종료 버저비터 위닝샷 작렬!`;
+    } else {
+      if (nextTeamScore >= nextOppScore) {
+        nextOppScore = nextTeamScore + 1;
+      }
+      clutchPlayLine = `😢 [아쉬운 림 외면] ${career.name} 선수가 마지막 회심의 아이솔레이션 위닝샷을 던졌으나 림 안쪽을 맞고 튀어 나오며 종료 버저가 울립니다 (${nextTeamScore}:${nextOppScore}).`;
+      customClutchNote = '마지막 클러치 위닝샷 불발';
+    }
+  } else {
+    if (succeeded) {
+      nextStats.ast += 1;
+      nextTeamScore += pointsAdded;
+      if (nextTeamScore <= nextOppScore) {
+        nextTeamScore = nextOppScore + 1;
+      }
+      clutchPlayLine = `🧠 [환상적인 클러치 킥아웃 어시스트!] ${career.name} 선수가 수비수 3명을 순식간에 끌어들인 뒤 반대편 코너 오픈 동료에게 노룩 패스를 배달! 종료 버저와 함께 역전 3점슛이 꽂힙니다! (${nextTeamScore}:${nextOppScore})`;
+      customClutchNote = `${career.name} 결승 위닝 킥아웃 어시스트 기록!`;
+    } else {
+      if (nextTeamScore >= nextOppScore) {
+        nextOppScore = nextTeamScore + 1;
+      }
+      clutchPlayLine = `😢 [뼈아픈 마지막 포제션] ${career.name} 선수의 킥아웃 패스를 이어받은 코너 동료의 오픈 3점슛이 림을 돌아 나오며 경기가 그대로 종료됩니다 (${nextTeamScore}:${nextOppScore}).`;
+      customClutchNote = '마지막 코너 킥아웃 찬스 무산';
+    }
+  }
+
+  const updatedLogs = [...liveGame.quarterLogs];
+  if (updatedLogs.length > 0) {
+    const lastIdx = updatedLogs.length - 1;
+    const prevLog = updatedLogs[lastIdx];
+    updatedLogs[lastIdx] = {
+      ...prevLog,
+      teamPts: prevLog.teamPts + (nextTeamScore - liveGame.teamScore),
+      oppPts: prevLog.oppPts + (nextOppScore - liveGame.oppScore),
+      playerPts: prevLog.playerPts + (nextStats.pts - liveGame.playerStats.pts),
+      playerAst: prevLog.playerAst + (nextStats.ast - liveGame.playerStats.ast),
+      playByPlay: [...prevLog.playByPlay, clutchPlayLine],
+    };
+  }
+
+  const finalOutcome = buildFinalOutcome(
+    liveGame,
+    career,
+    nextTeamScore,
+    nextOppScore,
+    nextStats,
+    customClutchNote
+  );
+
+  return {
+    ...liveGame,
+    teamScore: nextTeamScore,
+    oppScore: nextOppScore,
+    isFinished: true,
+    pendingClutchPossession: false,
+    clutchPossessionResolved: true,
+    clutchSituationText: clutchPlayLine,
+    playerStats: nextStats,
+    quarterLogs: updatedLogs,
     finalOutcome,
   };
 }
@@ -1305,13 +1548,21 @@ export function skipLiveGameToEnd(
 ): LiveGameState {
   let current = { ...liveGame };
   let guard = 0;
-  while (!current.isFinished && guard < 8) {
-    current = simulateLiveQuarter(
-      current,
-      career,
-      current.currentTactic || 'UNSELFISH_PASS',
-      rng
-    );
+  while (!current.isFinished && guard < 10) {
+    if (current.pendingClutchPossession) {
+      const autoChoice: ClutchChoiceId =
+        career.stats.ply > Math.max(career.stats.ins, career.stats.out) + 5
+          ? 'KICKOUT_ASSIST'
+          : 'ISO_WINNER';
+      current = resolveClutchPossession(current, career, autoChoice, rng);
+    } else {
+      current = simulateLiveQuarter(
+        current,
+        career,
+        current.currentTactic || 'UNSELFISH_PASS',
+        rng
+      );
+    }
     guard++;
   }
   return current;

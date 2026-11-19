@@ -53,7 +53,7 @@ export function DraftLiveStage() {
   const twoWayTargetTeam = dr.draftedTeam || dr.twoWayOfferTeam;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-2xl mx-auto space-y-5">
       <section className="bg-white text-slate-900 border border-slate-200 rounded-3xl p-6 sm:p-10 shadow-sm text-center space-y-6 relative overflow-hidden">
         {/* 상단 라이브 배지 및 즉시 건너뛰기 버튼 */}
         <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-4">

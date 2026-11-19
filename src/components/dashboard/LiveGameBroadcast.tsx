@@ -51,6 +51,7 @@ export function LiveGameBroadcast() {
   const career = useCareerStore((s) => s.career);
   const setLiveGameTactic = useCareerStore((s) => s.setLiveGameTactic);
   const playNextLiveQuarter = useCareerStore((s) => s.playNextLiveQuarter);
+  const resolveLiveClutchChoice = useCareerStore((s) => s.resolveLiveClutchChoice);
   const skipLiveGame = useCareerStore((s) => s.skipLiveGame);
   const closeLiveGameAndReturn = useCareerStore((s) => s.closeLiveGameAndReturn);
 
@@ -60,6 +61,7 @@ export function LiveGameBroadcast() {
   const userWon = liveGame.teamScore > liveGame.oppScore;
   const ps = liveGame.playerStats;
   const fgPct = ps.fga > 0 ? ((ps.fgm / ps.fga) * 100).toFixed(1) : '0.0';
+  const hasClutchTrait = (career.traits || []).includes('CLUTCH_PERFORMER');
 
   return (
     <div
@@ -73,6 +75,8 @@ export function LiveGameBroadcast() {
             ● LIVE BROADCAST ·{' '}
             {liveGame.isFinished
               ? '경기 종료'
+              : liveGame.pendingClutchPossession
+              ? '🔥 4Q 종료 직전 · 마지막 1포제션'
               : liveGame.quarter === 0
               ? 'TIP-OFF 대기'
               : `${liveGame.quarter}쿼터 종료`}
@@ -109,13 +113,20 @@ export function LiveGameBroadcast() {
           <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
             {liveGame.isFinished
               ? 'FINAL'
+              : liveGame.pendingClutchPossession
+              ? '4Q 0:14.2'
               : liveGame.quarter === 0
               ? '1Q 시작 전'
               : `${liveGame.quarter}Q 완료`}
           </span>
           <div className="text-xs text-slate-400 font-bold">VS</div>
           <span className="inline-block text-[11px] font-bold text-emerald-600">
-            체력 {ps.stamina}% · 반칙 {ps.fouls}개
+            체력 {ps.stamina}% · 반칙 {ps.fouls}개 · 리듬{' '}
+            {liveGame.momentum === 'HOT'
+              ? '🔥 HOT'
+              : liveGame.momentum === 'COLD'
+              ? '❄️ COLD'
+              : '⚖️ NORMAL'}
           </span>
         </div>
 
@@ -129,7 +140,7 @@ export function LiveGameBroadcast() {
       </div>
 
       {/* 내 선수 실시간 스탯 라인 */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-center">
+      <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-3.5 text-center">
         {[
           { label: 'PTS', val: ps.pts },
           { label: 'REB', val: ps.reb },
@@ -139,6 +150,10 @@ export function LiveGameBroadcast() {
           {
             label: 'FG',
             val: `${ps.fgm}/${ps.fga} (${fgPct}%)`,
+          },
+          {
+            label: '3PT',
+            val: `${ps.tpm}/${ps.tpa}`,
           },
         ].map((st) => (
           <div key={st.label}>
@@ -150,8 +165,62 @@ export function LiveGameBroadcast() {
         ))}
       </div>
 
-      {/* 작전 지시 선택 */}
-      {!liveGame.isFinished && (
+      {/* 🔥 4쿼터 종료 1분 전: 클러치 마지막 1포제션 선택지 UI */}
+      {liveGame.pendingClutchPossession && !liveGame.isFinished && (
+        <div
+          data-testid="clutch-possession-modal"
+          className="p-5 rounded-2xl bg-rose-50/90 border-2 border-rose-500 space-y-4 shadow-xs"
+        >
+          <div className="space-y-1">
+            <span className="inline-flex items-center gap-1.5 text-xs font-black text-rose-700">
+              🚨 CLUTCH TIME · 운명을 가를 마지막 1포제션 선택!
+            </span>
+            <p className="text-xs sm:text-sm font-extrabold text-slate-900 leading-relaxed">
+              {liveGame.clutchSituationText}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              type="button"
+              data-testid="clutch-choice-iso"
+              onClick={() => resolveLiveClutchChoice('ISO_WINNER')}
+              className="p-4 rounded-2xl bg-white hover:bg-orange-50 border-2 border-orange-500 text-left transition cursor-pointer space-y-1.5 shadow-2xs"
+            >
+              <div className="text-xs sm:text-sm font-black text-orange-700">
+                🔥 내가 직접 아이솔레이션 위닝샷을 쏜다
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                수비수를 흔들고 직접 스텝백 버저비터를 던져요! (내 슈팅·돌파 능력치 및 승부사 특성 반영)
+              </p>
+              <div className="text-[11px] font-extrabold text-slate-800 pt-0.5">
+                내 공격력: INS {career.stats.ins} / OUT {career.stats.out}
+                {hasClutchTrait ? ' · 🔥 승부사 보너스!' : ''}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              data-testid="clutch-choice-kickout"
+              onClick={() => resolveLiveClutchChoice('KICKOUT_ASSIST')}
+              className="p-4 rounded-2xl bg-white hover:bg-indigo-50 border-2 border-indigo-500 text-left transition cursor-pointer space-y-1.5 shadow-2xs"
+            >
+              <div className="text-xs sm:text-sm font-black text-indigo-700">
+                🧠 더블팀을 유인해 코너 오픈 동료에게 킥아웃 패스
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                수비 2~3명을 순식간에 끌어들인 뒤 노룩 킥아웃 패스로 동료의 역전 3점슛을 도우며 승부를 결정지어요!
+              </p>
+              <div className="text-[11px] font-extrabold text-slate-800 pt-0.5">
+                내 패스 시야: PLY {career.stats.ply} · 팀 전력 {liveGame.playerTeam.rating}
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 작전 지시 선택 (클러치 선택 대기 중이 아닐 때만 노출) */}
+      {!liveGame.isFinished && !liveGame.pendingClutchPossession && (
         <div className="space-y-2.5">
           <div className="text-xs font-bold text-slate-700">
             다음 쿼터 전술 지시 선택 ({liveGame.quarter >= 4 ? '연장전(OT)' : `${liveGame.quarter + 1}쿼터`})
@@ -221,36 +290,38 @@ export function LiveGameBroadcast() {
       )}
 
       {/* 하단 액션 버튼 */}
-      <div className="flex items-center justify-end gap-3 pt-2">
-        {!liveGame.isFinished ? (
-          <button
-            type="button"
-            onClick={playNextLiveQuarter}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm flex items-center justify-center gap-2 transition shadow-sm cursor-pointer"
-          >
-            <Play className="w-4 h-4 fill-current" />
-            {liveGame.quarter >= 4 ? '연장전(OT)' : `${liveGame.quarter + 1}쿼터`} 실시간 중계 진행하기
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={closeLiveGameAndReturn}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-sm flex items-center justify-center gap-2 transition shadow-sm cursor-pointer"
-          >
-            {userWon ? (
-              <>
-                <Trophy className="w-4 h-4" />
-                우승 확정 및 오프시즌 에이전트 데스크로 복귀
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                경기 결과 확인 및 오프시즌 복귀하기
-              </>
-            )}
-          </button>
-        )}
-      </div>
+      {!liveGame.pendingClutchPossession && (
+        <div className="flex items-center justify-end gap-3 pt-2">
+          {!liveGame.isFinished ? (
+            <button
+              type="button"
+              onClick={playNextLiveQuarter}
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-white font-black text-sm flex items-center justify-center gap-2 transition shadow-sm cursor-pointer"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              {liveGame.quarter >= 4 ? '연장전(OT)' : `${liveGame.quarter + 1}쿼터`} 실시간 중계 진행하기
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={closeLiveGameAndReturn}
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black text-sm flex items-center justify-center gap-2 transition shadow-sm cursor-pointer"
+            >
+              {userWon ? (
+                <>
+                  <Trophy className="w-4 h-4" />
+                  우승 확정 및 오프시즌 에이전트 데스크로 복귀
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  경기 결과 확인 및 오프시즌 복귀하기
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

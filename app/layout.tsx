@@ -1,12 +1,5 @@
 import type { Metadata } from 'next';
-import { Noto_Sans_KR } from 'next/font/google';
 import './globals.css';
-
-const notoSansKr = Noto_Sans_KR({
-  subsets: ['latin'],
-  weight: ['400', '500', '700', '900'],
-  display: 'swap',
-});
 
 export const metadata: Metadata = {
   title: '벤치에서 MVP까지 (From Bench to MVP)',
@@ -35,7 +28,7 @@ export default function RootLayout({
     <html lang="ko">
       <body
         suppressHydrationWarning
-        className={`${notoSansKr.className} bg-[#F8FAFC] text-[#0F172A] antialiased`}
+        className="font-sans bg-[#F8FAFC] text-[#0F172A] antialiased"
       >
         {children}
       </body>

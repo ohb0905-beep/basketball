@@ -29,7 +29,6 @@ export function Header({ onRequestResetModal }: HeaderProps = {}) {
     setEspnLogos,
   } = useCareerStore();
 
-  // 전 리그 크롤링 API (/api/league-sync) 및 로컬 스토리지 캐싱 + 리그별 SVG 폴백 초기화
   useEffect(() => {
     const baseLogos: Record<string, string> = {};
     for (const t of [...ALL_TEAMS, ...ASIAN_NATIONAL_TEAMS]) {
@@ -59,7 +58,6 @@ export function Header({ onRequestResetModal }: HeaderProps = {}) {
       }
     }
 
-    // 클라이언트 캐시 우선 로드
     try {
       const rawCache = window.localStorage.getItem(CLIENT_LOGO_CACHE_KEY);
       if (rawCache) {
@@ -124,46 +122,43 @@ export function Header({ onRequestResetModal }: HeaderProps = {}) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+      <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between gap-2">
         <button
           onClick={() => setView('HOME')}
-          className="flex items-center gap-2.5 text-left group cursor-pointer"
+          className="flex items-center gap-2 text-left group cursor-pointer"
         >
-          <div className="w-9 h-9 rounded-xl bg-orange-600 flex items-center justify-center shadow-xs group-hover:bg-orange-700 transition-colors">
-            <Trophy className="w-5 h-5 text-white" />
+          <div className="w-8 h-8 rounded-xl bg-orange-600 flex items-center justify-center shadow-2xs group-hover:bg-orange-700 transition-colors">
+            <Trophy className="w-4 h-4 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="font-black tracking-tight text-base sm:text-lg text-slate-900">
+            <div className="flex items-center gap-1.5">
+              <span className="font-black tracking-tight text-sm sm:text-base text-slate-900">
                 벤치에서 MVP까지
               </span>
-              <span className="hidden sm:inline text-xs font-bold text-orange-600">
-                · PRO EDITION
+              <span className="text-[10px] font-extrabold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-md">
+                PRO
               </span>
             </div>
-            <p className="text-[11px] text-slate-500 hidden sm:block">
-              고교 코트에서 NBA 명예의 전당까지 · 리얼 농구 커리어 시뮬레이션
-            </p>
           </div>
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {hofList.length > 0 && (
             <button
               onClick={() => setView('HOME')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-amber-800 transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-amber-800 transition-colors cursor-pointer"
             >
               <Award className="w-3.5 h-3.5 text-amber-600" />
-              <span>명예의 전당 ({hofList.length})</span>
+              <span>전당 ({hofList.length})</span>
             </button>
           )}
 
           {career && view !== 'DASHBOARD' && !career.retirementReason && (
             <button
               onClick={() => setView('DASHBOARD')}
-              className="px-3.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition-colors cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition-colors cursor-pointer"
             >
-              커리어 복귀 ({career.name})
+              복귀 ({career.name})
             </button>
           )}
 
@@ -186,7 +181,7 @@ export function Header({ onRequestResetModal }: HeaderProps = {}) {
                   resetActiveCareer();
                 }
               }}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-xs font-semibold text-slate-700 hover:text-rose-700 transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-xs font-semibold text-slate-700 hover:text-rose-700 transition-colors cursor-pointer"
               title="새 선수 키우기"
             >
               <RotateCcw className="w-3.5 h-3.5" />

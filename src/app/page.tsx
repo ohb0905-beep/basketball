@@ -62,7 +62,7 @@ export default function BenchToMvpApp() {
         {view === 'CREATE' && <PlayerCreator />}
 
         {view === 'DASHBOARD' && career && (
-          <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+          <div className="max-w-2xl mx-auto px-4 py-5 space-y-5">
             <PlayerHeader career={career} />
 
             {/* 3탭 네비게이션 (화이트톤 세그먼트 컨트롤) */}

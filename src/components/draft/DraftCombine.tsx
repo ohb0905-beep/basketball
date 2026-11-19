@@ -48,7 +48,7 @@ export function DraftCombine() {
   const projectedRound = cs.projectedPick <= 30 ? '1라운드' : cs.projectedPick <= 58 ? '2라운드' : '언드래프트 위험';
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10 space-y-6 text-slate-900">
+    <div className="max-w-2xl mx-auto px-4 py-6 space-y-5 text-slate-900">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <button
           type="button"

@@ -7,11 +7,13 @@ import { LEAGUE_CONFIG } from '../data/leagues';
 import { getTeamsByLeague } from '../data/teams';
 import {
   AllLeagueTier,
+  AwardRaceEntry,
   CareerState,
   ContractType,
   GrowthDna,
   LeagueAwardSummary,
   LeagueId,
+  PersonalCareId,
   PlayerStats,
   PlayerTraitId,
   PlaystyleArchetype,
@@ -366,6 +368,7 @@ export function calculateRoleAndMpg(
     draftPedigreeRound?: 1 | 2 | null;
     draftPedigreeSeasonsLeft?: number;
     seasonLogs?: SeasonBoxScore[];
+    activePersonalCare?: PersonalCareId[];
   },
   rng: () => number = Math.random
 ): RoleAndMpgResult {
@@ -507,23 +510,30 @@ export function calculateRoleAndMpg(
     basePer36 = 22.8;
   }
 
-  // 부상 리스크 계산 (PHY, 출전시간, 철강왕 DNA, 고유 특성 '강철 체력' / '유리몸' 모두 반영)
+  // 부상 리스크 계산 (PHY, 출전시간, 철강왕 DNA, 고유 특성 '강철 체력' / '유리몸' 및 퍼스널 케어 'REHAB_LOAD_MGMT' 모두 반영)
   const phy = career.stats?.phy ?? 65;
   const dna = career.growthDna || 'STANDARD';
   const traits = career.traits || [];
+  const hasRehabCare = (career.activePersonalCare || []).includes(
+    'REHAB_LOAD_MGMT'
+  );
   let injuredGamesMissed = 0;
 
   const lowPhyRisk = Math.max(0.02, (72 - phy) * 0.008);
   const highMpgRisk = Math.max(0, (mpg - 28.0) * 0.015);
   let injuryMult = dna === 'IRONMAN' ? 0.45 : 1.0;
   if (traits.includes('IRON_STAMINA')) injuryMult *= 0.4;
-  if (traits.includes('GLASS_BODY')) injuryMult *= 1.65;
+  if (traits.includes('GLASS_BODY') && !hasRehabCare) injuryMult *= 1.65;
+  if (hasRehabCare) injuryMult *= 0.3;
 
   if (rng() < (lowPhyRisk + highMpgRisk) * injuryMult) {
-    const maxMiss = Math.max(3, Math.round(leagueConfig.games * 0.28));
+    const rawMaxMiss = Math.max(3, Math.round(leagueConfig.games * 0.28));
+    const maxMiss = hasRehabCare
+      ? Math.max(2, Math.round(rawMaxMiss * 0.35))
+      : rawMaxMiss;
     injuredGamesMissed = Math.max(
-      2,
-      Math.min(maxMiss, Math.round(3 + rng() * (maxMiss - 2)))
+      1,
+      Math.min(maxMiss, Math.round(2 + rng() * Math.max(1, maxMiss - 2)))
     );
   }
 
@@ -565,7 +575,7 @@ export function calculatePpg(
 }
 
 /**
- * 선수 고유 성장 곡선 DNA 및 특성(슬로우 스타터 등)이 반영된 시즌 성장 및 에이징 수식
+ * 선수 고유 성장 곡선 DNA 및 특성(슬로우 스타터, 퍼스널 케어 바이오메카닉스 랩, 베테랑 스타일 진화 등)이 반영된 시즌 성장 및 에이징 수식
  */
 export function calculateSeasonStatGrowth(
   career: Pick<
@@ -577,6 +587,8 @@ export function calculateSeasonStatGrowth(
     growthDna?: GrowthDna;
     traits?: PlayerTraitId[];
     totals?: CareerState['totals'];
+    activePersonalCare?: PersonalCareId[];
+    veteranReinvented?: boolean;
   },
   mpg: number,
   rng: () => number = Math.random,
@@ -587,6 +599,10 @@ export function calculateSeasonStatGrowth(
   const dna: GrowthDna = career.growthDna || 'STANDARD';
   const traits = career.traits || [];
   const isSlowStarter = traits.includes('SLOW_STARTER');
+  const hasBiomechLab = (career.activePersonalCare || []).includes(
+    'BIOMECH_SKILL_LAB'
+  );
+  const veteranReinvented = Boolean(career.veteranReinvented);
   const heightCm = career.heightCm ?? 195;
   const primaryPos = career.primaryPos ?? 'SG';
 
@@ -650,6 +666,8 @@ export function calculateSeasonStatGrowth(
       ageMultiplier = career.age <= 20 ? 1.12 : career.age <= 23 ? 0.96 : 0.74;
     }
 
+    const careGrowthMult = hasBiomechLab ? 1.15 : 1.0;
+
     const baseGain =
       1.72 *
       ptFactor *
@@ -657,7 +675,8 @@ export function calculateSeasonStatGrowth(
       potPenalty *
       highOvrWall *
       injuryFactor *
-      ageMultiplier;
+      ageMultiplier *
+      careGrowthMult;
 
     const focusWeights: Record<
       TrainingFocus,
@@ -709,7 +728,7 @@ export function calculateSeasonStatGrowth(
     if (
       career.ovr < leagueConfig.growthCap &&
       career.ovr < career.potential &&
-      rng() < 0.58
+      rng() < (hasBiomechLab ? 0.75 : 0.58)
     ) {
       const bonusKey: keyof PlayerStats =
         career.trainingFocus === 'OUTSIDE_SHOOTING'
@@ -730,6 +749,8 @@ export function calculateSeasonStatGrowth(
   const aged = applyAgingCurve(career.age, prev, rng, {
     growthDna: dna,
     careerMinutes,
+    hasBiomechLab,
+    veteranReinvented,
   });
   return applyBioCap(aged.nextStats);
 }
@@ -1416,6 +1437,29 @@ export function simulateSeason(
     boxScore.narrativeLog.push(rivalNarrative);
   }
 
+  // 🏆 MVP & 신인왕(ROY) 투표 레이스 TOP 5 보드 및 서사 피드백 생성
+  const hadPreviousSeasonInLeague = career.seasonLogs.some(
+    (l) => l.league === career.league
+  );
+  const awardRaces = buildAwardRaceTop5({
+    career,
+    boxScore,
+    standings,
+    updatedRivals,
+    isRookieSeason: !hadPreviousSeasonInLeague,
+    rng,
+  });
+  boxScore.mvpRace = awardRaces.mvpRace;
+  boxScore.mvpRaceNarrative = awardRaces.mvpRaceNarrative;
+  if (awardRaces.mvpRaceNarrative) {
+    boxScore.narrativeLog.push(`🗳️ [MVP 투표 결산] ${awardRaces.mvpRaceNarrative}`);
+  }
+  if (awardRaces.royRace && awardRaces.royRaceNarrative) {
+    boxScore.royRace = awardRaces.royRace;
+    boxScore.royRaceNarrative = awardRaces.royRaceNarrative;
+    boxScore.narrativeLog.push(`🌱 [신인왕 투표 결산] ${awardRaces.royRaceNarrative}`);
+  }
+
   // 능력치 성장/노쇠화 적용 (신장 대비 포지션 물리 상한선 강제 적용)
   const { nextStats, delta: statDelta } = calculateSeasonStatGrowth(
     career,
@@ -1507,6 +1551,300 @@ export function simulateSeason(
     newlyAcquiredTraitNames: newlyAcquired.map((t) => t.name),
     updatedRivals,
     brokenRolePromise,
+  };
+}
+
+/**
+ * MVP 및 신인왕(ROY) 투표 레이스 TOP 5 보드 및 구체적 서사 피드백 생성기
+ */
+export function buildAwardRaceTop5(params: {
+  career: CareerState;
+  boxScore: SeasonBoxScore;
+  standings: StandingEntry[];
+  updatedRivals: RivalPlayer[];
+  isRookieSeason: boolean;
+  rng?: () => number;
+}): {
+  mvpRace: AwardRaceEntry[];
+  mvpRaceNarrative: string;
+  royRace?: AwardRaceEntry[];
+  royRaceNarrative?: string;
+} {
+  const { career, boxScore, standings, updatedRivals, isRookieSeason, rng = Math.random } =
+    params;
+  const leagueCfg = LEAGUE_CONFIG[career.league];
+  const ldrScale = leagueCfg.ldr / 78;
+  const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
+
+  const otherStandings = standings.filter((s) => !s.isPlayerTeam);
+  const topTeams =
+    otherStandings.length > 0
+      ? otherStandings.slice(0, Math.min(6, otherStandings.length))
+      : standings;
+
+  const calcScore = (
+    ppg: number,
+    rpg: number,
+    apg: number,
+    wins: number,
+    losses: number
+  ) => {
+    const winPct = wins / Math.max(1, wins + losses);
+    return Number((ppg * 1.15 + rpg * 0.72 + apg * 0.92 + winPct * 22).toFixed(2));
+  };
+
+  // 1. MVP 후보군 구성 (본인 + 동일 리그 라이벌 + 가상 슈퍼스타 후보 4명)
+  const mvpCandidates: Omit<AwardRaceEntry, 'rank' | 'firstPlaceVoteShare'>[] = [];
+
+  const myMvpScore = calcScore(
+    boxScore.ppg,
+    boxScore.rpg,
+    boxScore.apg,
+    boxScore.wins,
+    boxScore.losses
+  );
+
+  mvpCandidates.push({
+    name: career.name,
+    teamShortName: boxScore.teamShortName,
+    pos: career.primaryPos,
+    isPlayer: true,
+    ppg: boxScore.ppg,
+    rpg: boxScore.rpg,
+    apg: boxScore.apg,
+    wins: boxScore.wins,
+    losses: boxScore.losses,
+    awardScore: myMvpScore,
+  });
+
+  const sameLeagueRivals = updatedRivals.filter((r) => r.league === career.league);
+  for (const r of sameLeagueRivals) {
+    const st = standings.find((s) => s.team.id === r.teamId) || topTeams[0];
+    const rWins = st ? st.wins : Math.round(leagueCfg.games * 0.56);
+    const rLosses = st ? st.losses : leagueCfg.games - rWins;
+    mvpCandidates.push({
+      name: r.name,
+      teamShortName: r.teamShortName,
+      pos: r.pos,
+      isPlayer: false,
+      ppg: r.ppg,
+      rpg: r.rpg,
+      apg: r.apg,
+      wins: rWins,
+      losses: rLosses,
+      awardScore: calcScore(r.ppg, r.rpg, r.apg, rWins, rLosses),
+    });
+  }
+
+  for (let i = 0; i < 4; i++) {
+    const tEntry = topTeams[i % Math.max(1, topTeams.length)];
+    const pos = positions[(i + 1) % positions.length];
+    const starName = generateProceduralPlayerName(career.league, rng);
+    const basePpg = Number(
+      (19.5 + ldrScale * 7.8 - i * 1.3 + (rng() * 2.2 - 1.1)).toFixed(1)
+    );
+    const baseRpg = Number(
+      ((pos === 'C' || pos === 'PF' ? 9.6 : 5.4) + (rng() * 1.8 - 0.9)).toFixed(1)
+    );
+    const baseApg = Number(
+      ((pos === 'PG' ? 8.2 : 4.6) + (rng() * 1.6 - 0.8)).toFixed(1)
+    );
+    const sWins = tEntry ? tEntry.wins : Math.round(leagueCfg.games * (0.64 - i * 0.04));
+    const sLosses = tEntry ? tEntry.losses : leagueCfg.games - sWins;
+
+    mvpCandidates.push({
+      name: starName,
+      teamShortName: tEntry ? tEntry.team.shortName : career.team.shortName,
+      pos,
+      isPlayer: false,
+      ppg: basePpg,
+      rpg: baseRpg,
+      apg: baseApg,
+      wins: sWins,
+      losses: sLosses,
+      awardScore: calcScore(basePpg, baseRpg, baseApg, sWins, sLosses),
+    });
+  }
+
+  // wonMvp 판정 결과와 100% 정합성 유지
+  const bestNpcMvpScore = Math.max(
+    ...mvpCandidates.filter((c) => !c.isPlayer).map((c) => c.awardScore)
+  );
+  const playerMvpObj = mvpCandidates.find((c) => c.isPlayer)!;
+  if (boxScore.wonMvp && playerMvpObj.awardScore <= bestNpcMvpScore) {
+    playerMvpObj.awardScore = Number((bestNpcMvpScore + 2.4).toFixed(2));
+  } else if (!boxScore.wonMvp && playerMvpObj.awardScore >= bestNpcMvpScore) {
+    // 선수가 MVP를 수상하지 못한 시즌이면 1위 후보보다 근소하게 아래(2위)에 위치하도록 보정
+    playerMvpObj.awardScore = Number((bestNpcMvpScore - 1.2).toFixed(2));
+  }
+
+  mvpCandidates.sort((a, b) => b.awardScore - a.awardScore);
+
+  // 만약 선수가 5위 밖이지만 준수한 주전급 시즌을 보냈다면 5위 안에 포함해 내 순위 비교를 직관적으로 제공
+  let top5MvpRaw = mvpCandidates.slice(0, 5);
+  if (!top5MvpRaw.some((c) => c.isPlayer) && boxScore.ppg >= 14.0) {
+    top5MvpRaw = [...mvpCandidates.slice(0, 4), playerMvpObj];
+  }
+
+  const mvpWeights = top5MvpRaw.map((c, idx) => {
+    const scoreGapFromTop = Math.max(0, top5MvpRaw[0].awardScore - c.awardScore);
+    const rankDecay = idx === 0 ? 1.0 : idx === 1 ? 0.45 : idx === 2 ? 0.16 : idx === 3 ? 0.05 : 0.02;
+    return Math.max(0.01, Math.exp(-scoreGapFromTop * 0.22) * rankDecay);
+  });
+  const weightSum = mvpWeights.reduce((a, b) => a + b, 0);
+  const rawShares = mvpWeights.map((w) => Math.round((w / weightSum) * 100));
+  const shareDiff = 100 - rawShares.reduce((a, b) => a + b, 0);
+  rawShares[0] = Math.max(1, rawShares[0] + shareDiff);
+
+  const mvpRace: AwardRaceEntry[] = top5MvpRaw.map((c, idx) => ({
+    ...c,
+    rank: idx + 1,
+    firstPlaceVoteShare: rawShares[idx],
+  }));
+
+  const mvpWinner = mvpRace[0];
+  const mvpRunnerUp = mvpRace[1] || mvpRace[0];
+  const myMvpRankEntry = mvpRace.find((c) => c.isPlayer);
+
+  let mvpRaceNarrative = '';
+  if (boxScore.wonMvp || myMvpRankEntry?.rank === 1) {
+    mvpRaceNarrative = `투표 결과 1위 (1위 표 ${mvpWinner.firstPlaceVoteShare}%) — 2위 ${mvpRunnerUp.name}(${mvpRunnerUp.teamShortName}, ${mvpRunnerUp.firstPlaceVoteShare}%)을 제치고 ${leagueCfg.shortName} 정규시즌 MVP 트로피를 거머쥐었어요!`;
+  } else if (myMvpRankEntry && (myMvpRankEntry.rank === 2 || myMvpRankEntry.rank === 3)) {
+    const teamRecordLack = boxScore.wins < mvpWinner.wins;
+    mvpRaceNarrative = teamRecordLack
+      ? `투표 결과 ${myMvpRankEntry.rank}위 (1위 표 ${myMvpRankEntry.firstPlaceVoteShare}%) — 개인 스탯(${boxScore.ppg}점 ${boxScore.rpg}리바 ${boxScore.apg}도움)은 최정상급이었으나 팀 성적(${boxScore.wins}승 ${boxScore.losses}패) 부족으로 1위 ${mvpWinner.name}(${mvpWinner.teamShortName}, ${mvpWinner.wins}승 ${mvpWinner.losses}패)에게 아쉽게 고배를 마셨어요.`
+      : `투표 결과 ${myMvpRankEntry.rank}위 (1위 표 ${myMvpRankEntry.firstPlaceVoteShare}%) — 맹활약을 펼쳤지만 1위 ${mvpWinner.name}(${mvpWinner.teamShortName}, 평균 ${mvpWinner.ppg}점 ${mvpWinner.rpg}리바 ${mvpWinner.apg}도움)의 압도적인 공수 마진에 밀려 아쉽게 수상에 실패했어요.`;
+  } else if (myMvpRankEntry) {
+    mvpRaceNarrative = `투표 결과 ${myMvpRankEntry.rank}위 (1위 표 ${myMvpRankEntry.firstPlaceVoteShare}%) — 리그 정상급 활약을 인정받아 MVP 투표 TOP 5에 이름을 올렸어요 (1위: ${mvpWinner.name} · ${mvpWinner.firstPlaceVoteShare}%).`;
+  } else {
+    mvpRaceNarrative = `이번 시즌 ${leagueCfg.shortName} MVP는 평균 ${mvpWinner.ppg}점 ${mvpWinner.rpg}리바 ${mvpWinner.apg}도움을 기록한 ${mvpWinner.name}(${mvpWinner.teamShortName}, 1위 표 ${mvpWinner.firstPlaceVoteShare}%) 선수가 차지했어요.`;
+  }
+
+  // 2. 신인왕(ROY) 투표 레이스 TOP 5 (해당 리그 루키 시즌일 때만 생성)
+  if (!isRookieSeason) {
+    return { mvpRace, mvpRaceNarrative };
+  }
+
+  const royCandidates: Omit<AwardRaceEntry, 'rank' | 'firstPlaceVoteShare'>[] = [];
+  const calcRoyScore = (ppg: number, rpg: number, apg: number, wins: number, losses: number) => {
+    const winPct = wins / Math.max(1, wins + losses);
+    return Number((ppg * 1.25 + rpg * 0.65 + apg * 0.85 + winPct * 10).toFixed(2));
+  };
+
+  royCandidates.push({
+    name: career.name,
+    teamShortName: boxScore.teamShortName,
+    pos: career.primaryPos,
+    isPlayer: true,
+    ppg: boxScore.ppg,
+    rpg: boxScore.rpg,
+    apg: boxScore.apg,
+    wins: boxScore.wins,
+    losses: boxScore.losses,
+    awardScore: calcRoyScore(boxScore.ppg, boxScore.rpg, boxScore.apg, boxScore.wins, boxScore.losses),
+  });
+
+  for (const r of sameLeagueRivals) {
+    if (r.draftYear === career.seasonYear) {
+      const st = standings.find((s) => s.team.id === r.teamId) || otherStandings[0];
+      const rw = st ? st.wins : Math.round(leagueCfg.games * 0.48);
+      const rl = st ? st.losses : leagueCfg.games - rw;
+      royCandidates.push({
+        name: r.name,
+        teamShortName: r.teamShortName,
+        pos: r.pos,
+        isPlayer: false,
+        ppg: r.ppg,
+        rpg: r.rpg,
+        apg: r.apg,
+        wins: rw,
+        losses: rl,
+        awardScore: calcRoyScore(r.ppg, r.rpg, r.apg, rw, rl),
+      });
+    }
+  }
+
+  let rookieIdx = 0;
+  while (royCandidates.length < 5) {
+    const st =
+      otherStandings[(rookieIdx + 2) % Math.max(1, otherStandings.length)] ||
+      standings[0];
+    const pos = positions[(rookieIdx + 2) % positions.length];
+    const rkName = generateProceduralPlayerName(career.league, rng);
+    const rkPpg = Number(
+      (11.2 + ldrScale * 3.8 - rookieIdx * 1.1 + (rng() * 1.8 - 0.9)).toFixed(1)
+    );
+    const rkRpg = Number(
+      ((pos === 'C' || pos === 'PF' ? 6.8 : 3.9) + (rng() * 1.2 - 0.6)).toFixed(1)
+    );
+    const rkApg = Number(
+      ((pos === 'PG' ? 5.4 : 2.8) + (rng() * 1.0 - 0.5)).toFixed(1)
+    );
+    const rw = st ? st.wins : Math.round(leagueCfg.games * 0.45);
+    const rl = st ? st.losses : leagueCfg.games - rw;
+
+    royCandidates.push({
+      name: rkName,
+      teamShortName: st ? st.team.shortName : career.team.shortName,
+      pos,
+      isPlayer: false,
+      ppg: rkPpg,
+      rpg: rkRpg,
+      apg: rkApg,
+      wins: rw,
+      losses: rl,
+      awardScore: calcRoyScore(rkPpg, rkRpg, rkApg, rw, rl),
+    });
+    rookieIdx++;
+  }
+
+  const bestNpcRoyScore = Math.max(
+    ...royCandidates.filter((c) => !c.isPlayer).map((c) => c.awardScore)
+  );
+  const playerRoyObj = royCandidates.find((c) => c.isPlayer)!;
+  if (boxScore.wonRookieOfYear && playerRoyObj.awardScore <= bestNpcRoyScore) {
+    playerRoyObj.awardScore = Number((bestNpcRoyScore + 2.0).toFixed(2));
+  } else if (!boxScore.wonRookieOfYear && playerRoyObj.awardScore >= bestNpcRoyScore) {
+    playerRoyObj.awardScore = Number((bestNpcRoyScore - 1.1).toFixed(2));
+  }
+
+  royCandidates.sort((a, b) => b.awardScore - a.awardScore);
+  const top5RoyRaw = royCandidates.slice(0, 5);
+
+  const royWeights = top5RoyRaw.map((c, idx) => {
+    const gap = Math.max(0, top5RoyRaw[0].awardScore - c.awardScore);
+    const decay = idx === 0 ? 1.0 : idx === 1 ? 0.48 : idx === 2 ? 0.18 : idx === 3 ? 0.06 : 0.02;
+    return Math.max(0.01, Math.exp(-gap * 0.24) * decay);
+  });
+  const royWeightSum = royWeights.reduce((a, b) => a + b, 0);
+  const royShares = royWeights.map((w) => Math.round((w / royWeightSum) * 100));
+  const royDiff = 100 - royShares.reduce((a, b) => a + b, 0);
+  royShares[0] = Math.max(1, royShares[0] + royDiff);
+
+  const royRace: AwardRaceEntry[] = top5RoyRaw.map((c, idx) => ({
+    ...c,
+    rank: idx + 1,
+    firstPlaceVoteShare: royShares[idx],
+  }));
+
+  const royWinner = royRace[0];
+  const royRunnerUp = royRace[1] || royRace[0];
+  const myRoyEntry = royRace.find((c) => c.isPlayer);
+
+  let royRaceNarrative = '';
+  if (boxScore.wonRookieOfYear || myRoyEntry?.rank === 1) {
+    royRaceNarrative = `신인왕 투표 1위 (1위 표 ${royWinner.firstPlaceVoteShare}%) — 동기 라이벌 ${royRunnerUp.name}(${royRunnerUp.teamShortName}, ${royRunnerUp.firstPlaceVoteShare}%)을 제치고 생애 단 한 번뿐인 올해의 신인왕(ROY)을 차지했어요!`;
+  } else if (myRoyEntry && (myRoyEntry.rank === 2 || myRoyEntry.rank === 3)) {
+    royRaceNarrative = `신인왕 투표 ${myRoyEntry.rank}위 (1위 표 ${myRoyEntry.firstPlaceVoteShare}%) — 데뷔 시즌 준수한 기록(${boxScore.ppg}점 ${boxScore.rpg}리바 ${boxScore.apg}도움)을 남겼으나 출전 시간과 득점 볼륨에서 앞선 1위 ${royWinner.name}(${royWinner.teamShortName}, 평균 ${royWinner.ppg}점)에게 아쉽게 신인왕을 내주었어요.`;
+  } else {
+    royRaceNarrative = `신인왕 투표 ${myRoyEntry ? `${myRoyEntry.rank}위` : '후보권 외'} — 이번 시즌 올해의 신인상은 평균 ${royWinner.ppg}점을 기록한 동기 ${royWinner.name}(${royWinner.teamShortName}, 1위 표 ${royWinner.firstPlaceVoteShare}%) 선수가 수상했어요.`;
+  }
+
+  return {
+    mvpRace,
+    mvpRaceNarrative,
+    royRace,
+    royRaceNarrative,
   };
 }
 

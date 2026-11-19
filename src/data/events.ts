@@ -533,6 +533,43 @@ export const FAREWELL_TOUR_LOGS: string[] = [
   '수많은 어린이 팬들이 "고마워요 레전드!" 플래카드를 흔들며 눈시울을 붉혔어요!',
 ];
 
+/**
+ * 32~34세 베테랑 '플레이 스타일 진화(Re-invention)' 특별 서사 이벤트 (커리어 1회)
+ * - 에이징 커브로 인해 피지컬(PHY)이 하락하기 시작할 때, 점프력 대신 패스 시야(PLY)와 코너 3점슛(OUT)으로
+ *   팀을 이끄는 베테랑 포인트 포워드 / 3&D 도사로 변신할 수 있는 기회 제공
+ */
+export function createVeteranReinventionEvent(
+  career: CareerState
+): CareerEvent {
+  return {
+    id: 'EVT_VETERAN_REINVENTION',
+    title: '🧬 [베테랑의 진화] 점프력 대신 농구 IQ로! 플레이 스타일 변신 제안',
+    subtitle: `만 ${career.age}세 베테랑 전환기 · 코칭스태프 전술 미팅 (커리어 1회)`,
+    description: `어느덧 만 ${career.age}세에 접어들며 젊은 시절 같은 폭발적인 탄력과 스피드(PHY)를 매 경기 쏟아붓기 쉽지 않아졌어요. 감독님이 조용히 다가와 "이제 무리한 림 어택 대신, 노련한 패스 시야(PLY)와 코너 3점슛(OUT)으로 코트를 지휘하는 베테랑 포인트 포워드·3&D 멘토로 플레이 스타일을 진화시켜 보는 게 어떻겠나?"라고 제안했어요.`,
+    category: 'VETERAN_LEGACY',
+    choices: [
+      {
+        label: '🧠 패스 시야와 코너 3점슛으로 팀을 이끄는 베테랑 도사로 변신!',
+        description:
+          '운동능력(PHY) 저하를 자연스럽게 받아들이는 대신, 정교한 외곽슛과 패스 지능을 극대화해 30대 후반까지 우승 반지를 노려요!',
+        effectSummary:
+          '✨ 플레이 스타일 진화 완료 · PLY +3, OUT +3, DEF +1 (PHY -2) · 향후 에이징 커브 시 슛/패스 하락 영구 방어!',
+        statChanges: { ply: 3, out: 3, def: 1, phy: -2 },
+        trustDelta: 9,
+        triggerVeteranReinvention: true,
+      },
+      {
+        label: '🔥 내 원래의 폭발적인 돌파와 인사이드 승부 스타일을 끝까지 고수한다',
+        description:
+          '스타일을 바꾸기보다 웨이트 트레이닝으로 버티며 기존 에이스 플레이를 유지해요.',
+        effectSummary: 'INS +2, PHY +1 · 감독 신뢰도 +3 · 기존 플레이 스타일 유지',
+        statChanges: { ins: 2, phy: 1 },
+        trustDelta: 3,
+      },
+    ],
+  };
+}
+
 export function rollSeasonEvent(
   career: CareerState,
   rng: () => number = Math.random
@@ -546,12 +583,22 @@ export function rollSeasonEvent(
     return SANGMU_ENLISTMENT_EVENT;
   }
 
-  // 1) ④ 노장 치명적 부상 은퇴 기로: 만 32세 이상이고 PHY <= 65일 때 10% 확률
+  // 1) 🧬 만 32~34세 베테랑 '플레이 스타일 진화(Re-invention)' 이벤트 (커리어 단 1회)
+  if (
+    career.age >= 32 &&
+    career.age <= 34 &&
+    !career.veteranReinventionOffered &&
+    !career.veteranReinvented
+  ) {
+    return createVeteranReinventionEvent(career);
+  }
+
+  // 2) ④ 노장 치명적 부상 은퇴 기로: 만 32세 이상이고 PHY <= 65일 때 10% 확률
   if (career.age >= 32 && career.stats.phy <= 65 && rng() < 0.1) {
     return VETERAN_CRITICAL_INJURY_EVENT;
   }
 
-  // 2) 에이전트 은퇴 권유 리포트 (커리어 중 단 1회만, 동일 리그 내 뚜렷한 기량 하락 또는 만 35세+ 노쇠화 시)
+  // 3) 에이전트 은퇴 권유 리포트 (커리어 중 단 1회만, 동일 리그 내 뚜렷한 기량 하락 또는 만 35세+ 노쇠화 시)
   if (!career.agentAdviceShown) {
     const adviceEvent = createAgentRetirementAdviceEvent(career);
     if (adviceEvent) {
@@ -559,7 +606,7 @@ export function rollSeasonEvent(
     }
   }
 
-  // 3) 아시안게임 국가대표 차출 이벤트: 실제 4년 주기(2026, 2030, 2034, 2038...)에만 발동 & 미필 상태 & OVR >= 65 & 20~26세
+  // 4) 아시안게임 국가대표 차출 이벤트: 실제 4년 주기(2026, 2030, 2034, 2038...)에만 발동 & 미필 상태 & OVR >= 65 & 20~26세
   const isAsianGamesYear = career.seasonYear % 4 === 2;
   if (
     isAsianGamesYear &&
@@ -572,12 +619,12 @@ export function rollSeasonEvent(
     return ASIAN_GAMES_MILITARY_EVENT;
   }
 
-  // 4) 예약된 연쇄(Chain) 이벤트가 있으면 즉시 발동
+  // 5) 예약된 연쇄(Chain) 이벤트가 있으면 즉시 발동
   if (career.pendingChainEvent) {
     return rollCombinatorialEncounter(career, rng);
   }
 
-  // 5) 4축 조합형 랜덤 인카운터 엔진 (중복 0%, 최근 2시즌 카테고리 쿨다운, 48종 시나리오 풀)
+  // 6) 4축 조합형 랜덤 인카운터 엔진 (중복 0%, 최근 2시즌 카테고리 쿨다운, 48종 시나리오 풀)
   if (rng() < 0.48) {
     return rollCombinatorialEncounter(career, rng);
   }

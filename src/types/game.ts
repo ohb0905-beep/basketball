@@ -257,6 +257,28 @@ export type LiveTacticId =
   | 'UNSELFISH_PASS'    // 이타적 조율: 팀원 찬스 창출 (어시스트·팀 야투율↑)
   | 'PACE_CONSERVE';    // 체력 안배: 페이스 조절 (체력 회복, 4쿼터 클러치 대비)
 
+export type ClutchChoiceId = 'ISO_WINNER' | 'KICKOUT_ASSIST';
+
+export type PersonalCareId =
+  | 'BIOMECH_SKILL_LAB'
+  | 'REHAB_LOAD_MGMT'
+  | 'SIGNATURE_SNEAKER_MARKETING';
+
+export interface AwardRaceEntry {
+  rank: number;
+  name: string;
+  teamShortName: string;
+  pos: Position;
+  isPlayer: boolean;
+  ppg: number;
+  rpg: number;
+  apg: number;
+  wins: number;
+  losses: number;
+  firstPlaceVoteShare: number; // 1위 표 득표율 (0 ~ 100%)
+  awardScore: number;
+}
+
 export interface LiveQuarterLog {
   quarter: number; // 1, 2, 3, 4, 5(OT)
   label: string;
@@ -269,7 +291,7 @@ export interface LiveQuarterLog {
 }
 
 export interface LiveGameState {
-  gameType: 'LEAGUE_FINALS' | 'ASIAN_GAMES_FINAL';
+  gameType: 'LEAGUE_FINALS' | 'CONF_FINALS_GAME7' | 'ASIAN_GAMES_FINAL';
   title: string;
   subtitle: string;
   playerTeam: TeamInfo;
@@ -280,6 +302,9 @@ export interface LiveGameState {
   oppScore: number;
   currentTactic: LiveTacticId;
   momentum: 'HOT' | 'NEUTRAL' | 'COLD';
+  pendingClutchPossession?: boolean;
+  clutchPossessionResolved?: boolean;
+  clutchSituationText?: string;
   playerStats: {
     pts: number;
     reb: number;
@@ -363,6 +388,10 @@ export interface SeasonBoxScore {
   headline: string;
   narrativeLog: string[];
   isFarewellTour?: boolean;
+  mvpRace?: AwardRaceEntry[];
+  mvpRaceNarrative?: string;
+  royRace?: AwardRaceEntry[];
+  royRaceNarrative?: string;
 }
 
 export interface CareerHighs {
@@ -426,6 +455,7 @@ export interface CareerEventChoice {
   startFarewellTour?: boolean;
   executeTradeToContender?: boolean;
   markAgentAdviceDismissed?: boolean;
+  triggerVeteranReinvention?: boolean;
   nextChainEvent?: CareerEvent;
 }
 
@@ -601,6 +631,11 @@ export interface CareerState {
   prospectStars?: number; // 고교 졸업 시 산출된 유망주 등급 (1~5성)
   trainingFocus: TrainingFocus;
   lastCampYear?: number;
+  activePersonalCare?: PersonalCareId[];
+  purchasedPersonalCareCount?: number;
+  fanPopularity?: number;
+  veteranReinvented?: boolean;
+  veteranReinventionOffered?: boolean;
   militaryExempt: boolean;
   militaryServiceSeasonsLeft: number;
   previousTeamBeforeMilitary: TeamInfo | null;
