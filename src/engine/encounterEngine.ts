@@ -1,10 +1,15 @@
 import {
   CareerEvent,
+  CareerEventChoice,
   CareerState,
+  EncounterResolutionResult,
   LeagueId,
+  PlayerStats,
   PlayerTraitId,
   Position,
 } from '../types/game';
+import { LEAGUE_CONFIG } from '../data/leagues';
+import { clampNum } from '../config/balanceConfig';
 
 export type CareerEventCategory = NonNullable<CareerEvent['category']>;
 
@@ -26,6 +31,9 @@ export interface EncounterScenarioTemplate {
   title: string;
   subtitle: string;
   description: string;
+  allowedLeagues?: LeagueId[];
+  minAge?: number;
+  maxAge?: number;
   preferredPositions?: Position[];
   preferredLeagues?: LeagueId[];
   preferredTraits?: PlayerTraitId[];
@@ -1087,6 +1095,581 @@ const SCENARIO_SEEDS: Array<{
   },
 ];
 
+const PRO_LEAGUES: LeagueId[] = ['KBL', 'OVERSEAS', 'GLEAGUE', 'NBA'];
+
+// 프로 무대 전용 시나리오 (고교·대학 아마추어 단계에서 원정 비행기·글로벌 음료 CF·전담 영양사 등 몰입 깨짐 원천 차단)
+const PRO_ONLY_CODES = new Set<string>([
+  'TAC_04', // 구단 데이터 분석팀
+  'LCK_03', // 신인 후배 스파링
+  'LCK_04', // 원정 비행기
+  'INJ_01', // 크라이오테라피
+  'INJ_04', // 베테랑 필라테스
+  'INJ_05', // 카본 인솔 피팅
+  'MED_02', // 글로벌 스포츠 매거진 커버
+  'MED_06', // 글로벌 스포츠 음료 CF
+  'OFF_01', // 전담 영양사 채용
+]);
+
+const MIN_AGE_BY_CODE: Record<string, number> = {
+  LCK_03: 22,
+  INJ_04: 26,
+  OFF_04: 22,
+};
+
+const STAT_KO_LABEL: Record<keyof PlayerStats, string> = {
+  ins: '인사이드(INS)',
+  out: '외곽 슈팅(OUT)',
+  ply: '플레이메이킹(PLY)',
+  def: '수비력(DEF)',
+  reb: '리바운드(REB)',
+  phy: '피지컬(PHY)',
+};
+
+const OPPOSITE_STAT: Record<keyof PlayerStats, keyof PlayerStats> = {
+  ins: 'phy',
+  out: 'def',
+  ply: 'ins',
+  def: 'out',
+  reb: 'ply',
+  phy: 'out',
+};
+
+function getPrimaryStatKey(stats?: Partial<PlayerStats>): keyof PlayerStats {
+  if (!stats) return 'ins';
+  let bestKey: keyof PlayerStats = 'ins';
+  let bestVal = -99;
+  for (const key of Object.keys(stats) as (keyof PlayerStats)[]) {
+    const val = stats[key] ?? 0;
+    if (val > bestVal) {
+      bestVal = val;
+      bestKey = key;
+    }
+  }
+  return bestKey;
+}
+
+// 6대 대표 2부작 연쇄 스토리(Chain Event) 정의 — 선택의 성공/실패가 다음 시즌 스토리로 이어집니다
+const CHAIN_FOLLOWUPS: Record<
+  string,
+  { successChain: CareerEvent; failureChain: CareerEvent }
+> = {
+  RIV_01: {
+    successChain: {
+      id: 'EVT_CHAIN_RIV_01_REMATCH',
+      title: '라이벌의 복수전 도전장',
+      subtitle: '지난 시즌 정면승부 승리의 후속편',
+      description:
+        '지난 시즌 맞대결에서 완패했던 라이벌이 비시즌 피나는 특훈 끝에 새로운 무기를 장착하고 돌아왔어요. 전국 생중계 리매치에서 다시 한번 격차를 증명할 차례예요.',
+      category: 'RIVAL_SHOWDOWN',
+      choices: [
+        {
+          label: '정공법으로 다시 한번 에이스 대결을 수락한다',
+          description: '더 강해진 라이벌의 공격을 정면으로 받아치며 완전히 상하 관계를 각인시켜요.',
+          effectSummary: '성공 시 INS +2, DEF +2, 주가 +8 · 실패 시 신뢰도 -5, 주가 -4',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'ins', difficulty: 2, baseProb: 0.62, label: '인사이드(INS) 기반' },
+          successOutcome: {
+            narrative: '리매치에서도 압도적인 공수 퍼포먼스로 라이벌을 제압하며 확실한 에이스 서열을 정리했어요!',
+            statChanges: { ins: 2, def: 2 },
+            trustDelta: 6,
+            draftStockDelta: 8,
+          },
+          failureOutcome: {
+            narrative: '한층 날카로워진 라이벌의 반격에 고전하며 아쉬운 패배를 허용했어요.',
+            statChanges: { def: -1 },
+            trustDelta: -5,
+            draftStockDelta: -4,
+          },
+        },
+        {
+          label: '개인 대결 대신 팀 수비 함정으로 라이벌을 묶는다',
+          description: '자존심 싸움을 피하고 팀 전술로 실리적인 승리를 챙겨요.',
+          effectSummary: '확정 · PLY +2, DEF +1 · 신뢰도 +6 (주가 변동 없음)',
+          riskTier: 'SAFE',
+          statChanges: { ply: 2, def: 1 },
+          trustDelta: 6,
+        },
+      ],
+    },
+    failureChain: {
+      id: 'EVT_CHAIN_RIV_01_REDEMPTION',
+      title: '절치부심 · 라이벌 설욕전',
+      subtitle: '지난 시즌 패배를 딛고 일어설 기회',
+      description:
+        '지난 시즌 라이벌에게 당했던 굴욕을 잊지 않고 겨우내 비디오를 돌려보며 약점을 파고들었어요. 드디어 설욕의 무대가 열렸어요.',
+      category: 'RIVAL_SHOWDOWN',
+      choices: [
+        {
+          label: '비시즌 갈고닦은 카운터 무브로 정면 설욕!',
+          description: '라이벌의 수비 습관을 역이용해 코트 위에서 통쾌하게 되갚아줘요.',
+          effectSummary: '성공 시 INS +3, OUT +1, 신뢰도 +7, 주가 +8 · 실패 시 주가 -4',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'out', difficulty: 1, baseProb: 0.66, label: '외곽 슈팅(OUT) 기반' },
+          successOutcome: {
+            narrative: '완벽한 설욕전! 라이벌 앞에서 결정적인 연속 득점을 꽂아 넣으며 평가를 단숨에 뒤집었어요!',
+            statChanges: { ins: 3, out: 1 },
+            trustDelta: 7,
+            draftStockDelta: 8,
+          },
+          failureOutcome: {
+            narrative: '의욕이 앞서 슛 셀렉션이 흔들리며 아쉽게 설욕 기회를 놓쳤어요.',
+            trustDelta: -3,
+            draftStockDelta: -4,
+          },
+        },
+        {
+          label: '감정을 비우고 수비·리바운드 궂은일로 승리에 헌신',
+          description: '화려함보다 투지로 팀의 승리를 지켜내요.',
+          effectSummary: '확정 · DEF +2, REB +1 · 신뢰도 +7',
+          riskTier: 'SAFE',
+          statChanges: { def: 2, reb: 1 },
+          trustDelta: 7,
+        },
+      ],
+    },
+  },
+  MED_01: {
+    successChain: {
+      id: 'EVT_CHAIN_MED_01_SPOTLIGHT',
+      title: '전국구 스타의 무게 · 집중 견제 돌파',
+      subtitle: '지난 시즌 화제의 인터뷰 후속편',
+      description:
+        '지난 시즌 당당한 어록이 전국 팬들의 시선을 사로잡은 뒤, 이제 모든 원정 경기에서 상대 수비가 나를 최우선 타깃으로 거칠게 견제해요.',
+      category: 'MEDIA_SPOTLIGHT',
+      choices: [
+        {
+          label: '야유 속에서 더블팀을 찢는 슈퍼스타 쇼타임!',
+          description: '모두의 시선을 즐기며 압도적인 클러치 퍼포먼스로 응답해요.',
+          effectSummary: '성공 시 OUT +2, PLY +2, 주가 +8 · 실패 시 신뢰도 -5, 주가 -5',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'out', difficulty: 3, baseProb: 0.6, label: '외곽 슈팅(OUT) 기반' },
+          successOutcome: {
+            narrative: '원정 관중석의 야유를 환호로 바꿔버렸어요! 명실상부 리그 최고 흥행 카드로 올라섰어요.',
+            statChanges: { out: 2, ply: 2 },
+            trustDelta: 5,
+            draftStockDelta: 8,
+          },
+          failureOutcome: {
+            narrative: '거친 더블팀 압박에 턴오버가 속출하며 언론의 비판에 직면했어요.',
+            statChanges: { ply: -1 },
+            trustDelta: -5,
+            draftStockDelta: -5,
+          },
+        },
+        {
+          label: '집중 견제를 역이용해 동료 찬스를 살리는 성숙한 대응',
+          description: '스포트라이트를 팀원들과 나누며 코트 위 지배력을 키워요.',
+          effectSummary: '확정 · PLY +2, DEF +1 · 신뢰도 +7',
+          riskTier: 'SAFE',
+          statChanges: { ply: 2, def: 1 },
+          trustDelta: 7,
+        },
+      ],
+    },
+    failureChain: {
+      id: 'EVT_CHAIN_MED_01_APOLOGY',
+      title: '논란을 실력으로 잠재울 시간',
+      subtitle: '과했던 자신감 발언의 후폭풍 극복',
+      description:
+        '지난 시즌 패기 넘쳤던 인터뷰가 부진과 겹치며 조롱거리가 되었어요. 묵묵히 코트 위 결과로 여론을 뒤집을 기회가 왔어요.',
+      category: 'MEDIA_SPOTLIGHT',
+      choices: [
+        {
+          label: '빅매치에서 폭발적인 득점으로 비판론자들을 침묵시킨다',
+          description: '말 대신 숫자와 하이라이트로 모든 논란을 종결해요.',
+          effectSummary: '성공 시 INS +2, OUT +2, 주가 +9 · 실패 시 신뢰도 -4',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'ins', difficulty: 1, baseProb: 0.65, label: '인사이드(INS) 기반' },
+          successOutcome: {
+            narrative: '비판을 완벽히 잠재운 대폭발! 팬들과 기자들 모두 당신의 멘탈에 박수를 보냈어요.',
+            statChanges: { ins: 2, out: 2 },
+            trustDelta: 6,
+            draftStockDelta: 9,
+          },
+          failureOutcome: {
+            narrative: '부담감을 떨치지 못해 야투 난조에 빠졌지만, 그래도 끝까지 포기하지 않았어요.',
+            trustDelta: -4,
+            draftStockDelta: -2,
+          },
+        },
+        {
+          label: '진심 어린 겸손한 인터뷰와 성실한 수비로 신뢰 회복',
+          description: '태도의 변화로 코칭스태프와 팬들의 마음을 되돌려요.',
+          effectSummary: '확정 · DEF +2, PHY +1 · 신뢰도 +8',
+          riskTier: 'SAFE',
+          statChanges: { def: 2, phy: 1 },
+          trustDelta: 8,
+        },
+      ],
+    },
+  },
+  TAC_01: {
+    successChain: {
+      id: 'EVT_CHAIN_TAC_01_KEYS',
+      title: '감독 신뢰 테스트 · 클러치 전권 위임',
+      subtitle: '심야 비디오 세션 이후 찾아온 기회',
+      description:
+        '지난 시즌 자신의 공격 철학을 데이터로 설득했던 용기를 높이 산 감독님이, 이번 시즌 승부처 마지막 2분 공격 조율 전권을 맡겨보겠다고 제안했어요.',
+      category: 'TACTICAL_CLASH',
+      choices: [
+        {
+          label: '승부처 공격 전권을 당당히 수락하고 코트를 지휘한다',
+          description: '실패하면 책임이 따르지만, 해내면 명실상부 팀의 야전사령관이 돼요.',
+          effectSummary: '성공 시 PLY +2, OUT +2, 신뢰도 +10 · 실패 시 신뢰도 -7',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'ply', difficulty: 2, baseProb: 0.64, label: '플레이메이킹(PLY) 기반' },
+          successOutcome: {
+            narrative: '완벽한 클러치 리딩으로 연이어 역전승을 합작하며 감독님의 절대적 신임을 얻었어요!',
+            statChanges: { ply: 2, out: 2 },
+            trustDelta: 10,
+            draftStockDelta: 6,
+          },
+          failureOutcome: {
+            narrative: '승부처 실책이 나오며 감독님이 다시 보수적인 세트 오펜스로 돌아갔어요.',
+            trustDelta: -7,
+            draftStockDelta: -3,
+          },
+        },
+        {
+          label: '감독님과 사인을 공유하며 절반의 역할부터 단계적으로 수행',
+          description: '리스크를 줄이고 안정적으로 전술 영향력을 넓혀가요.',
+          effectSummary: '확정 · PLY +1, INS +1 · 신뢰도 +6',
+          riskTier: 'SAFE',
+          statChanges: { ply: 1, ins: 1 },
+          trustDelta: 6,
+        },
+      ],
+    },
+    failureChain: {
+      id: 'EVT_CHAIN_TAC_01_REBUILD_TRUST',
+      title: '냉각된 감독과의 관계 회복',
+      subtitle: '전술 이견 이후 찾아온 화해의 계기',
+      description:
+        '지난 시즌 전술 갈등 이후 감독님과 미묘한 거리감이 남아있어요. 팀 미팅에서 먼저 손을 내밀어 관계를 풀어볼 시점이에요.',
+      category: 'TACTICAL_CLASH',
+      choices: [
+        {
+          label: '훈련장에 가장 먼저 출근해 감독님 전술을 100% 체화한다',
+          description: '행동으로 팀 퍼스트 정신을 증명해 신뢰를 단번에 회복해요.',
+          effectSummary: '확정 · DEF +1, PLY +1 · 신뢰도 +10',
+          riskTier: 'SAFE',
+          statChanges: { def: 1, ply: 1 },
+          trustDelta: 10,
+        },
+        {
+          label: '연습경기에서 내 방식의 파괴력을 다시 증명해 보인다',
+          description: '실력으로 코칭스태프를 설득하는 정면 승부예요.',
+          effectSummary: '성공 시 INS +2, OUT +1, 신뢰도 +7 · 실패 시 신뢰도 -8',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'ins', difficulty: 2, baseProb: 0.6, label: '인사이드(INS) 기반' },
+          successOutcome: {
+            narrative: '연습경기를 지배하며 감독님으로부터 "네 판단이 맞았다"는 인정을 받아냈어요!',
+            statChanges: { ins: 2, out: 1 },
+            trustDelta: 7,
+            draftStockDelta: 5,
+          },
+          failureOutcome: {
+            narrative: '무리한 개인 플레이가 반복되며 로테이션 우선순위가 밀릴 위기에 놓였어요.',
+            trustDelta: -8,
+            draftStockDelta: -3,
+          },
+        },
+      ],
+    },
+  },
+  TAC_04: {
+    successChain: {
+      id: 'EVT_CHAIN_TAC_04_COUNTER',
+      title: '상대 수비의 데이터 역공 파훼',
+      subtitle: '전천후 미드레인지 전략의 진가',
+      description:
+        '상대 팀들이 우리의 3점·골밑 위주 패턴을 데이터로 완벽히 봉쇄하기 시작했어요. 지난 시즌 준비해 둔 미드레인지 카운터가 빛을 발할 순간이에요.',
+      category: 'TACTICAL_CLASH',
+      choices: [
+        {
+          label: '엘보우 풀업 미드레인지로 상대 드롭백 수비를 해체한다',
+          description: '데이터의 빈틈을 찌르는 완벽한 카운터 공격을 펼쳐요.',
+          effectSummary: '성공 시 INS +2, OUT +2, 주가 +7 · 실패 시 OUT -1',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'out', difficulty: 2, baseProb: 0.65, label: '외곽 슈팅(OUT) 기반' },
+          successOutcome: {
+            narrative: '상대 수비 전술을 완전히 무력화하며 리그에서 가장 막기 힘든 스코어러로 극찬받았어요!',
+            statChanges: { ins: 2, out: 2 },
+            trustDelta: 6,
+            draftStockDelta: 7,
+          },
+          failureOutcome: {
+            narrative: '기대만큼 미드레인지 적중률이 나오지 않아 다시 슛 셀렉션을 점검해야 했어요.',
+            statChanges: { out: -1 },
+            trustDelta: -3,
+          },
+        },
+        {
+          label: '스크린과 킥아웃 패스로 오픈 찬스를 차분히 재설계',
+          description: '무리하지 않고 팀 전체의 슈팅 효율을 끌어올려요.',
+          effectSummary: '확정 · PLY +2 · 신뢰도 +6',
+          riskTier: 'SAFE',
+          statChanges: { ply: 2 },
+          trustDelta: 6,
+        },
+      ],
+    },
+    failureChain: {
+      id: 'EVT_CHAIN_TAC_04_RESET',
+      title: '샷 차트 전면 재정비 세션',
+      subtitle: '비효율 슈팅 구간 교정',
+      description:
+        '지난 시즌 고집했던 무리한 미드레인지 야투율이 발목을 잡았어요. 분석팀과 다시 머리를 맞대고 슈팅 효율을 끌어올려야 해요.',
+      category: 'TACTICAL_CLASH',
+      choices: [
+        {
+          label: '코너 3점과 림 어택에 집중하는 고효율 루틴으로 전환',
+          description: '자존심을 내려놓고 검증된 현대 농구 효율을 받아들여요.',
+          effectSummary: '확정 · OUT +2, INS +1 · 신뢰도 +7',
+          riskTier: 'SAFE',
+          statChanges: { out: 2, ins: 1 },
+          trustDelta: 7,
+        },
+      ],
+    },
+  },
+  INJ_03: {
+    successChain: {
+      id: 'EVT_CHAIN_INJ_03_SHOOTOUT',
+      title: '교정된 원핸드 릴리스 · 슛감 상승',
+      subtitle: '손가락 부상 위기에서 탄생한 새 슈팅 폼',
+      description:
+        '지난 시즌 부상 중에 교정한 깔끔한 원핸드 릴리스가 완전히 몸에 배며 연습 경기마다 3점슛이 빗발치고 있어요.',
+      category: 'LOAD_MANAGEMENT',
+      choices: [
+        {
+          label: '올스타/리그 슈팅 쇼케이스에 도전해 이름을 알린다',
+          description: '완성된 슈팅 메커니즘을 전국 무대에서 증명해 보여요.',
+          effectSummary: '성공 시 OUT +3, 주가 +8 · 실패 시 주가 -3',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'out', difficulty: 1, baseProb: 0.68, label: '외곽 슈팅(OUT) 기반' },
+          successOutcome: {
+            narrative: '신들린 3점 행진으로 관중을 열광시키며 리그 정상급 슈터로 공인받았어요!',
+            statChanges: { out: 3 },
+            trustDelta: 5,
+            draftStockDelta: 8,
+          },
+          failureOutcome: {
+            narrative: '긴장 탓에 초반 슛이 짧았지만, 교정된 폼 자체는 호평을 받았어요.',
+            statChanges: { out: 1 },
+            draftStockDelta: -3,
+          },
+        },
+        {
+          label: '쇼케이스 대신 실전 무빙 캐치앤슛 안정화에 집중',
+          description: '시즌 내내 흔들리지 않는 기복 없는 슛감을 다져요.',
+          effectSummary: '확정 · OUT +2, PHY +1 · 신뢰도 +5',
+          riskTier: 'SAFE',
+          statChanges: { out: 2, phy: 1 },
+          trustDelta: 5,
+        },
+      ],
+    },
+    failureChain: {
+      id: 'EVT_CHAIN_INJ_03_RECOVERY',
+      title: '테이핑 해제와 슛 밸런스 회복',
+      subtitle: '완치 후 되찾는 감각',
+      description:
+        '지난 시즌 무리했던 손가락이 드디어 완전히 회복되었어요. 기본기부터 차근차근 슛감을 되살려야 해요.',
+      category: 'LOAD_MANAGEMENT',
+      choices: [
+        {
+          label: '하루 300개 정석 자유투·폼 슈팅으로 감각 완전 회복',
+          description: '서두르지 않고 기본기를 되찾아 오히려 더 탄탄한 슛감을 얻어요.',
+          effectSummary: '확정 · OUT +2, PHY +1 · 신뢰도 +5',
+          riskTier: 'SAFE',
+          statChanges: { out: 2, phy: 1 },
+          trustDelta: 5,
+        },
+      ],
+    },
+  },
+  LCK_05: {
+    successChain: {
+      id: 'EVT_CHAIN_LCK_05_DYNASTY',
+      title: '완벽한 공존 · 리그 최강 원투펀치',
+      subtitle: '주전 경쟁을 넘어선 라커룸 리더십',
+      description:
+        '지난 시즌 갈등을 현명하게 풀어낸 동료와 환상적인 호흡을 맞추기 시작했어요. 두 사람이 함께 코트에 설 때마다 팀 마진이 폭등하고 있어요.',
+      category: 'LOCKER_ROOM',
+      choices: [
+        {
+          label: '두 사람의 2대2 하이-로우 시그니처 패턴을 완성한다',
+          description: '리그가 두려워하는 원투펀치 공격 옵션을 구축해요.',
+          effectSummary: '성공 시 PLY +2, INS +2, 신뢰도 +8 · 실패 시 신뢰도 +2',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'ply', difficulty: 1, baseProb: 0.7, label: '플레이메이킹(PLY) 기반' },
+          successOutcome: {
+            narrative: '눈빛만 봐도 통하는 완벽한 2대2 게임 완성! 구단 팬들이 열광하는 듀오가 되었어요.',
+            statChanges: { ply: 2, ins: 2 },
+            trustDelta: 8,
+            draftStockDelta: 5,
+          },
+          failureOutcome: {
+            narrative: '패턴 완성도는 조금 아쉬웠지만 서로를 존중하는 라커룸 분위기는 탄탄하게 유지되었어요.',
+            statChanges: { ply: 1 },
+            trustDelta: 2,
+          },
+        },
+        {
+          label: '수비 로테이션 호흡을 먼저 다져 빈틈없는 라인업 구축',
+          description: '공수 겸장 라인업으로 안정감을 극대화해요.',
+          effectSummary: '확정 · DEF +2, REB +1 · 신뢰도 +7',
+          riskTier: 'SAFE',
+          statChanges: { def: 2, reb: 1 },
+          trustDelta: 7,
+        },
+      ],
+    },
+    failureChain: {
+      id: 'EVT_CHAIN_LCK_05_TENSION',
+      title: '주전 자리 재경쟁 · 코트 위의 증명',
+      subtitle: '어색해진 라커룸 분위기를 실력으로 정리할 시점',
+      description:
+        '지난 시즌 포지션 경쟁자와 갈등이 완벽히 해소되지 않았어요. 팀 훈련 캠프에서 누가 진짜 코어인지 다시 가려야 해요.',
+      category: 'LOCKER_ROOM',
+      choices: [
+        {
+          label: '먼저 대화를 청해 역할 분담을 합의하고 팀워크를 택한다',
+          description: '성숙한 리더십으로 라커룸 갈등을 봉합해요.',
+          effectSummary: '확정 · PLY +1, DEF +1 · 신뢰도 +9',
+          riskTier: 'SAFE',
+          statChanges: { ply: 1, def: 1 },
+          trustDelta: 9,
+        },
+        {
+          label: '청백전에서 압도적인 스탯으로 주전 자리를 못 박는다',
+          description: '실력으로 모든 논쟁을 끝내는 승부수예요.',
+          effectSummary: '성공 시 INS +2, OUT +2, 주가 +6 · 실패 시 신뢰도 -6',
+          riskTier: 'HIGH_RISK',
+          successCheck: { statKey: 'ins', difficulty: 2, baseProb: 0.62, label: '인사이드(INS) 기반' },
+          successOutcome: {
+            narrative: '청백전을 완전히 지배하며 감독님과 동료 모두를 실력으로 납득시켰어요!',
+            statChanges: { ins: 2, out: 2 },
+            trustDelta: 5,
+            draftStockDelta: 6,
+          },
+          failureOutcome: {
+            narrative: '지나친 승부욕으로 무리한 슛이 늘어나며 코치진의 표정이 굳어졌어요.',
+            trustDelta: -6,
+          },
+        },
+      ],
+    },
+  },
+};
+
+function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoice[] {
+  const c1Primary = getPrimaryStatKey(s.c1Stats);
+  const c2Primary = getPrimaryStatKey(s.c2Stats);
+  const c1TradeoffStat = OPPOSITE_STAT[c1Primary];
+  const isProScenario = PRO_ONLY_CODES.has(s.code);
+  const chainEntry = CHAIN_FOLLOWUPS[s.code];
+
+  // 선택지 1: 안정형 또는 트레이드오프형 (100% 확정 결과, 과도한 공짜 버프 대신 명확한 방향성/소폭 트레이드오프)
+  const c1StatsBalanced: Partial<PlayerStats> = {};
+  const c1Keys = Object.keys(s.c1Stats || {}) as (keyof PlayerStats)[];
+  if (c1Keys.length >= 2) {
+    c1StatsBalanced[c1Keys[0]] = Math.min(2, s.c1Stats?.[c1Keys[0]] ?? 1);
+    c1StatsBalanced[c1Keys[1]] = 1;
+  } else {
+    c1StatsBalanced[c1Primary] = 2;
+  }
+  const hasC1Tradeoff = s.code.endsWith('02') || s.code.endsWith('04') || s.code.endsWith('06');
+  if (hasC1Tradeoff && !c1StatsBalanced[c1TradeoffStat]) {
+    c1StatsBalanced[c1TradeoffStat] = -1;
+  }
+
+  const c1StatParts = (Object.keys(c1StatsBalanced) as (keyof PlayerStats)[]).map(
+    (k) => `${k.toUpperCase()} ${(c1StatsBalanced[k] ?? 0) > 0 ? `+${c1StatsBalanced[k]}` : c1StatsBalanced[k]}`
+  );
+  const c1TrustAdj = Math.max(3, Math.min(8, s.c1Trust));
+  const c1DraftAdj = Math.max(1, Math.min(4, s.c1Draft));
+
+  const safeOrTradeoffChoice: CareerEventChoice = {
+    label: s.c1Label,
+    description: s.c1Desc,
+    riskTier: hasC1Tradeoff ? 'BALANCED' : 'SAFE',
+    effectSummary: `${hasC1Tradeoff ? '트레이드오프 확정' : '안정 확정'} · ${c1StatParts.join(', ')} · 신뢰도 +${c1TrustAdj}`,
+    statChanges: c1StatsBalanced,
+    trustDelta: c1TrustAdj,
+    draftStockDelta: c1DraftAdj,
+    nextChainEvent: chainEntry ? chainEntry.successChain : undefined,
+  };
+
+  // 선택지 2: 도전형 (실제 능력치 기반 확률 판정 + 성공 시 고보상 / 실패 시 실질 페널티 + 연쇄 스토리)
+  const c2SuccessStats: Partial<PlayerStats> = { ...(s.c2Stats || {}) };
+  c2SuccessStats[c2Primary] = Math.max(2, (c2SuccessStats[c2Primary] ?? 1) + 1);
+  const c2SuccessParts = (Object.keys(c2SuccessStats) as (keyof PlayerStats)[]).map(
+    (k) => `${k.toUpperCase()} +${c2SuccessStats[k]}`
+  );
+  const c2SuccessDraft = Math.min(9, Math.max(5, s.c2Draft + 2));
+  const c2SuccessCash = isProScenario ? 25000 : 0;
+
+  const c2FailStats: Partial<PlayerStats> = { [c2Primary]: -1 };
+  const c2FailTrust = -5;
+  const c2FailDraft = -4;
+
+  const highRiskChoice: CareerEventChoice = {
+    label: s.c2Label,
+    description: s.c2Desc,
+    riskTier: 'HIGH_RISK',
+    effectSummary: `성공 시 ${c2SuccessParts.join(', ')}, 주가 +${c2SuccessDraft}${
+      c2SuccessCash > 0 ? ', 보너스 +$25K' : ''
+    }${chainEntry ? ' (연쇄 스토리)' : ''} · 실패 시 ${c2Primary.toUpperCase()} -1, 신뢰도 ${c2FailTrust}`,
+    successCheck: {
+      statKey: c2Primary,
+      difficulty: 2,
+      baseProb: 0.62,
+      minProb: 0.25,
+      maxProb: 0.9,
+      label: `${STAT_KO_LABEL[c2Primary]} 기반 판정`,
+    },
+    successOutcome: {
+      narrative: `과감한 승부수가 완벽하게 통했어요! 코칭스태프와 스카우트 모두가 당신의 결단력에 감탄했어요.`,
+      statChanges: c2SuccessStats,
+      trustDelta: Math.max(4, s.c2Trust),
+      draftStockDelta: c2SuccessDraft,
+      cashDelta: c2SuccessCash,
+      nextChainEvent: chainEntry ? chainEntry.successChain : undefined,
+    },
+    failureOutcome: {
+      narrative: `기대만큼 결과가 따라주지 않아 리듬이 흔들렸어요. 감독님의 신뢰도와 스카우트 평가가 소폭 하락했어요.`,
+      statChanges: c2FailStats,
+      trustDelta: c2FailTrust,
+      draftStockDelta: c2FailDraft,
+      nextChainEvent: chainEntry ? chainEntry.failureChain : undefined,
+    },
+    // 폴백용 기본값 (하위 호환성 유지)
+    statChanges: c2SuccessStats,
+    trustDelta: s.c2Trust,
+    draftStockDelta: c2SuccessDraft,
+  };
+
+  const choices: CareerEventChoice[] = [safeOrTradeoffChoice, highRiskChoice];
+
+  // 일부 핵심 프로/특훈 시나리오에는 자금 투자형 3번째 선택지 추가
+  if (isProScenario && (s.category === 'LOAD_MANAGEMENT' || s.category === 'OFF_COURT_BRAND')) {
+    choices.push({
+      label: '사비를 투자해 전문 컨설턴트·트레이너를 개인 초빙한다 (-$15K)',
+      description: '보유 현금을 과감히 투자해 리스크 없이 확실한 컨디션과 기량 보너스를 챙겨요.',
+      riskTier: 'BALANCED',
+      cashDelta: -15000,
+      effectSummary: '가용 자산 -$15K · PHY +2, 신뢰도 +6, 주가 +5 확정',
+      statChanges: { phy: 2, [c1Primary]: 1 },
+      trustDelta: 6,
+      draftStockDelta: 5,
+    });
+  }
+
+  return choices;
+}
+
 export const ENCOUNTER_SCENARIO_POOL: EncounterScenarioTemplate[] =
   SCENARIO_SEEDS.map((s) => ({
     id: `EVT_COMB_${s.code}`,
@@ -1094,26 +1677,128 @@ export const ENCOUNTER_SCENARIO_POOL: EncounterScenarioTemplate[] =
     title: s.title,
     subtitle: s.subtitle,
     description: s.description,
+    allowedLeagues: PRO_ONLY_CODES.has(s.code) ? PRO_LEAGUES : undefined,
+    minAge: MIN_AGE_BY_CODE[s.code],
     preferredTags: s.tags,
-    choices: [
-      {
-        label: s.c1Label,
-        description: s.c1Desc,
-        effectSummary: s.c1Summary,
-        statChanges: s.c1Stats,
-        trustDelta: s.c1Trust,
-        draftStockDelta: s.c1Draft,
-      },
-      {
-        label: s.c2Label,
-        description: s.c2Desc,
-        effectSummary: s.c2Summary,
-        statChanges: s.c2Stats,
-        trustDelta: s.c2Trust,
-        draftStockDelta: s.c2Draft,
-      },
-    ],
+    choices: enrichSeedChoices(s),
   }));
+
+/**
+ * 확률 판정 선택지의 실시간 성공 확률(0~100 정수 %) 산출
+ * - 선수의 해당 능력치 vs 리그 기준치(LDR) + 난이도 보정
+ * - 감독 신뢰도 및 승부사(CLUTCH_PERFORMER) 특성 가산
+ */
+export function calculateEncounterSuccessChance(
+  career: CareerState,
+  choice: CareerEventChoice
+): number {
+  if (!choice.successCheck) return 100;
+  const check = choice.successCheck;
+  const playerStat = career.stats[check.statKey] ?? career.ovr;
+  const leagueLdr = LEAGUE_CONFIG[career.league]?.ldr ?? 68;
+  const target = leagueLdr + check.difficulty;
+
+  const baseProb = check.baseProb ?? 0.62;
+  const statDiffBonus = (playerStat - target) * 0.018;
+  const trustBonus = (career.coachTrust - 55) * 0.0022;
+  const clutchBonus = (career.traits || []).includes('CLUTCH_PERFORMER')
+    ? 0.06
+    : 0;
+
+  const prob = clampNum(
+    baseProb + statDiffBonus + trustBonus + clutchBonus,
+    check.minProb ?? 0.22,
+    check.maxProb ?? 0.92
+  );
+  return Math.round(prob * 100);
+}
+
+/**
+ * 인카운터 선택지 결과를 확률 판정 및 트레이드오프에 따라 결정적으로 해석합니다.
+ */
+export function resolveEncounterChoiceOutcome(
+  career: CareerState,
+  event: CareerEvent,
+  choice: CareerEventChoice,
+  rng: () => number = Math.random
+): {
+  result: EncounterResolutionResult;
+  nextChainEvent: CareerEvent | null;
+} {
+  if (!choice.successCheck || !choice.successOutcome || !choice.failureOutcome) {
+    const statChanges = choice.statChanges || {};
+    const trustDelta = choice.trustDelta || 0;
+    const draftStockDelta = choice.draftStockDelta || 0;
+    const potentialDelta = choice.potentialDelta || 0;
+    const cashDelta = choice.cashDelta || 0;
+    const nextChainEvent = choice.nextChainEvent || null;
+    return {
+      result: {
+        eventId: event.id,
+        eventTitle: event.title,
+        choiceLabel: choice.label,
+        wasProbabilistic: false,
+        successChancePct: 100,
+        rolledSuccess: true,
+        outcomeTier: 'GUARANTEED',
+        narrative: choice.description,
+        statChanges,
+        trustDelta,
+        draftStockDelta,
+        potentialDelta,
+        cashDelta,
+        chainedNextSeasonTitle: nextChainEvent?.title,
+      },
+      nextChainEvent,
+    };
+  }
+
+  const chancePct = calculateEncounterSuccessChance(career, choice);
+  const roll = rng() * 100;
+  const succeeded = roll < chancePct;
+  const isCritical = succeeded && roll < chancePct * 0.2;
+
+  const branch = succeeded ? choice.successOutcome : choice.failureOutcome;
+  const statChanges: Partial<PlayerStats> = { ...(branch.statChanges || {}) };
+
+  // 대성공(상위 20% 롤) 시 핵심 능력치 +1 추가 보너스
+  if (isCritical) {
+    const key = choice.successCheck.statKey;
+    statChanges[key] = (statChanges[key] ?? 0) + 1;
+  }
+
+  const trustDelta = (branch.trustDelta || 0) + (isCritical ? 2 : 0);
+  const draftStockDelta = (branch.draftStockDelta || 0) + (isCritical ? 2 : 0);
+  const potentialDelta = branch.potentialDelta || 0;
+  const cashDelta = (branch.cashDelta || 0) + (choice.cashDelta || 0);
+  const nextChainEvent = branch.nextChainEvent || null;
+
+  return {
+    result: {
+      eventId: event.id,
+      eventTitle: event.title,
+      choiceLabel: choice.label,
+      wasProbabilistic: true,
+      successChancePct: chancePct,
+      rolledSuccess: succeeded,
+      outcomeTier: isCritical
+        ? 'CRITICAL_SUCCESS'
+        : succeeded
+        ? 'SUCCESS'
+        : 'FAILURE',
+      narrative: isCritical
+        ? `대성공 · ${branch.narrative} 기대 이상의 활약으로 핵심 능력치가 추가로 +1 상승했습니다.`
+        : branch.narrative,
+      statChanges,
+      trustDelta,
+      draftStockDelta,
+      potentialDelta,
+      cashDelta,
+      chainedNextSeasonTitle: nextChainEvent?.title,
+    },
+    nextChainEvent,
+  };
+}
 
 export function rollCombinatorialEncounter(
   career: CareerState,
@@ -1127,19 +1812,36 @@ export function rollCombinatorialEncounter(
   const recentCategories = (career.recentEventCategories || []).slice(-2);
   const contextTags = extractCareerContextTags(career);
 
+  // 0) 리그/연령 컨텍스트 적합성 필터 (고교생에게 프로 전용 이벤트 출현 원천 차단)
+  const contextEligible = ENCOUNTER_SCENARIO_POOL.filter((s) => {
+    if (s.allowedLeagues && !s.allowedLeagues.includes(career.league)) {
+      return false;
+    }
+    if (typeof s.minAge === 'number' && career.age < s.minAge) {
+      return false;
+    }
+    if (typeof s.maxAge === 'number' && career.age > s.maxAge) {
+      return false;
+    }
+    return true;
+  });
+
+  const basePool =
+    contextEligible.length > 0 ? contextEligible : ENCOUNTER_SCENARIO_POOL;
+
   // 1) 미경험(Zero Duplicate) + 최근 2시즌 카테고리 쿨다운 적용
-  let candidates = ENCOUNTER_SCENARIO_POOL.filter(
+  let candidates = basePool.filter(
     (s) => !seenIds.has(s.id) && !recentCategories.includes(s.category)
   );
 
   // 만약 모든 후보가 소진되었으면 쿨다운만 유지하고 미경험 필터 완화
   if (candidates.length === 0) {
-    candidates = ENCOUNTER_SCENARIO_POOL.filter(
+    candidates = basePool.filter(
       (s) => !recentCategories.includes(s.category)
     );
   }
   if (candidates.length === 0) {
-    candidates = [...ENCOUNTER_SCENARIO_POOL];
+    candidates = [...basePool];
   }
 
   // 2) 커리어 컨텍스트 태그 일치도에 따라 가중치 정렬/선택
@@ -1174,3 +1876,4 @@ export function rollCombinatorialEncounter(
     choices: chosen.choices,
   };
 }
+

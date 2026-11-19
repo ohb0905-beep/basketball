@@ -1,8 +1,14 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { BookMarked, Calendar, SlidersHorizontal } from 'lucide-react';
 import { Header } from '../components/common/Header';
-import { CareerEventModal, ToastBanner } from '../components/common/Modal';
+import {
+  CareerEventModal,
+  ResetConfirmModal,
+  SaveAndGuideModal,
+  ToastBanner,
+} from '../components/common/Modal';
 import { PlayerCreator } from '../components/create/PlayerCreator';
 import { HistoryTab } from '../components/dashboard/HistoryTab';
 import { PlayerHeader } from '../components/dashboard/PlayerHeader';
@@ -14,14 +20,25 @@ import { HeroSection } from '../components/home/HeroSection';
 import { RetirementCeremony } from '../components/retirement/RetirementCeremony';
 import { useCareerStore } from '../store/useCareerStore';
 
+const DASHBOARD_TABS = [
+  { id: 'SEASON' as const, label: '시즌', icon: Calendar },
+  { id: 'TRAINING' as const, label: '선수', icon: SlidersHorizontal },
+  { id: 'HISTORY' as const, label: '기록', icon: BookMarked },
+];
+
 export default function BenchToMvpApp() {
   const view = useCareerStore((s) => s.view);
   const career = useCareerStore((s) => s.career);
+  const lastEncounterOutcome = useCareerStore((s) => s.lastEncounterOutcome);
   const setView = useCareerStore((s) => s.setView);
   const resolveEventChoice = useCareerStore((s) => s.resolveEventChoice);
+  const dismissEncounterOutcome = useCareerStore((s) => s.dismissEncounterOutcome);
   const startNewCareer = useCareerStore((s) => s.startNewCareer);
+  const resetActiveCareer = useCareerStore((s) => s.resetActiveCareer);
 
   const [activeTab, setActiveTab] = useState<'SEASON' | 'TRAINING' | 'HISTORY'>('SEASON');
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [showSaveGuideModal, setShowSaveGuideModal] = useState(false);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -52,67 +69,56 @@ export default function BenchToMvpApp() {
     }
   }, [view, career, setView, startNewCareer]);
 
+  const isLiveBroadcast =
+    view === 'DASHBOARD' &&
+    career?.seasonPhase === 'LIVE_FINAL_BROADCAST' &&
+    Boolean(career?.liveGame);
+
+  const isWideDashboard =
+    view === 'DASHBOARD' &&
+    activeTab === 'SEASON' &&
+    (career?.seasonPhase === 'POSTSEASON_BRACKET' || isLiveBroadcast);
+
+  const showBottomTabBar =
+    view === 'DASHBOARD' && Boolean(career) && !isLiveBroadcast;
+
+  const hasSeasonDock =
+    showBottomTabBar &&
+    activeTab === 'SEASON' &&
+    Boolean(career) &&
+    ((!career!.offseasonLocked && career!.seasonPhase === 'REGULAR_SEASON') ||
+      (career!.seasonPhase === 'POSTSEASON_BRACKET' &&
+        Boolean(career!.playoffBracket) &&
+        !career!.playoffBracket?.championTeamId));
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
-      <Header />
+    <div className="min-h-screen bg-[var(--t-bg)] text-[var(--t-g900)] flex flex-col">
+      <Header
+        wide={isWideDashboard}
+        onRequestResetModal={() => setShowResetModal(true)}
+        onRequestSaveGuideModal={() => setShowSaveGuideModal(true)}
+      />
 
       <main className="flex-1 w-full">
-        {view === 'HOME' && <HeroSection />}
+        {view === 'HOME' && (
+          <HeroSection onRequestResetModal={() => setShowResetModal(true)} />
+        )}
 
         {view === 'CREATE' && <PlayerCreator />}
 
         {view === 'DASHBOARD' && career && (
-          <div className="max-w-2xl mx-auto px-4 py-5 space-y-5">
-            <PlayerHeader career={career} />
-
-            {/* 3탭 네비게이션 (화이트톤 세그먼트 컨트롤) */}
-            <div
-              role="tablist"
-              aria-label="인게임 대시보드 탭"
-              className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-white border border-slate-200 shadow-2xs"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'SEASON'}
-                onClick={() => setActiveTab('SEASON')}
-                className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${
-                  activeTab === 'SEASON'
-                    ? 'bg-orange-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                🏀 이번 시즌 &amp; 오프시즌
-              </button>
-
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'TRAINING'}
-                onClick={() => setActiveTab('TRAINING')}
-                className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${
-                  activeTab === 'TRAINING'
-                    ? 'bg-orange-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                ⚡ 내 선수 &amp; 생체역학 훈련
-              </button>
-
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === 'HISTORY'}
-                onClick={() => setActiveTab('HISTORY')}
-                className={`py-3 px-4 rounded-xl text-xs sm:text-sm font-black transition cursor-pointer ${
-                  activeTab === 'HISTORY'
-                    ? 'bg-orange-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                📜 커리어 기록실
-              </button>
-            </div>
+          <div
+            className={`mx-auto px-4 pt-2 space-y-3 transition-[max-width] duration-200 ${
+              isWideDashboard ? 'max-w-[760px]' : 'max-w-[560px]'
+            } ${
+              hasSeasonDock
+                ? 'pb-[156px]'
+                : showBottomTabBar
+                ? 'pb-[88px]'
+                : 'pb-10'
+            }`}
+          >
+            {!isLiveBroadcast && <PlayerHeader career={career} />}
 
             <div>
               {activeTab === 'SEASON' && <SeasonTab />}
@@ -125,7 +131,7 @@ export default function BenchToMvpApp() {
         {view === 'DRAFT_COMBINE' && <DraftCombine />}
 
         {view === 'DRAFT_LIVE' && (
-          <div className="px-4 py-8">
+          <div className="px-4 pt-3 pb-10">
             <DraftLiveStage />
           </div>
         )}
@@ -133,10 +139,73 @@ export default function BenchToMvpApp() {
         {view === 'RETIREMENT' && <RetirementCeremony />}
       </main>
 
-      {/* 시즌 분기점 / 아시안게임 차출 / 부상 이벤트 모달 */}
+      {/* 고정 하단 탭바 (토스형 모바일 앱 내비게이션) */}
+      {showBottomTabBar && (
+        <nav
+          role="tablist"
+          aria-label="대시보드 탭"
+          className="fixed bottom-0 left-0 right-0 z-40 bg-[var(--t-card)]/95 backdrop-blur-md border-t border-[var(--t-g200)] rounded-t-[20px] pb-safe"
+        >
+          <div className="max-w-[560px] mx-auto grid grid-cols-3 h-[58px]">
+            {DASHBOARD_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const selected = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex flex-col items-center justify-center gap-0.5 cursor-pointer t-tap ${
+                    selected
+                      ? 'text-[var(--t-accent)]'
+                      : 'text-[var(--t-g400)] hover:text-[var(--t-g700)]'
+                  }`}
+                >
+                  <Icon
+                    className={`w-[22px] h-[22px] ${
+                      selected ? 'stroke-[2.4]' : 'stroke-[1.9]'
+                    }`}
+                  />
+                  <span
+                    className={`text-[11px] leading-none ${
+                      selected ? 'font-bold' : 'font-medium'
+                    }`}
+                  >
+                    {tab.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      )}
+
+      {/* 분기점 인카운터 바텀시트 */}
       <CareerEventModal
         event={career?.pendingEvent || null}
+        career={career}
+        lastOutcome={lastEncounterOutcome}
         onSelectChoice={resolveEventChoice}
+        onDismissOutcome={dismissEncounterOutcome}
+      />
+
+      {/* 초기화 확인 바텀시트 */}
+      <ResetConfirmModal
+        open={showResetModal}
+        career={career}
+        onCancel={() => setShowResetModal(false)}
+        onConfirmReset={() => {
+          setShowResetModal(false);
+          resetActiveCareer();
+        }}
+      />
+
+      {/* 세이브 · 가이드 바텀시트 */}
+      <SaveAndGuideModal
+        open={showSaveGuideModal}
+        onClose={() => setShowSaveGuideModal(false)}
       />
 
       <ToastBanner />

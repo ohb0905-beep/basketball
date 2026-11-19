@@ -100,21 +100,21 @@ export function generateSeasonNarrativeLogs(
 
   if (ctx.singleGameHighPts && ctx.singleGameHighPts >= 20) {
     logs.push(
-      `🔥 시즌 최고 득점 경신! ${displayTeam} ${displayName}, 단일 경기 ${ctx.singleGameHighPts}점을 폭발시키며 홈 관중석을 열광의 도가니로 만들었어요.`
+      `시즌 최다 득점: ${displayTeam} ${displayName}, 단일 경기 ${ctx.singleGameHighPts}점을 기록했습니다.`
     );
   } else {
     logs.push(
-      `🏀 ${displayTeam} 소속으로 정규시즌 일정을 소화하며 평균 ${ctx.ppg.toFixed(1)}점 ${ctx.rpg.toFixed(1)}리바운드 ${ctx.apg.toFixed(1)}어시스트를 기록했어요.`
+      `${displayTeam} 소속으로 정규시즌 평균 ${ctx.ppg.toFixed(1)}점 ${ctx.rpg.toFixed(1)}리바운드 ${ctx.apg.toFixed(1)}도움을 기록했습니다.`
     );
   }
 
   if (ctx.wonMvp) {
     logs.push(
-      `👑 압도적인 공수 마진과 클러치 지배력을 인정받아 ${ctx.leagueName} 정규시즌 MVP 트로피를 들어 올렸어요!`
+      `정규시즌 MVP: 공수 활약과 팀 성적을 인정받아 ${ctx.leagueName} 정규시즌 MVP를 수상했습니다.`
     );
   } else if (ctx.allStarSelected) {
     logs.push(
-      `⭐ 팬들과 코칭스태프의 지지를 받아 ${ctx.leagueName} 올스타에 당당히 선정되었어요.`
+      `올스타 선정: ${ctx.leagueName} 올스타 로스터에 이름을 올렸습니다.`
     );
   }
 

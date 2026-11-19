@@ -1,1 +1,203 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --t-bg: #f2f4f6;
+  --t-card: #ffffff;
+  --t-sheet: #ffffff;
+  --t-g900: #191f28;
+  --t-g800: #333d4b;
+  --t-g700: #4e5968;
+  --t-g600: #6b7684;
+  --t-g500: #737d8a;
+  --t-g400: #9aa3ae;
+  --t-g200: #e5e8eb;
+  --t-g100: #f2f4f6;
+  --t-g50: #f9fafb;
+
+  --t-accent: #f05a1f;
+  --t-accent-hover: #d9480f;
+  --t-accent-soft: #fff3ec;
+  --t-accent-ink: #c84310;
+
+  --t-up: #f04452;
+  --t-up-soft: #ffecee;
+  --t-down: #3182f6;
+  --t-down-soft: #e8f3ff;
+  --t-ok: #03b26c;
+  --t-ok-soft: #e6f8f0;
+  --t-gold: #e89b10;
+  --t-gold-soft: #fff5e0;
+
+  --t-court-bg: #f9fafb;
+  --t-court-line: #d6dce2;
+  --t-court-paint: #fff3ec;
+  --t-dock-fade: rgba(242, 244, 246, 0.94);
+}
+
+.dark,
+[data-theme="dark"] {
+  --t-bg: #101013;
+  --t-card: #1c1c21;
+  --t-sheet: #232329;
+  --t-g900: #f2f2f4;
+  --t-g800: #d8d8df;
+  --t-g700: #b8b8c2;
+  --t-g600: #9d9da7;
+  --t-g500: #858590;
+  --t-g400: #6b6b76;
+  --t-g200: #2e2e36;
+  --t-g100: #26262d;
+  --t-g50: #1f1f25;
+
+  --t-accent: #ff6b2c;
+  --t-accent-hover: #ff8049;
+  --t-accent-soft: #2e1e17;
+  --t-accent-ink: #ff8a56;
+
+  --t-up: #ff6b6b;
+  --t-up-soft: #311d20;
+  --t-down: #5ca0ff;
+  --t-down-soft: #1b2638;
+  --t-ok: #2bd48c;
+  --t-ok-soft: #172d24;
+  --t-gold: #fbbf24;
+  --t-gold-soft: #2d2514;
+
+  --t-court-bg: #17171c;
+  --t-court-line: #34343f;
+  --t-court-paint: #2a1d17;
+  --t-dock-fade: rgba(16, 16, 19, 0.94);
+}
+
+html {
+  font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+    system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo",
+    "Noto Sans KR", "Malgun Gothic", sans-serif;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+  -webkit-tap-highlight-color: transparent;
+  background-color: var(--t-bg);
+  color: var(--t-g900);
+}
+
+body {
+  background-color: var(--t-bg);
+  color: var(--t-g900);
+  overflow-x: hidden;
+}
+
+.t-card {
+  background-color: var(--t-card);
+  border-radius: 22px;
+  padding: 22px 20px;
+}
+
+.t-tap {
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.t-tap:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.t-cta {
+  width: 100%;
+  min-height: 54px;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--t-accent);
+  color: #ffffff;
+  cursor: pointer;
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.t-cta:hover:not(:disabled) {
+  background-color: var(--t-accent-hover);
+}
+
+.t-cta:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.t-cta:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.t-cta-sub {
+  width: 100%;
+  min-height: 50px;
+  border-radius: 16px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--t-g100);
+  color: var(--t-g800);
+  cursor: pointer;
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1),
+    background-color 140ms ease;
+}
+
+.t-cta-sub:hover:not(:disabled) {
+  background-color: var(--t-g200);
+}
+
+.t-cta-sub:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.t-cta-sub:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pb-safe {
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+/* Custom slim range slider */
+input[type="range"].t-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--t-g200);
+  outline: none;
+}
+
+input[type="range"].t-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--t-accent);
+  border: 3px solid var(--t-card);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+}
+
+input[type="range"].t-range::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--t-accent);
+  border: 3px solid var(--t-card);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+}

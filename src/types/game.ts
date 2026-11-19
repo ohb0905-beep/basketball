@@ -247,6 +247,7 @@ export interface PlayoffBracketState {
   rounds: PlayoffSeriesMatchup[][];
   playerEliminated: boolean;
   playerReachedFinals: boolean;
+  pendingConfFinalsGame7?: boolean; // 컨퍼런스 파이널이 실제로 3승 3패 7차전에 돌입했을 때만 true
   championTeamId: string | null;
   playoffResultLabel: string;
 }
@@ -257,7 +258,13 @@ export type LiveTacticId =
   | 'UNSELFISH_PASS'    // 이타적 조율: 팀원 찬스 창출 (어시스트·팀 야투율↑)
   | 'PACE_CONSERVE';    // 체력 안배: 페이스 조절 (체력 회복, 4쿼터 클러치 대비)
 
-export type ClutchChoiceId = 'ISO_WINNER' | 'KICKOUT_ASSIST';
+export type ClutchChoiceId =
+  | 'ISO_WINNER'         // 열세/동점: 직접 아이솔레이션 클러치 슛
+  | 'KICKOUT_ASSIST'     // 열세/동점: 더블팀 유인 후 코너 오픈 동료 킥아웃 패스
+  | 'LOCKDOWN_STOP'      // 리드: 상대 에이스 전담 락다운 수비로 마지막 포제션 봉쇄
+  | 'CLUTCH_FREE_THROWS';// 리드: 시간 소진 및 파울 작전 유도 후 쐐기 자유투 침착하게 성공
+
+export type ClutchScenarioType = 'TRAILING' | 'TIED' | 'LEADING';
 
 export type PersonalCareId =
   | 'BIOMECH_SKILL_LAB'
@@ -279,6 +286,60 @@ export interface AwardRaceEntry {
   awardScore: number;
 }
 
+export type LiveCourtPlayType =
+  | 'THREE_MAKE'
+  | 'TWO_MAKE'
+  | 'FT'
+  | 'MISS'
+  | 'ASSIST'
+  | 'STEAL'
+  | 'BLOCK'
+  | 'FOUL'
+  | 'OPP_SCORE'
+  | 'TEAM_TICK'
+  | 'CLUTCH';
+
+export interface LivePlayerBoxSnapshot {
+  pts: number;
+  reb: number;
+  ast: number;
+  stl: number;
+  blk: number;
+  fgm: number;
+  fga: number;
+  tpm: number;
+  tpa: number;
+  fouls: number;
+  stamina: number;
+}
+
+export interface LiveCourtPlay {
+  id: string;
+  clock: string;
+  actor: 'PLAYER' | 'TEAMMATE' | 'OPPONENT';
+  type: LiveCourtPlayType;
+  /** 내 선수의 실제 1포제션 플레이일 때만 true (하프코트 슈팅맵 표시 대상) */
+  showOnCourt?: boolean;
+  /** 이번 1포제션의 실제 득점(0, 1, 2, 3점만 허용) */
+  shotPoints?: number;
+  /** 코트 위 표시 배지('+3', '+2', '+1', 'MISS', 'AST', 'STL', 'BLK', 'FOUL') */
+  courtBadge?: string;
+  x: number; // 0 ~ 100 (코트 좌우 정규화 좌표)
+  y: number; // 0 ~ 100 (코트 상하 정규화 좌표, 12 부근이 림)
+  fromX?: number; // 어시스트 패스/돌파 출발 X
+  fromY?: number; // 어시스트 패스/돌파 출발 Y
+  /** 이번 슛/플레이가 림에 도달하기 직전(경과 시간 팀 득점 반영 후)의 스코어 */
+  teamScoreBefore?: number;
+  oppScoreBefore?: number;
+  teamDelta: number;
+  oppDelta: number;
+  teamScoreAfter: number;
+  oppScoreAfter: number;
+  /** 이번 턴이 끝난 시점의 내 선수 누적 박스스코어(스포일러 방지용) */
+  playerStatsAfter?: LivePlayerBoxSnapshot;
+  text: string;
+}
+
 export interface LiveQuarterLog {
   quarter: number; // 1, 2, 3, 4, 5(OT)
   label: string;
@@ -287,7 +348,11 @@ export interface LiveQuarterLog {
   playerPts: number;
   playerReb: number;
   playerAst: number;
+  startTeamScore?: number;
+  startOppScore?: number;
+  startPlayerStats?: LivePlayerBoxSnapshot;
   playByPlay: string[];
+  plays?: LiveCourtPlay[];
 }
 
 export interface LiveGameState {
@@ -302,8 +367,12 @@ export interface LiveGameState {
   oppScore: number;
   currentTactic: LiveTacticId;
   momentum: 'HOT' | 'NEUTRAL' | 'COLD';
+  foulLimit?: number; // NBA/G리그 6반칙, KBL/아마추어/아시안게임 5반칙
+  fouledOut?: boolean;
+  overtimeCount?: number; // 0 = 정규 4Q, 1 = 1OT, 2 = 2OT, 3 = 3OT
   pendingClutchPossession?: boolean;
   clutchPossessionResolved?: boolean;
+  clutchScenario?: ClutchScenarioType;
   clutchSituationText?: string;
   playerStats: {
     pts: number;
@@ -390,8 +459,10 @@ export interface SeasonBoxScore {
   isFarewellTour?: boolean;
   mvpRace?: AwardRaceEntry[];
   mvpRaceNarrative?: string;
+  playerMvpRank?: number | null;
   royRace?: AwardRaceEntry[];
   royRaceNarrative?: string;
+  playerRoyRank?: number | null;
 }
 
 export interface CareerHighs {
@@ -436,10 +507,53 @@ export type EncounterArchetypeCategory =
   | 'NATIONAL_PRIDE'
   | 'VETERAN_LEGACY';
 
+export type EncounterRiskTier = 'SAFE' | 'BALANCED' | 'HIGH_RISK';
+
+export interface EncounterSuccessCheck {
+  statKey: keyof PlayerStats;
+  difficulty: number; // 리그 기준치(LDR) 대비 보정치 또는 절대 난이도
+  baseProb?: number; // 기본 기준 확률 (default 0.62)
+  minProb?: number; // 하한 확률 (default 0.22)
+  maxProb?: number; // 상한 확률 (default 0.92)
+  label?: string; // UI 표시용 판정 기준 라벨 (예: '외곽 슈팅(OUT) 기반')
+}
+
+export interface EncounterOutcomeBranch {
+  narrative: string;
+  statChanges?: Partial<PlayerStats>;
+  trustDelta?: number;
+  draftStockDelta?: number;
+  potentialDelta?: number;
+  cashDelta?: number;
+  nextChainEvent?: CareerEvent;
+}
+
+export interface EncounterResolutionResult {
+  eventId: string;
+  eventTitle: string;
+  choiceLabel: string;
+  wasProbabilistic: boolean;
+  successChancePct: number;
+  rolledSuccess: boolean;
+  outcomeTier: 'CRITICAL_SUCCESS' | 'SUCCESS' | 'FAILURE' | 'GUARANTEED';
+  narrative: string;
+  statChanges: Partial<PlayerStats>;
+  trustDelta: number;
+  draftStockDelta: number;
+  potentialDelta: number;
+  cashDelta: number;
+  chainedNextSeasonTitle?: string;
+}
+
 export interface CareerEventChoice {
   label: string;
   description: string;
   effectSummary: string;
+  riskTier?: EncounterRiskTier;
+  successCheck?: EncounterSuccessCheck;
+  cashDelta?: number;
+  successOutcome?: EncounterOutcomeBranch;
+  failureOutcome?: EncounterOutcomeBranch;
   requiredTrait?: PlayerTraitId;
   statChanges?: Partial<PlayerStats>;
   trustDelta?: number;
@@ -454,6 +568,7 @@ export interface CareerEventChoice {
   enlistSangmu?: boolean;
   startFarewellTour?: boolean;
   executeTradeToContender?: boolean;
+  negotiateMidSeasonTrade?: boolean;
   markAgentAdviceDismissed?: boolean;
   triggerVeteranReinvention?: boolean;
   nextChainEvent?: CareerEvent;
@@ -618,7 +733,8 @@ export interface CareerState {
   contractType: ContractType;
   contractYearsLeft: number;
   annualSalary: number;     // 현재 계약 연봉 (USD 기준)
-  careerEarnings: number;   // 통산 누적 수입 (USD 기준)
+  careerEarnings: number;   // 통산 누적 프로 연봉 수입 (절대 차감되지 않는 명예 지표, USD)
+  cashBalance?: number;     // 가용 자산 (캠프·퍼스널 케어 지출용 현금, USD)
   twoWaySeasonsUsed: number;
   draftPedigreePick?: number | null;
   draftPedigreeRound?: 1 | 2 | null;
@@ -631,6 +747,7 @@ export interface CareerState {
   prospectStars?: number; // 고교 졸업 시 산출된 유망주 등급 (1~5성)
   trainingFocus: TrainingFocus;
   lastCampYear?: number;
+  tradeRequestedThisYear?: boolean;
   activePersonalCare?: PersonalCareId[];
   purchasedPersonalCareCount?: number;
   fanPopularity?: number;
@@ -644,9 +761,23 @@ export interface CareerState {
   isOutOfLeagueWarning: boolean;
   agentAdviceShown?: boolean;
   midSeasonEventTriggeredThisYear?: boolean;
+  lastTradeRumorYear?: number | null;
+  seasonsOnCurrentTeam?: number;
   seenEventIds?: string[];
   recentEventCategories?: string[];
   pendingChainEvent?: CareerEvent | null;
+  pendingSeasonSettlement?: {
+    nextStats: PlayerStats;
+    statDelta: StatDelta;
+    nextOvr: number;
+    nextPotential: number;
+    potentialBreakthroughReason: string | null;
+    nextCoachTrust: number;
+    nextDraftStock: number;
+    nextBadges: string[];
+    nextTraits: PlayerTraitId[];
+    brokenRolePromise: boolean;
+  } | null;
   seasonPhase?: SeasonPhase;
   currentStandings?: StandingEntry[];
   playoffBracket?: PlayoffBracketState | null;

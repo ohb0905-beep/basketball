@@ -1,3 +1,4 @@
+import { DRAFT_SCOUTING_CONFIG } from '../config/balanceConfig';
 import { CareerEvent, CareerState, Position } from '../types/game';
 
 export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
@@ -274,19 +275,19 @@ export const ASIAN_GAMES_MILITARY_EVENT: CareerEvent = {
   category: 'MILITARY',
   choices: [
     {
-      label: '🇰🇷 태극마크를 달고 아시안게임 본선 토너먼트(조별리그 → 8강 → 4강) 출전!',
+      label: '아시안게임 본선 토너먼트 출전',
       description:
-        '조별리그부터 4강까지 아시아 강호들과 진검승부를 펼쳐요. 4강 승리 시 대망의 결승전 실시간 중계로 직행해요!',
+        '조별리그부터 4강까지 승부를 펼치며 4강 승리 시 결승전 실시간 중계로 직행합니다.',
       effectSummary:
-        '🏀 아시안게임 풀 토너먼트 진행 (4강 승리 시 결승전 라이브 중계 진입 · 결승 우승 시에만 병역특례 부여)',
+        '아시안게임 토너먼트 진행 (결승 우승 시 병역특례 획득)',
       statChanges: { ins: 1, out: 1, ply: 1 },
       trustDelta: 6,
       draftStockDelta: 6,
       enterAsianGamesTournament: true,
     },
     {
-      label: '🏥 소속팀 비시즌 훈련 및 부상 관리에 전념 (대표팀 차출 고사)',
-      description: '아시안게임에 불참하고 개인 기량 연마와 컨디션 관리에 집중해요 (병역특례 기회 패스).',
+      label: '소속팀 비시즌 훈련 및 컨디션 관리 집중',
+      description: '대표팀 차출을 고사하고 개인 기량 연마와 부상 관리에 집중합니다.',
       effectSummary: 'PHY +2, OUT +1 · 대표팀 불참 (병역 미필 유지)',
       statChanges: { phy: 2, out: 1 },
       trustDelta: 2,
@@ -296,16 +297,16 @@ export const ASIAN_GAMES_MILITARY_EVENT: CareerEvent = {
 
 export const SANGMU_ENLISTMENT_EVENT: CareerEvent = {
   id: 'EVT_SANGMU_ENLISTMENT',
-  title: '🫡 국군체육부대(상무) 입대 영장 도착',
-  subtitle: '만 27세 병역 의무 이행 (2시즌 상무 농구단 복무)',
+  title: '국군체육부대 상무 입대 영장',
+  subtitle: '만 27세 병역 의무 이행 · 2시즌 복무',
   description:
-    '만 27세가 될 때까지 아시안게임 금메달 등 병역특례 혜택을 획득하지 못해 국군체육부대(상무 농구단)에 입대하게 되었어요. 앞으로 2시즌 동안 문경 상무 농구단 소속으로 복무한 뒤 프로 무대로 복귀해요.',
+    '만 27세가 될 때까지 병역특례 혜택을 획득하지 못해 국군체육부대 상무에 입대하게 되었습니다. 2시즌 동안 복무한 뒤 프로 무대로 복귀합니다.',
   category: 'MILITARY',
   choices: [
     {
-      label: '🫡 성실하게 상무 농구단에 입대하여 웨이트 및 기초 체력 단련 (2시즌 복무)',
-      description: '규칙적인 일과와 웨이트 트레이닝으로 몸을 만들며 전역 후의 도약을 준비해요.',
-      effectSummary: '2시즌 국군체육부대(상무) 복무 시작 · PHY +1, DEF +1 · 전역 후 병역필 전환',
+      label: '국군체육부대 상무 입대 (2시즌 복무)',
+      description: '규칙적인 일과와 웨이트 트레이닝으로 전역 후 복귀를 준비합니다.',
+      effectSummary: '2시즌 상무 복무 시작 · PHY +1, DEF +1 · 전역 후 병역필 전환',
       statChanges: { phy: 1, def: 1 },
       enlistSangmu: true,
     },
@@ -314,22 +315,22 @@ export const SANGMU_ENLISTMENT_EVENT: CareerEvent = {
 
 export const VETERAN_CRITICAL_INJURY_EVENT: CareerEvent = {
   id: 'EVT_VETERAN_CRITICAL_INJURY',
-  title: '🚨 비보: 경기 중 아킬레스건/무릎 중상 발생',
-  subtitle: '④ 노장 치명적 부상 은퇴 기로 (만 32세 이상 · 피지컬 저하)',
+  title: '경기 중 아킬레스건 · 무릎 중상 발생',
+  subtitle: '베테랑 치명적 부상 은퇴 기로',
   description:
-    '치열한 리바운드 경합 후 착지 과정에서 날카로운 통증과 함께 코트에 쓰러졌어요. 정밀 검진 결과 최소 1년의 혹독한 재활이 필요한 중상이라는 진단을 받았어요. 베테랑으로서 중대한 결정을 내려야 해요.',
+    '리바운드 경합 후 착지 과정에서 중상을 입어 최소 1년의 재활이 필요하다는 진단을 받았습니다. 베테랑으로서 진로를 결정해야 합니다.',
   category: 'INJURY',
   choices: [
     {
-      label: '🔥 1년 재활 후 코트 복귀 도전 (PHY -7 영구 하락)',
-      description: '운동능력은 크게 떨어지겠지만, 농구를 향한 열정으로 다시 코트에 서요.',
-      effectSummary: 'PHY -7 영구 하락 · 노련미 PLY +2 · 불굴의 재활 투혼',
+      label: '1년 재활 후 코트 복귀 도전 (PHY -7)',
+      description: '운동능력 저하를 감수하고 재활 후 다시 코트에 섭니다.',
+      effectSummary: 'PHY -7 영구 하락 · PLY +2 · 재활 복귀',
       statChanges: { phy: -7, ply: 2 },
       trustDelta: 5,
     },
     {
-      label: '🎤 부상을 받아들이고 명예롭게 현역 은퇴 선언',
-      description: '그동안 쏟아부은 땀방울을 가슴에 품고 정든 코트와 작별 인사를 나눠요.',
+      label: '부상을 받아들이고 현역 은퇴 선언',
+      description: '코트와 작별하고 명예의 전당 심사로 이동합니다.',
       effectSummary: '현역 은퇴식 진행 및 명예의 전당 심사 이동',
       triggerRetirement: 'CRITICAL_INJURY',
     },
@@ -402,21 +403,21 @@ export function createAgentRetirementAdviceEvent(
 
   return {
     id: 'EVT_AGENT_RETIREMENT_ADVICE',
-    title: '📋 에이전트의 진지한 면담: 현역 은퇴 권유 리포트 (커리어 1회)',
-    subtitle: '동일 리그 내 기량 하락 또는 고령 베테랑 은퇴 기로',
-    description: `${reasonText} 에이전트가 조심스럽게 다가와 박수칠 때 명예롭게 코트를 떠나는 선택지와, 현역 연장에 도전하는 선택지를 함께 제시했어요. (현역 연장을 선택하면 앞으로 에이전트가 다시 은퇴를 권유하지 않아요)`,
+    title: '에이전트 면담 · 현역 은퇴 권유 리포트',
+    subtitle: '동일 리그 기량 하락 또는 베테랑 은퇴 기로 (커리어 1회)',
+    description: `${reasonText} 에이전트가 명예 은퇴와 현역 연장 선택지를 함께 제시했습니다. 현역 연장을 선택하면 이후 은퇴 권유는 다시 표시되지 않습니다.`,
     category: 'RETIREMENT_ADVICE',
     choices: [
       {
-        label: '🎤 에이전트의 조언을 받아들여 명예 은퇴 선언',
-        description: '아름다운 추억을 가슴에 품고 공식 은퇴식과 명예의 전당 심사로 향해요.',
-        effectSummary: '현역 명예 은퇴식 진행 (VOLUNTARY_HONOR)',
+        label: '에이전트 조언 수용 · 명예 은퇴 선언',
+        description: '공식 은퇴식과 명예의 전당 심사로 이동합니다.',
+        effectSummary: '현역 명예 은퇴식 진행',
         triggerRetirement: 'VOLUNTARY_HONOR',
       },
       {
-        label: '🔥 현역 연장에 도전 (더 이상 은퇴 권유 받지 않음)',
-        description: '아직 코트를 떠날 수 없어요! 에이전트의 권유를 정중히 거절하고 현역 도전을 이어가요.',
-        effectSummary: '현역 연장 확정 · 이후 에이전트 은퇴 권유 영구 비활성화',
+        label: '현역 연장 도전 (은퇴 권유 해제)',
+        description: '권유를 정중히 거절하고 현역 도전을 이어갑니다.',
+        effectSummary: '현역 연장 확정 · 이후 은퇴 권유 비활성화',
         trustDelta: 0,
         markAgentAdviceDismissed: true,
       },
@@ -426,6 +427,8 @@ export function createAgentRetirementAdviceEvent(
 
 /**
  * 시즌 중반(50% 진행 시점) '커리어 분기점(Mid-Season Crossroads)' 이벤트 생성
+ * - 트레이드 데드라인 루머는 최소 3시즌 쿨다운 + 현 소속팀 2시즌 이상 재적 조건 적용 (역할 약속 위반 시에만 예외)
+ * - 매 시즌 반복 대신 올스타 브레이크 점검, 라커룸 리더십, 전술 해법 등 다양한 서사를 제공
  */
 export function rollMidSeasonCrossroadsEvent(
   career: CareerState,
@@ -437,33 +440,63 @@ export function rollMidSeasonCrossroadsEvent(
     career.league === 'OVERSEAS';
   const isAceOrStarter =
     career.role.includes('에이스') || career.role.includes('스타터');
-  const isRebuildingOrBrokenPromise =
-    career.team.direction === 'REBUILDING' || Boolean(career.brokenRolePromise);
 
-  // 시나리오 1: 트레이드 데드라인 루머 (프로 리그에서 리빌딩 팀 에이스이거나 역할 약속이 깨졌을 때)
-  if (isProLeague && (isRebuildingOrBrokenPromise || (isAceOrStarter && rng() < 0.45))) {
+  const rumorCfg = DRAFT_SCOUTING_CONFIG.tradeRumor;
+  const lastRumorYear = career.lastTradeRumorYear ?? null;
+  const seasonsSinceRumor =
+    lastRumorYear !== null ? career.seasonYear - lastRumorYear : 99;
+  const seasonsOnTeam = career.seasonsOnCurrentTeam ?? 0;
+
+  const passesTradeCooldown = seasonsSinceRumor >= rumorCfg.cooldownSeasons;
+  const passesTeamTenure =
+    Boolean(career.brokenRolePromise) ||
+    seasonsOnTeam >= rumorCfg.minSeasonsOnTeam;
+
+  let tradeRumorChance = 0;
+  if (isProLeague && passesTradeCooldown && passesTeamTenure) {
+    if (career.brokenRolePromise) {
+      tradeRumorChance = rumorCfg.brokenPromiseProb;
+    } else if (career.team.direction === 'REBUILDING') {
+      tradeRumorChance =
+        rumorCfg.rebuildingBaseProb +
+        (career.contractYearsLeft <= 1 ? rumorCfg.contractYearBonusProb : 0);
+    } else if (career.team.direction === 'CONTENDER') {
+      tradeRumorChance = rumorCfg.contenderRareProb;
+    } else {
+      tradeRumorChance =
+        rumorCfg.playoffHuntBaseProb +
+        (career.contractYearsLeft <= 1 ? rumorCfg.contractYearBonusProb * 0.75 : 0);
+    }
+  }
+
+  // 시나리오 1: 트레이드 데드라인 루머 (희귀 발동 · 쿨다운 & 최소 재적 연수 충족 시에만)
+  if (tradeRumorChance > 0 && rng() < tradeRumorChance) {
     return {
       id: `EVT_MID_TRADE_DEADLINE_${career.seasonYear}`,
-      title: '🚨 [시즌 중반 분기점] 트레이드 데드라인 빅딜 루머!',
-      subtitle: '정규시즌 반환점(50%) · 프랜차이즈 의리 vs 우승 컨텐더 이적',
+      title: '트레이드 데드라인 영입 타진 루머',
+      subtitle: '정규시즌 반환점 · 잔류 vs 구단 트레이드 협상',
       description: career.brokenRolePromise
-        ? `계약 당시 약속받았던 출전 시간이 지켜지지 않자, 플레이오프 우승권을 노리는 타 구단 단장이 즉시 전력감으로 영입하겠다는 트레이드 오퍼를 보냈어요!`
-        : `하위권에서 고군분투하는 나의 활약을 눈여겨본 우승 컨텐더 구단이 트레이드 데드라인 직전 영입 제안을 보내왔어요! 어떤 결단을 내릴까요?`,
+        ? `계약 당시 약속받은 출전 시간이 지켜지지 않자 타 구단들이 트레이드 데드라인을 앞두고 영입을 타진하고 있습니다.`
+        : `${career.team.shortName}에서의 시즌이 길어지며 타 구단 단장들이 트레이드 문의를 넣어오고 있습니다. 잔류할지 프런트에 트레이드 협상을 요청할지 결정하세요.`,
       category: 'MID_SEASON_CROSSROADS',
       choices: [
         {
-          label: '🤝 팀에 남아 프랜차이즈 충성 선언',
-          description: '이적 루머를 일축하고 현재 동료들과 끝까지 시즌을 완주하겠다고 선언해요.',
-          effectSummary: '감독 신뢰도 +9 · INS +1, DEF +1 상승',
+          label: '이적 루머 일축 · 소속팀 잔류 선언',
+          description: '라커룸 분위기를 다잡고 현재 동료들과 시즌을 완주합니다.',
+          riskTier: 'SAFE',
+          effectSummary: '안정 확정 · 감독 신뢰도 +8 · INS +1, DEF +1',
           statChanges: { ins: 1, def: 1 },
-          trustDelta: 9,
+          trustDelta: 8,
         },
         {
-          label: '✈️ 우승 반지와 새로운 기회를 위해 트레이드 요청 단행!',
-          description: '단장에게 공식 트레이드를 요청해 포지션 니즈가 맞는 상위 전력 구단으로 즉시 이적해요!',
-          effectSummary: '즉시 타 구단으로 트레이드 이적 · 스카우트 주목도 +5 · 승률 상승 기대',
-          draftStockDelta: 5,
-          executeTradeToContender: true,
+          label: '구단 프런트에 공식 트레이드 협상 요청',
+          description:
+            '단장에게 타 구단과의 트레이드 협상을 요청합니다. 시장 가치와 계약 조건에 따라 성사되거나 반려될 수 있습니다.',
+          riskTier: 'HIGH_RISK',
+          effectSummary:
+            '구단 협상 판정 · 성사 시 타 구단 이적 · 반려 시 잔류 및 신뢰도 하락',
+          draftStockDelta: 3,
+          negotiateMidSeasonTrade: true,
         },
       ],
     };
@@ -473,51 +506,183 @@ export function rollMidSeasonCrossroadsEvent(
   if (!isAceOrStarter) {
     return {
       id: `EVT_MID_STARTER_SHOWCASE_${career.seasonYear}`,
-      title: '⚡ [시즌 중반 분기점] 주전 선수 부상! 3주간의 임시 선발 기회',
-      subtitle: '정규시즌 반환점(50%) · 식스맨에서 주전으로 도약할 결정적 찬스',
+      title: '주전 부상 · 3주간 임시 선발 기회',
+      subtitle: '정규시즌 반환점 · 주전 도약 찬스',
       description:
-        '팀 내 주전 선수가 발목 염좌로 3주간 결장하게 되면서 감독님이 나에게 임시 선발 출전 기회를 부여했어요! 코트 위에서 어떤 인상을 남길까요?',
+        '팀 내 주전 선수가 발목 염좌로 3주간 결장하며 임시 선발 출전 기회가 주어졌습니다.',
       category: 'MID_SEASON_CROSSROADS',
       choices: [
         {
-          label: '🔥 공격적인 득점 쇼케이스로 스카우트들에게 강렬한 어필!',
-          description: '과감한 1대1 돌파와 외곽슛으로 내 공격 재능과 잠재력을 만천하에 증명해요.',
-          effectSummary: 'INS +1, OUT +1 · 잠재력(POT) +1 확장 · 스카우트 주가 +7',
+          label: '공격적인 득점 쇼케이스로 어필',
+          description: '과감한 1대1 돌파와 외곽슛으로 공격 재능을 증명합니다.',
+          riskTier: 'HIGH_RISK',
+          effectSummary: '성공 시 INS +2, OUT +1, POT +1, 주가 +8 · 실패 시 신뢰도 -6, 주가 -3',
+          successCheck: {
+            statKey: 'ins',
+            difficulty: 0,
+            baseProb: 0.65,
+            label: '인사이드(INS) 기반 쇼케이스 판정',
+          },
+          successOutcome: {
+            narrative: '3주간 임시 선발로 맹활약하며 잠재력 상한선까지 끌어올렸습니다.',
+            statChanges: { ins: 2, out: 1 },
+            trustDelta: 5,
+            draftStockDelta: 8,
+            potentialDelta: 1,
+          },
+          failureOutcome: {
+            narrative: '무리한 아이솔레이션이 턴오버로 이어지며 다시 벤치 롤로 복귀했습니다.',
+            statChanges: { ply: -1 },
+            trustDelta: -6,
+            draftStockDelta: -3,
+          },
           statChanges: { ins: 1, out: 1 },
           draftStockDelta: 7,
           potentialDelta: 1,
         },
         {
-          label: '🛡️ 팀 전술에 맞춘 궂은일과 이타적 패스로 감독 신뢰 독차지!',
-          description: '수비 로테이션과 찬스 메이킹에 집중해 감독님의 눈도장을 확실하게 찍어요.',
-          effectSummary: 'PLY +1, DEF +1 · 감독 신뢰도 +11 대폭 상승 (출전시간 증가)',
+          label: '궂은일과 이타적 패스로 감독 신뢰 확보',
+          description: '수비 로테이션과 찬스 메이킹에 집중해 감독의 신뢰를 얻습니다.',
+          riskTier: 'SAFE',
+          effectSummary: '안정 확정 · PLY +1, DEF +1 · 감독 신뢰도 +10',
           statChanges: { ply: 1, def: 1 },
-          trustDelta: 11,
+          trustDelta: 10,
         },
       ],
     };
   }
 
-  // 시나리오 3: 시즌 중반 상대 집중 견제 & 슈팅 밸런스 조정
+  // 시나리오 3~5: 다양한 비-트레이드 시즌 중반 분기점 로테이션
+  const scenarioRoll = rng();
+  if (scenarioRoll < 0.34) {
+    return {
+      id: `EVT_MID_ALLSTAR_BREAK_${career.seasonYear}`,
+      title: '올스타 브레이크 집중 교정 캠프',
+      subtitle: '정규시즌 반환점 · 체력 회복 vs 약점 보완',
+      description:
+        '올스타 브레이크로 5일간의 휴식기가 주어졌습니다. 후반기 순위 싸움을 앞두고 시간을 어떻게 보낼까요?',
+      category: 'MID_SEASON_CROSSROADS',
+      choices: [
+        {
+          label: '개인 스킬 트레이너와 약점 기술 집중 교정',
+          description: '휴식 대신 슈팅 폼과 풋워크를 교정해 후반기 폭발력을 노립니다.',
+          riskTier: 'BALANCED',
+          effectSummary: '성공 시 INS +1, OUT +2, PLY +1 · 실패 시 피로 누적 PHY -1',
+          successCheck: {
+            statKey: 'phy',
+            difficulty: -2,
+            baseProb: 0.72,
+            label: '피지컬(PHY) 체력 소화력 판정',
+          },
+          successOutcome: {
+            narrative: '브레이크 집중 교정으로 후반기에 한층 예리한 공격 감각을 뽐냈습니다.',
+            statChanges: { ins: 1, out: 2, ply: 1 },
+            trustDelta: 4,
+            draftStockDelta: 5,
+          },
+          failureOutcome: {
+            narrative: '휴식 없이 무리한 훈련을 강행해 하체 피로가 쌓였습니다.',
+            statChanges: { phy: -1 },
+            trustDelta: -2,
+          },
+          statChanges: { out: 1, ply: 1 },
+        },
+        {
+          label: '리커버리와 전술 비디오 분석 집중',
+          description: '관절을 회복시키며 후반기 상대 팀 수비 패턴을 분석합니다.',
+          riskTier: 'SAFE',
+          effectSummary: '안정 확정 · PHY +1, PLY +1 · 감독 신뢰도 +6',
+          statChanges: { phy: 1, ply: 1 },
+          trustDelta: 6,
+        },
+      ],
+    };
+  }
+
+  if (scenarioRoll < 0.67) {
+    return {
+      id: `EVT_MID_LOCKER_LEADERSHIP_${career.seasonYear}`,
+      title: '후반기 연패 위기 · 라커룸 미팅',
+      subtitle: '정규시즌 반환점 · 팀 케미스트리와 리더십',
+      description:
+        '후반기 진입 직전 3연패에 빠지며 라커룸 분위기가 무거워졌습니다. 팀의 핵심 선수로서 어떤 대응을 택할까요?',
+      category: 'MID_SEASON_CROSSROADS',
+      choices: [
+        {
+          label: '선수단 미팅 소집 · 수비 기강 다잡기',
+          description: '수비 로테이션 문제를 정면으로 짚으며 팀의 각성을 이끌어냅니다.',
+          riskTier: 'HIGH_RISK',
+          effectSummary: '성공 시 DEF +2, REB +1, 신뢰도 +9 · 실패 시 신뢰도 -5',
+          successCheck: {
+            statKey: 'ply',
+            difficulty: 0,
+            baseProb: 0.68,
+            label: '경기 조율(PLY) 리더십 판정',
+          },
+          successOutcome: {
+            narrative: '직언에 동료들이 하나로 뭉치며 후반기 수비력이 크게 반등했습니다.',
+            statChanges: { def: 2, reb: 1 },
+            trustDelta: 9,
+            draftStockDelta: 4,
+          },
+          failureOutcome: {
+            narrative: '거친 표현에 일부 동료들이 반발하며 분위기가 잠시 서먹해졌습니다.',
+            statChanges: {},
+            trustDelta: -5,
+          },
+          statChanges: { def: 1 },
+        },
+        {
+          label: '궂은일과 리바운드 경합으로 솔선수범',
+          description: '말보다 허슬 플레이로 팀 에너지를 끌어올립니다.',
+          riskTier: 'SAFE',
+          effectSummary: '안정 확정 · REB +1, PHY +1 · 감독 신뢰도 +7',
+          statChanges: { reb: 1, phy: 1 },
+          trustDelta: 7,
+        },
+      ],
+    };
+  }
+
+  // 시나리오 5: 시즌 중반 상대 집중 견제 & 슈팅 밸런스 조정
   return {
     id: `EVT_MID_TACTICAL_ADJUST_${career.seasonYear}`,
-    title: '🏀 [시즌 중반 분기점] 상대 수비의 집중 견제와 전술 해법',
-    subtitle: '정규시즌 반환점(50%) · 후반기 퍼포먼스를 좌우할 훈련 선택',
+    title: '상대 수비 집중 견제와 전술 해법',
+    subtitle: '정규시즌 반환점 · 후반기 돌파구 선택',
     description:
-      '시즌 중반에 접어들자 상대 팀들이 스카우팅 리포트를 바탕으로 집요한 더블팀과 함정 수비를 펼치고 있어요. 후반기 돌파구를 어떻게 마련할까요?',
+      '시즌 중반에 접어들며 상대 팀들이 집요한 더블팀과 함정 수비를 펼치고 있습니다.',
     category: 'MID_SEASON_CROSSROADS',
     choices: [
       {
-        label: '🎯 릴리스 속도를 높이는 야간 슈팅 & 볼핸들링 특훈',
-        description: '수비가 붙기 전에 한 박자 빠르게 올라가는 풀업 점퍼와 패스 타이밍을 연마해요.',
-        effectSummary: 'OUT +2, PLY +1 · 스카우트 주가 +5',
+        label: '퀵릴리스 야간 슈팅 · 풀업 3점 특훈',
+        description: '수비가 붙기 전에 한 박자 빠르게 올라가는 릴리스로 돌파구를 찾습니다.',
+        riskTier: 'HIGH_RISK',
+        effectSummary: '성공 시 OUT +3, PLY +1, 주가 +7 · 실패 시 PHY -1, 신뢰도 -4',
+        successCheck: {
+          statKey: 'out',
+          difficulty: 2,
+          baseProb: 0.64,
+          label: '외곽 슈팅(OUT) 기반 특훈 판정',
+        },
+        successOutcome: {
+          narrative: '야간 특훈으로 더블팀 위에서도 흔들리지 않는 퀵릴리스를 완성했습니다.',
+          statChanges: { out: 3, ply: 1 },
+          trustDelta: 5,
+          draftStockDelta: 7,
+        },
+        failureOutcome: {
+          narrative: '과도한 야간 슈팅 훈련으로 피로가 누적되어 슛 밸런스가 흔들렸습니다.',
+          statChanges: { phy: -1 },
+          trustDelta: -4,
+        },
         statChanges: { out: 2, ply: 1 },
         draftStockDelta: 5,
       },
       {
-        label: '💪 웨이트와 압박 수비 에너지로 공수 밸런스 재정비',
-        description: '강한 체력과 대인 방어로 상대 에이스를 먼저 지치게 만들어요.',
-        effectSummary: 'DEF +1, REB +1, PHY +1 · 감독 신뢰도 +7',
+        label: '웨이트와 압박 수비로 공수 밸런스 재정비',
+        description: '체력과 대인 방어로 상대 에이스를 먼저 지치게 만듭니다.',
+        riskTier: 'SAFE',
+        effectSummary: '안정 확정 · DEF +1, REB +1, PHY +1 · 감독 신뢰도 +7',
         statChanges: { def: 1, reb: 1, phy: 1 },
         trustDelta: 7,
       },
@@ -543,26 +708,26 @@ export function createVeteranReinventionEvent(
 ): CareerEvent {
   return {
     id: 'EVT_VETERAN_REINVENTION',
-    title: '🧬 [베테랑의 진화] 점프력 대신 농구 IQ로! 플레이 스타일 변신 제안',
+    title: '베테랑 플레이 스타일 진화 제안',
     subtitle: `만 ${career.age}세 베테랑 전환기 · 코칭스태프 전술 미팅 (커리어 1회)`,
-    description: `어느덧 만 ${career.age}세에 접어들며 젊은 시절 같은 폭발적인 탄력과 스피드(PHY)를 매 경기 쏟아붓기 쉽지 않아졌어요. 감독님이 조용히 다가와 "이제 무리한 림 어택 대신, 노련한 패스 시야(PLY)와 코너 3점슛(OUT)으로 코트를 지휘하는 베테랑 포인트 포워드·3&D 멘토로 플레이 스타일을 진화시켜 보는 게 어떻겠나?"라고 제안했어요.`,
+    description: `만 ${career.age}세에 접어들며 폭발적인 탄력 유지가 쉽지 않아졌습니다. 감독이 패스 시야(PLY)와 코너 3점슛(OUT) 중심의 베테랑 스타일 전환을 제안했습니다.`,
     category: 'VETERAN_LEGACY',
     choices: [
       {
-        label: '🧠 패스 시야와 코너 3점슛으로 팀을 이끄는 베테랑 도사로 변신!',
+        label: '패스 시야와 외곽슛 중심의 베테랑 스타일로 전환',
         description:
-          '운동능력(PHY) 저하를 자연스럽게 받아들이는 대신, 정교한 외곽슛과 패스 지능을 극대화해 30대 후반까지 우승 반지를 노려요!',
+          '운동능력(PHY) 저하를 받아들이고 슈팅과 패스 지능을 끌어올려 30대 후반까지 경쟁력을 유지합니다.',
         effectSummary:
-          '✨ 플레이 스타일 진화 완료 · PLY +3, OUT +3, DEF +1 (PHY -2) · 향후 에이징 커브 시 슛/패스 하락 영구 방어!',
+          'PLY +3, OUT +3, DEF +1 (PHY -2) · 향후 에이징 시 슛/패스 하락 완화',
         statChanges: { ply: 3, out: 3, def: 1, phy: -2 },
         trustDelta: 9,
         triggerVeteranReinvention: true,
       },
       {
-        label: '🔥 내 원래의 폭발적인 돌파와 인사이드 승부 스타일을 끝까지 고수한다',
+        label: '기존 돌파와 인사이드 스타일 고수',
         description:
-          '스타일을 바꾸기보다 웨이트 트레이닝으로 버티며 기존 에이스 플레이를 유지해요.',
-        effectSummary: 'INS +2, PHY +1 · 감독 신뢰도 +3 · 기존 플레이 스타일 유지',
+          '웨이트 트레이닝으로 버티며 기존 에이스 플레이를 유지합니다.',
+        effectSummary: 'INS +2, PHY +1 · 감독 신뢰도 +3 · 기존 스타일 유지',
         statChanges: { ins: 2, phy: 1 },
         trustDelta: 3,
       },
@@ -572,7 +737,8 @@ export function createVeteranReinventionEvent(
 
 export function rollSeasonEvent(
   career: CareerState,
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  completedSeasonYear?: number
 ): CareerEvent | null {
   // 0) 만 27세 병역 미필자 상무 입대 이벤트 (최우선 발동)
   if (
@@ -607,7 +773,8 @@ export function rollSeasonEvent(
   }
 
   // 4) 아시안게임 국가대표 차출 이벤트: 실제 4년 주기(2026, 2030, 2034, 2038...)에만 발동 & 미필 상태 & OVR >= 65 & 20~26세
-  const isAsianGamesYear = career.seasonYear % 4 === 2;
+  const targetYear = completedSeasonYear ?? career.seasonYear;
+  const isAsianGamesYear = targetYear % 4 === 2;
   if (
     isAsianGamesYear &&
     !career.militaryExempt &&

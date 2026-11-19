@@ -45,7 +45,7 @@ export function TeamEmblem({ team, size = 'md', className = '' }: TeamEmblemProp
 
   return (
     <div
-      className={`${sizeClasses} ${className} relative flex items-center justify-center rounded-xl bg-white border border-slate-200 p-1.5 shadow-2xs shrink-0 overflow-hidden select-none`}
+      className={`${sizeClasses} ${className} relative flex items-center justify-center rounded-full bg-[var(--t-g100)] p-1 shrink-0 overflow-hidden select-none`}
       title={team.name}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}

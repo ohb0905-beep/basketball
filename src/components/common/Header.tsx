@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { Award, Home, RotateCcw, Trophy } from 'lucide-react';
+import { BookOpen, Moon, RotateCcw, Sun } from 'lucide-react';
 import { generateLeagueFallbackSvgDataUri } from '../../data/logoFallbacks';
 import {
   ALL_TEAMS,
@@ -10,24 +10,31 @@ import {
   NBA_TEAMS,
   NCAA_TEAMS,
 } from '../../data/teams';
+import { useTheme } from '../../hooks/useTheme';
 import { useCareerStore } from '../../store/useCareerStore';
 
 interface HeaderProps {
   onRequestResetModal?: () => void;
+  onRequestSaveGuideModal?: () => void;
+  wide?: boolean;
 }
 
 const CLIENT_LOGO_CACHE_KEY = 'bench_to_mvp_logo_cache_v2';
-const CLIENT_LOGO_CACHE_TTL = 60 * 60 * 1000; // 1시간
+const CLIENT_LOGO_CACHE_TTL = 60 * 60 * 1000;
 
-export function Header({ onRequestResetModal }: HeaderProps = {}) {
+export function Header({
+  onRequestResetModal,
+  onRequestSaveGuideModal,
+  wide = false,
+}: HeaderProps = {}) {
   const {
     view,
     career,
-    hofList,
     setView,
     resetActiveCareer,
     setEspnLogos,
   } = useCareerStore();
+  const { theme, mounted, toggleTheme } = useTheme();
 
   useEffect(() => {
     const baseLogos: Record<string, string> = {};
@@ -111,69 +118,75 @@ export function Header({ onRequestResetModal }: HeaderProps = {}) {
               JSON.stringify({ timestamp: Date.now(), logos: merged })
             );
           } catch {
-            // 스토리지 용량 초과 시 무시
+            // ignore storage quota errors
           }
         }
       })
       .catch(() => {
-        // 네트워크 차단 시 사전 생성된 공식 URL 및 리그별 SVG 이니셜 폴백 유지
+        // fallback already loaded
       });
   }, [setEspnLogos]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-md">
-      <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between gap-2">
+    <header className="sticky top-0 z-40 bg-[var(--t-bg)]/90 backdrop-blur-md">
+      <div
+        className={`mx-auto px-4 h-[52px] flex items-center justify-between gap-2 transition-[max-width] duration-200 ${
+          wide ? 'max-w-[760px]' : 'max-w-[560px]'
+        }`}
+      >
         <button
+          type="button"
           onClick={() => setView('HOME')}
-          className="flex items-center gap-2 text-left group cursor-pointer"
+          className="min-h-[44px] flex items-center gap-2 text-left cursor-pointer min-w-0 t-tap"
         >
-          <div className="w-8 h-8 rounded-xl bg-orange-600 flex items-center justify-center shadow-2xs group-hover:bg-orange-700 transition-colors">
-            <Trophy className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-black tracking-tight text-sm sm:text-base text-slate-900">
-                벤치에서 MVP까지
-              </span>
-              <span className="text-[10px] font-extrabold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-md">
-                PRO
-              </span>
-            </div>
-          </div>
+          <span className="w-2.5 h-2.5 rounded-full bg-[var(--t-accent)] shrink-0" />
+          <span className="font-bold tracking-[-0.03em] text-[17px] text-[var(--t-g900)] whitespace-nowrap truncate">
+            벤치에서 MVP까지
+          </span>
         </button>
 
-        <div className="flex items-center gap-1.5">
-          {hofList.length > 0 && (
-            <button
-              onClick={() => setView('HOME')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-amber-800 transition-colors cursor-pointer"
-            >
-              <Award className="w-3.5 h-3.5 text-amber-600" />
-              <span>전당 ({hofList.length})</span>
-            </button>
-          )}
-
+        <div className="flex items-center gap-1 shrink-0">
           {career && view !== 'DASHBOARD' && !career.retirementReason && (
             <button
+              type="button"
               onClick={() => setView('DASHBOARD')}
-              className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition-colors cursor-pointer"
+              className="min-h-[36px] px-3 rounded-xl bg-[var(--t-accent-soft)] text-[var(--t-accent-ink)] text-[13px] font-semibold whitespace-nowrap cursor-pointer t-tap"
             >
-              복귀 ({career.name})
+              이어하기
             </button>
           )}
 
-          {view !== 'HOME' && (
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
+            aria-label={theme === 'dark' ? '라이트 모드 전환' : '다크 모드 전환'}
+            title={theme === 'dark' ? '라이트 모드' : '다크 모드'}
+          >
+            {mounted && theme === 'dark' ? (
+              <Sun className="w-[18px] h-[18px]" />
+            ) : (
+              <Moon className="w-[18px] h-[18px]" />
+            )}
+          </button>
+
+          {onRequestSaveGuideModal && (
             <button
-              onClick={() => setView('HOME')}
-              className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 transition-colors cursor-pointer"
-              title="홈 화면"
+              type="button"
+              data-testid="open-save-guide-btn"
+              onClick={onRequestSaveGuideModal}
+              className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
+              title="저장 및 가이드"
+              aria-label="저장 및 가이드"
             >
-              <Home className="w-4 h-4" />
+              <BookOpen className="w-[18px] h-[18px]" />
             </button>
           )}
 
           {career && (
             <button
+              type="button"
+              data-testid="header-reset-career-btn"
               onClick={() => {
                 if (onRequestResetModal) {
                   onRequestResetModal();
@@ -181,11 +194,11 @@ export function Header({ onRequestResetModal }: HeaderProps = {}) {
                   resetActiveCareer();
                 }
               }}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-xs font-semibold text-slate-700 hover:text-rose-700 transition-colors cursor-pointer"
-              title="새 선수 키우기"
+              className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:text-[var(--t-up)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
+              title="새 커리어"
+              aria-label="새 커리어"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">새 커리어</span>
+              <RotateCcw className="w-[18px] h-[18px]" />
             </button>
           )}
         </div>

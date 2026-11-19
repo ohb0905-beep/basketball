@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { ArrowLeft, Check, Ruler, ShieldCheck, Sparkles } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { ArrowLeft, Search } from 'lucide-react';
 import {
   getHeightModifiers,
   POSITION_ARCHETYPES,
@@ -16,6 +16,7 @@ import {
 } from '../../engine/statCalculator';
 import { useCareerStore } from '../../store/useCareerStore';
 import { BiomechanicalProfile, Position } from '../../types/game';
+import { SelectionCheckCircle } from '../common/Modal';
 import { TeamEmblem } from '../common/TeamEmblem';
 
 const POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
@@ -26,91 +27,115 @@ export function getScoutingBalanceBadges(bio: BiomechanicalProfile): {
   agilityBadge: string;
 } {
   let overallBadge = {
-    text: '✅ 이상적인 신체 밸런스 (포지션 최적화)',
-    toneClass: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+    text: '포지션 최적 밸런스',
+    toneClass: 'text-[var(--t-ok)]',
   };
   if (bio.positionalPhysicsStrain >= 0.42) {
     overallBadge = {
-      text: '⚠️ 포지션 대비 신체 부하 높음 - 턴오버·체력 소모 증가',
-      toneClass: 'bg-rose-50 border-rose-200 text-rose-700',
+      text: '신체 부하 높음 · 체력 소모 증가',
+      toneClass: 'text-[var(--t-up)]',
     };
   } else if (bio.positionalPhysicsStrain >= 0.2) {
     overallBadge = {
-      text: '⚡ 개성 있는 체격 조건 - 높이·스피드 장단점 공존',
-      toneClass: 'bg-amber-50 border-amber-200 text-amber-700',
+      text: '특수 체격 · 장단점 뚜렷',
+      toneClass: 'text-[var(--t-gold)]',
     };
   }
 
   const reachBadge =
     bio.reachLeverage >= 1.1
-      ? '🦅 압도적 타점 & 림 장악력 우위'
+      ? '높은 타점 · 림 장악 우위'
       : bio.reachLeverage >= 0.85
-      ? '⚖️ 안정적인 슛 타점 & 리바운드 경합'
-      : '💨 낮은 타점 - 빠른 외곽 돌파·슈팅 승부 권장';
+      ? '안정적 타점 · 리바운드 균형'
+      : '낮은 타점 · 외곽 돌파 유리';
 
   const agilityBadge =
     bio.centerOfGravityAgility >= 1.05
-      ? '⚡ 최상급 민첩성 & 볼 키핑 안정성'
+      ? '최상급 민첩성 · 안정적 핸들링'
       : bio.centerOfGravityAgility >= 0.85
-      ? '🏃 준수한 방향 전환 & 코트 기동력'
-      : '⚠️ 높은 무게중심 - 드리블 시 스틸·하체 피로 주의';
+      ? '준수한 기동력 · 방향 전환'
+      : '높은 무게중심 · 드리블 주의';
 
   return { overallBadge, reachBadge, agilityBadge };
-}
-
-function getElasticityBadgeText(elasticity: number): {
-  text: string;
-  className: string;
-} {
-  if (elasticity >= 0.95) {
-    return {
-      text: '🚀 성장 효율 최상',
-      className: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-    };
-  }
-  if (elasticity >= 0.78) {
-    return {
-      text: '✅ 표준 성장 효율',
-      className: 'text-slate-600 bg-slate-100 border-slate-200',
-    };
-  }
-  return {
-    text: '⚠️ 체격 한계 근접',
-    className: 'text-amber-700 bg-amber-50 border-amber-200',
-  };
 }
 
 export function PlayerCreator() {
   const startNewCareer = useCareerStore((s) => s.startNewCareer);
   const setView = useCareerStore((s) => s.setView);
 
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [name, setName] = useState('');
   const [jerseyNumber, setJerseyNumber] = useState('');
   const [primaryPos, setPrimaryPos] = useState<Position>('PG');
   const [heightCm, setHeightCm] = useState<number>(186);
-  const [highSchoolTeamId, setHighSchoolTeamId] = useState<string>(HIGH_SCHOOL_TEAMS[0].id);
+  const [highSchoolTeamId, setHighSchoolTeamId] = useState<string>(
+    HIGH_SCHOOL_TEAMS[0].id
+  );
+  const [schoolQuery, setSchoolQuery] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const currentArch = POSITION_ARCHETYPES[primaryPos];
   const heightRange = POSITION_HEIGHT_RANGES[primaryPos];
-  const { baselineStats, minOvr, maxOvr } = getPreviewStatsAndOvrRange(primaryPos, heightCm);
+  const { baselineStats, minOvr, maxOvr } = getPreviewStatsAndOvrRange(
+    primaryPos,
+    heightCm
+  );
   const heightMod = getHeightModifiers(heightCm);
   const bioProfile = calculateBiomechanicalProfile(heightCm, primaryPos);
-  const elasticityMap = getBiomechanicalGrowthElasticity(heightCm, primaryPos, baselineStats);
-  const { overallBadge, reachBadge, agilityBadge } = getScoutingBalanceBadges(bioProfile);
+  const elasticityMap = getBiomechanicalGrowthElasticity(
+    heightCm,
+    primaryPos,
+    baselineStats
+  );
+  const { overallBadge, reachBadge, agilityBadge } =
+    getScoutingBalanceBadges(bioProfile);
+
+  const filteredSchools = useMemo(() => {
+    const q = schoolQuery.trim().toLowerCase();
+    if (!q) return HIGH_SCHOOL_TEAMS;
+    return HIGH_SCHOOL_TEAMS.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) || t.city.toLowerCase().includes(q)
+    );
+  }, [schoolQuery]);
 
   const handlePosChange = (pos: Position) => {
     setPrimaryPos(pos);
     setHeightCm(POSITION_ARCHETYPES[pos].defaultHeightCm);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setErrorMsg('선수 이름을 입력해 주세요!');
+  const handleBack = () => {
+    if (step === 1) {
+      setView('HOME');
+    } else {
+      setStep((s) => (s === 3 ? 2 : 1));
+    }
+  };
+
+  const handleNextOrSubmit = () => {
+    if (step === 1) {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        setErrorMsg('이름을 입력해 주세요');
+        return;
+      }
+      setErrorMsg(null);
+      setStep(2);
       return;
     }
+
+    if (step === 2) {
+      setStep(3);
+      return;
+    }
+
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setStep(1);
+      setErrorMsg('이름을 입력해 주세요');
+      return;
+    }
+
     startNewCareer({
       name: trimmed,
       jerseyNumber: jerseyNumber.trim(),
@@ -120,88 +145,129 @@ export function PlayerCreator() {
     });
   };
 
+  const selectedSchool =
+    HIGH_SCHOOL_TEAMS.find((t) => t.id === highSchoolTeamId) ||
+    HIGH_SCHOOL_TEAMS[0];
+
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-5 text-slate-900">
+    <div className="max-w-[560px] mx-auto px-4 pt-2 pb-28 space-y-4">
+      {/* 상단 스텝 내비게이션 */}
       <div className="flex items-center justify-between">
         <button
           type="button"
-          onClick={() => setView('HOME')}
-          className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+          onClick={handleBack}
+          className="min-h-[40px] -ml-2 px-2 inline-flex items-center gap-1 text-[14px] font-semibold text-[var(--t-g600)] hover:text-[var(--t-g900)] cursor-pointer t-tap"
         >
           <ArrowLeft className="w-4 h-4" />
-          메인 코트로 돌아가기
+          <span>{step === 1 ? '홈' : '이전'}</span>
         </button>
-        <span className="text-xs font-extrabold text-orange-600">
-          만 17세 고교 신입생 등록
+
+        <div className="flex items-center gap-1.5" aria-label={`3단계 중 ${step}단계`}>
+          {[1, 2, 3].map((n) => (
+            <span
+              key={n}
+              className={`h-1.5 rounded-full transition-all duration-200 ${
+                n === step
+                  ? 'w-6 bg-[var(--t-accent)]'
+                  : n < step
+                  ? 'w-2 bg-[var(--t-accent)]/40'
+                  : 'w-2 bg-[var(--t-g200)]'
+              }`}
+            />
+          ))}
+        </div>
+
+        <span className="text-[13px] font-semibold text-[var(--t-g500)] tabular-nums">
+          {step} / 3
         </span>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {/* 1. 기본 프로필 & 신체 조건 설정 카드 */}
-        <section className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-5">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900">
-              새로운 유망주 프로필 등록
+      {/* STEP 1: 기본 프로필 */}
+      {step === 1 && (
+        <section className="t-card space-y-6">
+          <div className="space-y-1">
+            <h1 className="text-[24px] font-bold tracking-[-0.03em] text-[var(--t-g900)] leading-snug">
+              선수 이름을 정해주세요
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              포지션과 신장, 그리고 타고난 성장 DNA가 어우러져 나만의 선수로 탄생해요.
+            <p className="text-[14px] text-[var(--t-g600)]">
+              만 17세 고교 신입생으로 시작합니다
             </p>
           </div>
 
-          {/* 이름 및 등번호 */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div className="sm:col-span-2">
+          <div className="space-y-4">
+            <div className="space-y-1.5">
               <label
                 htmlFor="player-name-input"
-                className="block text-xs font-bold text-slate-700 mb-1.5"
+                className="block text-[13px] font-semibold text-[var(--t-g600)]"
               >
-                선수 이름
+                이름
               </label>
               <input
                 id="player-name-input"
                 type="text"
                 maxLength={16}
+                autoFocus
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
                   if (errorMsg) setErrorMsg(null);
                 }}
-                placeholder="선수 이름 입력"
-                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 font-bold text-sm focus:outline-none focus:bg-white focus:border-orange-500"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleNextOrSubmit();
+                  }
+                }}
+                placeholder="예: 강백호"
+                className="w-full h-[54px] px-4 rounded-2xl bg-[var(--t-g100)] text-[17px] font-bold text-[var(--t-g900)] placeholder:text-[var(--t-g400)] focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)]"
               />
               {errorMsg && (
-                <p className="text-xs font-bold text-rose-600 mt-1">{errorMsg}</p>
+                <p className="text-[13px] font-semibold text-[var(--t-up)]">
+                  {errorMsg}
+                </p>
               )}
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <label
                 htmlFor="jersey-number-input"
-                className="block text-xs font-bold text-slate-700 mb-1.5"
+                className="block text-[13px] font-semibold text-[var(--t-g600)]"
               >
-                등번호 (미입력 시 랜덤)
+                등번호 <span className="text-[var(--t-g400)] font-normal">(비워두면 자동 배정)</span>
               </label>
               <input
                 id="jersey-number-input"
                 type="text"
+                inputMode="numeric"
                 maxLength={2}
                 value={jerseyNumber}
                 onChange={(e) => {
                   const digits = e.target.value.replace(/[^0-9]/g, '');
                   setJerseyNumber(digits);
                 }}
-                placeholder="00 ~ 99"
-                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 font-bold text-sm tabular-nums focus:outline-none focus:bg-white focus:border-orange-500"
+                placeholder="0 ~ 99"
+                className="w-full h-[54px] px-4 rounded-2xl bg-[var(--t-g100)] text-[17px] font-bold text-[var(--t-g900)] placeholder:text-[var(--t-g400)] tabular-nums focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)]"
               />
             </div>
           </div>
+        </section>
+      )}
 
-          {/* 주포지션 선택 */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-2">
-              주포지션 선택 (5대 포지션)
-            </label>
-            <div className="grid grid-cols-5 gap-2">
+      {/* STEP 2: 포지션 & 체격 */}
+      {step === 2 && (
+        <div className="space-y-3">
+          <section className="t-card space-y-5">
+            <div className="space-y-1">
+              <h1 className="text-[22px] font-bold tracking-[-0.03em] text-[var(--t-g900)]">
+                포지션과 신장을 선택하세요
+              </h1>
+              <p className="text-[13px] text-[var(--t-g600)]">
+                {currentArch.title} · 권장 {heightRange.optimalMin}~{heightRange.optimalMax}cm
+              </p>
+            </div>
+
+            {/* 5포지션 세그먼트 */}
+            <div className="grid grid-cols-5 gap-1.5 p-1 rounded-2xl bg-[var(--t-g100)]">
               {POSITIONS.map((pos) => {
                 const isSelected = primaryPos === pos;
                 return (
@@ -209,212 +275,201 @@ export function PlayerCreator() {
                     key={pos}
                     type="button"
                     onClick={() => handlePosChange(pos)}
-                    className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
+                    className={`min-h-[48px] rounded-xl text-center transition cursor-pointer t-tap ${
                       isSelected
-                        ? 'border-orange-500 bg-orange-50 text-orange-700 font-black ring-1 ring-orange-500'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'
+                        ? 'bg-[var(--t-card)] text-[var(--t-accent)] font-bold shadow-2xs'
+                        : 'text-[var(--t-g600)] font-semibold'
                     }`}
                   >
-                    <span className="block text-sm sm:text-base font-black">{pos}</span>
-                    <span className="block text-[10px] text-slate-500 mt-0.5 truncate">
+                    <span className="block text-[14px]">{pos}</span>
+                    <span className="block text-[10px] text-[var(--t-g500)] truncate px-0.5">
                       {POSITION_LABELS[pos].split(' ')[0]}
                     </span>
                   </button>
                 );
               })}
             </div>
-          </div>
 
-          {/* 신장 슬라이더 & 한국어 스카우팅 등급 뱃지 */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-            <div className="flex items-center justify-between">
-              <label
-                htmlFor="height-slider"
-                className="text-xs font-bold text-slate-700 flex items-center gap-1.5"
-              >
-                <Ruler className="w-4 h-4 text-orange-600" />
-                선수 신장 설정
-              </label>
-              <span className="text-base sm:text-lg font-black text-orange-600 tabular-nums">
-                {heightCm}cm · {heightMod.label}
-              </span>
-            </div>
-
-            <input
-              id="height-slider"
-              type="range"
-              min={168}
-              max={222}
-              value={heightCm}
-              onChange={(e) => setHeightCm(Number(e.target.value))}
-              className="w-full accent-orange-600 cursor-pointer"
-            />
-
-            <div className="flex justify-between text-[11px] text-slate-500 tabular-nums">
-              <span>168cm (초단신 가드)</span>
-              <span>
-                {primaryPos} 권장 체격: {heightRange.optimalMin}~{heightRange.optimalMax}cm
-              </span>
-              <span>222cm (타워 빅맨)</span>
-            </div>
-
-            {/* 직관적인 한국어 스카우팅 리포트 등급 뱃지 */}
-            <div className="pt-2 border-t border-slate-200 space-y-2">
-              <div
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-extrabold ${overallBadge.toneClass}`}
-              >
-                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                <span>{overallBadge.text}</span>
+            {/* 신장 슬라이더 */}
+            <div className="space-y-3 pt-1">
+              <div className="flex items-baseline justify-between">
+                <label
+                  htmlFor="height-slider"
+                  className="text-[14px] font-semibold text-[var(--t-g600)]"
+                >
+                  신장
+                </label>
+                <div className="text-right tabular-nums">
+                  <span className="text-[26px] font-bold text-[var(--t-g900)]">
+                    {heightCm}
+                  </span>
+                  <span className="text-[14px] font-semibold text-[var(--t-g500)] ml-0.5">
+                    cm
+                  </span>
+                  <span className="text-[12px] font-semibold text-[var(--t-accent-ink)] ml-2">
+                    {heightMod.label}
+                  </span>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                <div className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-bold text-slate-700">
-                  {reachBadge}
+              <input
+                id="height-slider"
+                type="range"
+                min={168}
+                max={222}
+                value={heightCm}
+                onChange={(e) => setHeightCm(Number(e.target.value))}
+                className="t-range"
+              />
+
+              <div className="flex justify-between text-[11px] text-[var(--t-g400)] tabular-nums">
+                <span>168cm</span>
+                <span className={overallBadge.toneClass}>{overallBadge.text}</span>
+                <span>222cm</span>
+              </div>
+
+              <div className="pt-3 border-t border-[var(--t-g100)] divide-y divide-[var(--t-g100)] text-[13px]">
+                <div className="py-2 flex items-center justify-between gap-2">
+                  <span className="text-[var(--t-g500)]">타점 · 보드</span>
+                  <span className="font-semibold text-[var(--t-g800)]">{reachBadge}</span>
                 </div>
-                <div className="px-3 py-2 rounded-xl bg-white border border-slate-200 font-bold text-slate-700">
-                  {agilityBadge}
+                <div className="py-2 flex items-center justify-between gap-2">
+                  <span className="text-[var(--t-g500)]">기동 · 핸들링</span>
+                  <span className="font-semibold text-[var(--t-g800)]">{agilityBadge}</span>
                 </div>
               </div>
             </div>
+          </section>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              {heightMod.physicsDesc}
-            </p>
-          </div>
-        </section>
-
-        {/* 2. 스카우트 초기 예상 리포트 카드 */}
-        <section className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3.5">
-            <div>
-              <span className="text-xs font-extrabold text-orange-600">
-                스카우트 초기 예상 리포트
+          {/* 예상 초기 능력치 슬림 바 */}
+          <section className="t-card space-y-4">
+            <div className="flex items-baseline justify-between">
+              <span className="text-[15px] font-bold text-[var(--t-g900)]">
+                예상 초기 능력치
               </span>
-              <h2 className="text-lg font-black text-slate-900 mt-0.5">
-                #{jerseyNumber || '?'} {name || '신입 유망주'} ({primaryPos})
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">{currentArch.title}</p>
-            </div>
-            <div className="text-right">
-              <span className="block text-[11px] text-slate-500 font-bold">예상 초기 OVR</span>
               <span
                 data-testid="expected-ovr-range"
-                className="text-2xl font-black text-orange-600 tabular-nums"
+                className="text-[17px] font-bold text-[var(--t-accent)] tabular-nums"
               >
-                {minOvr} ~ {maxOvr}
+                OVR {minOvr} ~ {maxOvr}
               </span>
             </div>
-          </div>
 
-          <p className="text-xs text-slate-600 leading-relaxed">{currentArch.description}</p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {(
-              [
-                { key: 'ins', label: '인사이드 득점 (INS)', val: baselineStats.ins },
-                { key: 'out', label: '아웃사이드 슈팅 (OUT)', val: baselineStats.out },
-                { key: 'ply', label: '플레이메이킹 (PLY)', val: baselineStats.ply },
-                { key: 'def', label: '수비력 (DEF)', val: baselineStats.def },
-                { key: 'reb', label: '리바운드 & 보드 (REB)', val: baselineStats.reb },
-                { key: 'phy', label: '피지컬 & 내구도 (PHY)', val: baselineStats.phy },
-              ] as const
-            ).map((item) => {
-              const badge = getElasticityBadgeText(elasticityMap[item.key] ?? 1);
-              return (
-                <div
-                  key={item.key}
-                  className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5"
-                >
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-800">{item.label}</span>
-                    <span className="font-black text-orange-600 tabular-nums">
-                      기준 {item.val}
+            <div className="space-y-2.5">
+              {(
+                [
+                  { key: 'ins', label: '골밑', val: baselineStats.ins },
+                  { key: 'out', label: '외곽', val: baselineStats.out },
+                  { key: 'ply', label: '패스', val: baselineStats.ply },
+                  { key: 'def', label: '수비', val: baselineStats.def },
+                  { key: 'reb', label: '리바운드', val: baselineStats.reb },
+                  { key: 'phy', label: '피지컬', val: baselineStats.phy },
+                ] as const
+              ).map((item) => {
+                const elasticity = elasticityMap[item.key] ?? 1;
+                const isNearCap = elasticity < 0.78;
+                return (
+                  <div
+                    key={item.key}
+                    className="grid grid-cols-[58px_1fr_52px] items-center gap-3 text-[13px]"
+                  >
+                    <span className="font-semibold text-[var(--t-g600)]">
+                      {item.label}
                     </span>
-                  </div>
-                  <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
-                    <div
-                      style={{ width: `${item.val}%` }}
-                      className="h-full bg-orange-600 rounded-full transition-all"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between">
+                    <div className="h-[6px] rounded-full bg-[var(--t-g100)] overflow-hidden">
+                      <div
+                        style={{ width: `${item.val}%` }}
+                        className="h-full rounded-full bg-[var(--t-accent)] transition-all duration-200"
+                      />
+                    </div>
                     <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${badge.className}`}
+                      className={`text-right font-bold tabular-nums ${
+                        isNearCap ? 'text-[var(--t-gold)]' : 'text-[var(--t-g900)]'
+                      }`}
                     >
-                      {badge.text}
+                      {item.val}
                     </span>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="font-bold text-slate-700 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-orange-600" />
-              포지션 핵심 가중 능력치
-            </span>
-            <div className="flex flex-wrap items-center gap-1.5 text-slate-700">
-              {currentArch.keyStats.map((st, idx) => (
-                <React.Fragment key={st}>
-                  {idx > 0 && <span aria-hidden="true">·</span>}
-                  <span className="font-extrabold text-orange-600 uppercase">
-                    {st} 집중 가중
-                  </span>
-                </React.Fragment>
-              ))}
+                );
+              })}
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
+      )}
 
-        {/* 3. 입학 고교 선택 카드 */}
-        <section className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
-            <label className="block text-sm font-extrabold text-slate-900">
-              입학할 한국 고교농구 명문교 선택 ({HIGH_SCHOOL_TEAMS.length}개교)
-            </label>
-            <span className="text-[11px] text-slate-500">원하는 학교를 선택해 주세요</span>
+      {/* STEP 3: 입학 고교 선택 */}
+      {step === 3 && (
+        <section className="t-card space-y-4">
+          <div className="space-y-1">
+            <h1 className="text-[22px] font-bold tracking-[-0.03em] text-[var(--t-g900)]">
+              입학할 고교를 선택하세요
+            </h1>
+            <p className="text-[13px] text-[var(--t-g600)] tabular-nums">
+              {jerseyNumber ? `#${jerseyNumber} ` : ''}
+              {name} · {primaryPos} · {heightCm}cm
+            </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-64 overflow-y-auto pr-1">
-            {HIGH_SCHOOL_TEAMS.map((team) => {
+          <div className="relative">
+            <Search className="w-4 h-4 text-[var(--t-g400)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={schoolQuery}
+              onChange={(e) => setSchoolQuery(e.target.value)}
+              placeholder="학교명 또는 지역 검색"
+              className="w-full h-[44px] pl-10 pr-4 rounded-xl bg-[var(--t-g100)] text-[14px] text-[var(--t-g900)] placeholder:text-[var(--t-g400)] focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)]"
+            />
+          </div>
+
+          <div className="divide-y divide-[var(--t-g100)] max-h-[380px] overflow-y-auto -mx-2">
+            {filteredSchools.map((team) => {
               const selected = highSchoolTeamId === team.id;
               return (
                 <button
                   key={team.id}
                   type="button"
                   onClick={() => setHighSchoolTeamId(team.id)}
-                  className={`p-3 rounded-xl border text-left transition flex items-center gap-3 cursor-pointer ${
-                    selected
-                      ? 'border-orange-500 bg-orange-50/70 ring-1 ring-orange-500'
-                      : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                  className={`w-full min-h-[60px] px-2.5 py-2.5 rounded-2xl text-left flex items-center gap-3 cursor-pointer t-tap ${
+                    selected ? 'bg-[var(--t-accent-soft)]' : 'hover:bg-[var(--t-g50)]'
                   }`}
                 >
                   <TeamEmblem team={team} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-sm font-bold text-slate-900 truncate">
-                        {team.name}
-                      </span>
-                      {selected && <Check className="w-4 h-4 text-orange-600 shrink-0" />}
-                    </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      {team.city} · 구단 전력 {team.rating}
-                    </p>
+                    <span className="block text-[15px] font-bold text-[var(--t-g900)] truncate">
+                      {team.name}
+                    </span>
+                    <span className="block text-[12px] text-[var(--t-g500)] tabular-nums">
+                      {team.city} · 전력 {team.rating}
+                    </span>
                   </div>
+                  <SelectionCheckCircle selected={selected} />
                 </button>
               );
             })}
           </div>
-
-          <button
-            type="submit"
-            className="w-full py-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-black text-base transition shadow-sm cursor-pointer"
-          >
-            {jerseyNumber ? `#${jerseyNumber}` : '랜덤 등번호'} {name || '신입생'} 고교 농구부 입부하기
-          </button>
         </section>
-      </form>
+      )}
+
+      {/* 하단 고정 CTA 도크 */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-30 pt-4 px-4 pb-safe"
+        style={{
+          background:
+            'linear-gradient(to top, var(--t-dock-fade) 72%, transparent)',
+        }}
+      >
+        <div className="max-w-[528px] mx-auto">
+          <button
+            type="button"
+            onClick={handleNextOrSubmit}
+            className="t-cta"
+          >
+            {step < 3
+              ? '다음'
+              : `${selectedSchool.shortName} 입학하기`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

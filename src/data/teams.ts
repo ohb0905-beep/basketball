@@ -323,7 +323,7 @@ export const HIGH_SCHOOL_TEAMS: TeamInfo[] = [
 export const U_LEAGUE_TEAMS: TeamInfo[] = [
   {
     id: 'UNI_YONSEI',
-    name: '연세대학교 (독수리)',
+    name: '연세대학교',
     shortName: '연세대',
     city: '서울',
     league: 'U_LEAGUE',
@@ -331,11 +331,11 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
     primaryColor: '#003876',
     secondaryColor: '#60A5FA',
     logoUrl: '/logos/UNI_YONSEI.svg',
-    prestigeDesc: '세련된 시스템 농구와 초고교급 리크루팅을 자랑하는 대학 최고 명문이에요.',
+    prestigeDesc: '세련된 시스템 농구와 뛰어난 리크루팅을 자랑하는 대학 명문이에요.',
   },
   {
     id: 'UNI_KOREA',
-    name: '고려대학교 (호랑이)',
+    name: '고려대학교',
     shortName: '고려대',
     city: '서울',
     league: 'U_LEAGUE',
@@ -347,7 +347,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_CHUNGANG',
-    name: '중앙대학교 (청룡)',
+    name: '중앙대학교',
     shortName: '중앙대',
     city: '안성',
     league: 'U_LEAGUE',
@@ -359,7 +359,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_KYUNGHEE',
-    name: '경희대학교 (사자)',
+    name: '경희대학교',
     shortName: '경희대',
     city: '용인',
     league: 'U_LEAGUE',
@@ -371,7 +371,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_KONKUK',
-    name: '건국대학교 (황소)',
+    name: '건국대학교',
     shortName: '건국대',
     city: '충주',
     league: 'U_LEAGUE',
@@ -379,11 +379,11 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
     primaryColor: '#065F46',
     secondaryColor: '#34D399',
     logoUrl: '/logos/UNI_KONKUK.svg',
-    prestigeDesc: '황소 같은 돌파력과 외곽 양궁 농구로 플레이오프 돌풍을 일으키는 팀이에요.',
+    prestigeDesc: '저돌적인 돌파력과 외곽 화력으로 플레이오프 돌풍을 일으키는 팀이에요.',
   },
   {
     id: 'UNI_DONGGUK',
-    name: '동국대학교 (코끼리)',
+    name: '동국대학교',
     shortName: '동국대',
     city: '서울',
     league: 'U_LEAGUE',
@@ -395,7 +395,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_SKKU',
-    name: '성균관대학교 (킹고)',
+    name: '성균관대학교',
     shortName: '성균관대',
     city: '수원',
     league: 'U_LEAGUE',
@@ -407,7 +407,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_HANYANG',
-    name: '한양대학교 (사자)',
+    name: '한양대학교',
     shortName: '한양대',
     city: '서울',
     league: 'U_LEAGUE',
@@ -419,7 +419,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_DANKOOK',
-    name: '단국대학교 (곰)',
+    name: '단국대학교',
     shortName: '단국대',
     city: '천안',
     league: 'U_LEAGUE',
@@ -431,7 +431,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_MYONGJI',
-    name: '명지대학교 (백마)',
+    name: '명지대학교',
     shortName: '명지대',
     city: '용인',
     league: 'U_LEAGUE',
@@ -443,7 +443,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_SANGMYUNG',
-    name: '상명대학교 (사슴)',
+    name: '상명대학교',
     shortName: '상명대',
     city: '천안',
     league: 'U_LEAGUE',
@@ -455,7 +455,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
   },
   {
     id: 'UNI_CHOSUN',
-    name: '조선대학교 (호랑이)',
+    name: '조선대학교',
     shortName: '조선대',
     city: '광주',
     league: 'U_LEAGUE',
@@ -468,11 +468,11 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
 ];
 
 // ==========================================
-// 3. KBL 10개 프로 구단 + 국군체육부대(상무)
+// 3. KBL 10개 프로 구단 + 국군체육부대 상무
 // ==========================================
 export const SANGMU_TEAM: TeamInfo = {
   id: 'KBL_SANGMU',
-  name: '국군체육부대 (상무 농구단)',
+  name: '국군체육부대 상무',
   shortName: '상무',
   city: '문경',
   league: 'KBL',

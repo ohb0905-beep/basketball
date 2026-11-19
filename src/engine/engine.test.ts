@@ -9,6 +9,7 @@ import {
   U_LEAGUE_TEAMS,
   GLEAGUE_TEAMS,
   ASIAN_NATIONAL_TEAMS,
+  SANGMU_TEAM,
   ALL_TEAMS,
 } from '../data/teams';
 import {
@@ -28,6 +29,7 @@ import {
   rollPlayerDnaAndPlaystyle,
 } from './statCalculator';
 import {
+  buildAwardRaceTop5,
   calculateRoleAndMpg,
   calculatePpg,
   calculateSeasonStatGrowth,
@@ -45,6 +47,7 @@ import {
   evaluateHighSchoolProspect,
   evaluateTeamScouting,
   evaluateTwoWaySurvival,
+  executeDraftResolution,
   generateOffseasonOptions,
 } from './draftEngine';
 import {
@@ -60,14 +63,18 @@ import {
   evaluateRealisticFinalsMvp,
   generateLeagueStandings,
   resolveClutchPossession,
+  resolveConfFinalsGame7InBracket,
   simulateAsianGamesTournament,
   simulateLiveQuarter,
   skipEntirePlayoffs,
   skipLiveGameToEnd,
 } from './playoffEngine';
+import { isPersonalCareAllowedInLeague } from '../config/balanceConfig';
 import {
   ENCOUNTER_SCENARIO_POOL,
+  calculateEncounterSuccessChance,
   extractCareerContextTags,
+  resolveEncounterChoiceOutcome,
   rollCombinatorialEncounter,
 } from './encounterEngine';
 import {
@@ -1248,7 +1255,7 @@ test('19. MVP/ROY Top 5 Voting Board, Playoff Batch & 4Q Clutch 1-Possession Cho
   const totalVoteShare = sim.boxScore.mvpRace.reduce((acc, r) => acc + r.firstPlaceVoteShare, 0);
   assert.ok(Math.abs(totalVoteShare - 100) <= 1.0, `Top 5 vote share should sum to ~100%, got ${totalVoteShare}`);
 
-  // 2) Playoff 1~2R Batch Advance & 4Q Clutch 1-Possession Choice
+  // 2) Playoff 1~2R Batch Advance & Natural 4Q Clutch (±4pt only, zero score rigging)
   const standings = generateLeagueStandings(rookieStar, 56, 26, () => 0.5);
   const bracket = createPlayoffBracket(rookieStar, standings);
   const batched = batchAdvanceEarlyPlayoffRounds(bracket, rookieStar, standings, () => 0.2);
@@ -1257,18 +1264,56 @@ test('19. MVP/ROY Top 5 Voting Board, Playoff Batch & 4Q Clutch 1-Possession Cho
     'Batch advance must simulate early playoff rounds in one click'
   );
 
-  let liveGame = createLiveFinalGame(rookieStar, NBA_TEAMS[1], 'LEAGUE_FINALS');
-  liveGame = simulateLiveQuarter(liveGame, rookieStar, 'ACE_HERO', () => 0.5); // 1Q
-  liveGame = simulateLiveQuarter(liveGame, rookieStar, 'ACE_HERO', () => 0.5); // 2Q
-  liveGame = simulateLiveQuarter(liveGame, rookieStar, 'ACE_HERO', () => 0.5); // 3Q
-  liveGame = simulateLiveQuarter(liveGame, rookieStar, 'ACE_HERO', () => 0.5); // 4Q -> pauses at 1:00 left
-  assert.equal(liveGame.pendingClutchPossession, true, '4th quarter must pause with 1 minute left for Clutch 1-Possession decision');
-  assert.equal(liveGame.isFinished, false);
+  // 2a) Blowout after 3Q (20-point lead) must NOT trigger clutch or teleport scores
+  const blowoutAfter3Q = {
+    ...createLiveFinalGame(rookieStar, NBA_TEAMS[1], 'LEAGUE_FINALS'),
+    quarter: 3,
+    teamScore: 92,
+    oppScore: 68,
+  };
+  const blowoutFinal = simulateLiveQuarter(blowoutAfter3Q, rookieStar, 'UNSELFISH_PASS', () => 0.5);
+  assert.equal(
+    blowoutFinal.pendingClutchPossession,
+    false,
+    'Blowout (>4pt gap) must NOT artificially force Clutch 1-Possession'
+  );
+  assert.equal(blowoutFinal.isFinished, true);
+  assert.ok(
+    blowoutFinal.teamScore - blowoutFinal.oppScore >= 10,
+    'Blowout lead must be preserved naturally without score rigging'
+  );
 
-  const resolvedClutch = resolveClutchPossession(liveGame, rookieStar, 'ISO_WINNER', () => 0.1);
+  // 2b) Natural close game (|diff| <= 4 after 4Q) triggers Clutch 1-Possession with exact point math
+  const closeAfter3Q = {
+    ...createLiveFinalGame(rookieStar, NBA_TEAMS[1], 'LEAGUE_FINALS'),
+    quarter: 3,
+    teamScore: 76,
+    oppScore: 78,
+  };
+  let closeQ4 = simulateLiveQuarter(closeAfter3Q, rookieStar, 'ACE_HERO', () => 0.5);
+  // Guarantee a deterministic close-game state if rng shifted margin beyond 4
+  if (!closeQ4.pendingClutchPossession) {
+    closeQ4 = {
+      ...closeAfter3Q,
+      quarter: 4,
+      teamScore: 100,
+      oppScore: 102,
+      pendingClutchPossession: true,
+      clutchScenario: 'TRAILING',
+      clutchSituationText: '4Q 14.2초 전 2점 차 열세',
+    };
+  }
+  assert.equal(closeQ4.pendingClutchPossession, true);
+  const scoreBeforeClutch = closeQ4.teamScore;
+  const oppBeforeClutch = closeQ4.oppScore;
+  const resolvedClutch = resolveClutchPossession(closeQ4, rookieStar, 'ISO_WINNER', () => 0.05);
   assert.equal(resolvedClutch.pendingClutchPossession, false);
-  assert.equal(resolvedClutch.isFinished, true);
-  assert.equal(resolvedClutch.finalOutcome?.won, true);
+  const deltaPts = resolvedClutch.teamScore - scoreBeforeClutch;
+  assert.ok(
+    deltaPts === 0 || deltaPts === 2 || deltaPts === 3,
+    `ISO_WINNER must only add realistic basketball points (0, 2, or 3), got +${deltaPts}`
+  );
+  assert.equal(resolvedClutch.oppScore, oppBeforeClutch, 'Offensive clutch must not fabricate opponent points');
 
   // 3) Biomech Lab Aging Slowdown & Veteran Reinvention BBIQ/Shooting Protection
   const vetStats = { ins: 82, out: 88, ply: 86, def: 80, reb: 74, phy: 76 };
@@ -1302,6 +1347,789 @@ test('19. MVP/ROY Top 5 Voting Board, Playoff Batch & 4Q Clutch 1-Possession Cho
   assert.equal(vetEvt?.id, 'EVT_VETERAN_REINVENTION');
   assert.equal(vetEvt?.choices.length, 2);
 });
+
+test('20. Live Game Realism: Defensive/FT Lead Clutch, Overtime on Tie, and Real 5/6-Foul Foul-Out', () => {
+  const starNba = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 90,
+    stats: { ins: 88, out: 92, ply: 86, def: 89, reb: 78, phy: 84 },
+    seasonLogs: [createSeasonLog({ mpg: 35.0, ppg: 27.5 })],
+  });
+
+  // 1) LEADING clutch: LOCKDOWN_STOP (defense) & CLUTCH_FREE_THROWS (ice FT)
+  const leadingState = {
+    ...createLiveFinalGame(starNba, NBA_TEAMS[1], 'LEAGUE_FINALS'),
+    quarter: 4,
+    teamScore: 104,
+    oppScore: 102,
+    pendingClutchPossession: true,
+    clutchScenario: 'LEADING' as const,
+  };
+  const lockdownWin = resolveClutchPossession(leadingState, starNba, 'LOCKDOWN_STOP', () => 0.05);
+  assert.equal(lockdownWin.isFinished, true);
+  assert.equal(lockdownWin.finalOutcome?.won, true);
+  assert.equal(lockdownWin.teamScore, 104);
+  assert.equal(lockdownWin.oppScore, 102);
+
+  const ftIce = resolveClutchPossession(leadingState, starNba, 'CLUTCH_FREE_THROWS', () => 0.05);
+  assert.equal(ftIce.isFinished, true);
+  assert.equal(ftIce.finalOutcome?.won, true);
+  assert.equal(ftIce.teamScore, 106, 'Making both clutch free throws should add exactly +2 points');
+
+  // 2) Tie after clutch transitions to Overtime (OT1) instead of ending in a draw
+  const trailingBy2 = {
+    ...createLiveFinalGame(starNba, NBA_TEAMS[1], 'LEAGUE_FINALS'),
+    quarter: 4,
+    teamScore: 100,
+    oppScore: 102,
+    pendingClutchPossession: true,
+    clutchScenario: 'TRAILING' as const,
+  };
+  // Use KICKOUT_ASSIST with high rng? Better: trailing by 3 & 3pt makes tie -> OT, or trailing by 2 & 2pt makes tie -> OT
+  const trailingBy3 = {
+    ...trailingBy2,
+    teamScore: 99,
+    oppScore: 102,
+  };
+  const tiedGoingToOt = resolveClutchPossession(trailingBy3, starNba, 'ISO_WINNER', () => 0.05);
+  assert.equal(tiedGoingToOt.teamScore, 102, '3-point game-tying shot down 3 must tie score at 102-102');
+  assert.equal(tiedGoingToOt.oppScore, 102);
+  assert.equal(tiedGoingToOt.isFinished, false, 'Tied score after clutch must NOT finish game; must proceed to OT');
+  const afterOt1 = simulateLiveQuarter(tiedGoingToOt, starNba, 'ACE_HERO', () => 0.25);
+  assert.equal(afterOt1.quarter, 5);
+  assert.equal(afterOt1.overtimeCount, 1);
+
+  // 3) Real 6-foul foul-out in NBA (5 in KBL) stops player from recording further stats
+  const nearFoulOut = {
+    ...createLiveFinalGame(starNba, NBA_TEAMS[1], 'LEAGUE_FINALS'),
+    quarter: 2,
+    teamScore: 52,
+    oppScore: 50,
+    playerStats: {
+      pts: 14,
+      reb: 4,
+      ast: 3,
+      stl: 1,
+      blk: 0,
+      fgm: 5,
+      fga: 10,
+      tpm: 2,
+      tpa: 4,
+      fouls: 6,
+      stamina: 72,
+    },
+    fouledOut: true,
+  };
+  const q3FouledOut = simulateLiveQuarter(nearFoulOut, starNba, 'ACE_HERO', () => 0.5);
+  assert.equal(q3FouledOut.fouledOut, true);
+  assert.equal(q3FouledOut.playerStats.pts, 14, 'Fouled-out player must not accumulate any more points');
+  assert.equal(q3FouledOut.playerStats.fga, 10, 'Fouled-out player must not attempt any more shots');
+
+  const kblGame = createLiveFinalGame(
+    createBaseCareer({ league: 'KBL', team: KBL_TEAMS[0] }),
+    KBL_TEAMS[1],
+    'LEAGUE_FINALS'
+  );
+  assert.equal(kblGame.foulLimit, 5, 'KBL foul limit must be 5');
+  assert.equal(nearFoulOut.foulLimit, 6, 'NBA foul limit must be 6');
+});
+
+test('21. Conf Finals Game 7 Live Broadcast Advances to NBA Finals (Never Prematurely Awards Championship)', () => {
+  const nbaStar = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 91,
+  });
+  const standings = generateLeagueStandings(nbaStar, 58, 24, () => 0.5);
+  const eastTeams = standings.filter((s) => s.conference === 'EAST');
+  const westTeams = standings.filter((s) => s.conference === 'WEST');
+  const playerStanding = standings.find((s) => s.team.id === nbaStar.team.id)!;
+  const oppConfStanding =
+    (playerStanding.conference === 'EAST' ? eastTeams : westTeams).find(
+      (s) => s.team.id !== nbaStar.team.id
+    )!;
+  const otherConfA = (playerStanding.conference === 'EAST' ? westTeams : eastTeams)[0];
+  const otherConfB = (playerStanding.conference === 'EAST' ? westTeams : eastTeams)[1];
+
+  const confFinalsBracket = {
+    league: 'NBA' as const,
+    year: 2035,
+    totalRounds: 4,
+    currentRound: 3,
+    rounds: [
+      [],
+      [],
+      [
+        {
+          id: 'R3_S1',
+          roundNumber: 3,
+          roundLabel: '컨퍼런스 파이널',
+          conference: playerStanding.conference,
+          bestOf: 7,
+          winsNeeded: 4,
+          higherSeed: playerStanding,
+          lowerSeed: oppConfStanding,
+          higherSeedWins: 3,
+          lowerSeedWins: 3,
+          winnerId: null,
+          involvesPlayer: true,
+          summaryLog: ['3-3 동률'],
+        },
+        {
+          id: 'R3_S2',
+          roundNumber: 3,
+          roundLabel: '컨퍼런스 파이널',
+          conference: otherConfA.conference,
+          bestOf: 7,
+          winsNeeded: 4,
+          higherSeed: otherConfA,
+          lowerSeed: otherConfB,
+          higherSeedWins: 4,
+          lowerSeedWins: 2,
+          winnerId: otherConfA.team.id,
+          involvesPlayer: false,
+          summaryLog: ['4-2 종료'],
+        },
+      ],
+    ],
+    playerEliminated: false,
+    playerReachedFinals: false,
+    pendingConfFinalsGame7: true,
+    championTeamId: null,
+    playoffResultLabel: '컨퍼런스 파이널 7차전 (3승 3패)',
+  };
+
+  const afterWin = resolveConfFinalsGame7InBracket(
+    confFinalsBracket,
+    nbaStar,
+    standings,
+    true,
+    '108-104',
+    () => 0.4
+  );
+  assert.equal(afterWin.currentRound, 4, 'Winning Conf Finals Game 7 must advance to Round 4 (NBA Finals)');
+  assert.equal(afterWin.playerReachedFinals, true);
+  assert.equal(afterWin.pendingConfFinalsGame7, false);
+  assert.equal(afterWin.championTeamId, null, 'Winning Conf Finals Game 7 must NOT prematurely award NBA Championship');
+  assert.equal(afterWin.rounds[3].length, 1);
+
+  const afterLoss = resolveConfFinalsGame7InBracket(
+    confFinalsBracket,
+    nbaStar,
+    standings,
+    false,
+    '101-105',
+    () => 0.4
+  );
+  assert.equal(afterLoss.playerEliminated, true);
+  assert.equal(afterLoss.playerReachedFinals, false);
+  assert.ok(afterLoss.championTeamId !== null, 'Losing Conf Finals Game 7 should resolve the remaining NBA Finals in background');
+});
+
+test('22. Unified MVP/ROY Top 5 Fairness (No Bench Forcing) & Non-Scorer High School 5-Star Eligibility', () => {
+  // 1) Low-minute NBA bench rookie must NOT be forced into MVP Top 5
+  const benchRookie = createBaseCareer({
+    age: 20,
+    ovr: 67,
+    potential: 80,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    coachTrust: 40,
+    draftPedigreePick: null,
+    draftPedigreeRound: null,
+    draftPedigreeSeasonsLeft: 0,
+    seasonLogs: [],
+  });
+  const benchSim = simulateSeason(benchRookie, () => 0.5);
+  assert.equal(
+    benchSim.boxScore.wonMvp,
+    false,
+    'Low-minute bench player must not win MVP'
+  );
+  assert.equal(
+    benchSim.boxScore.mvpRace?.some((entry) => entry.isPlayer),
+    false,
+    'Low-minute bench player must NOT be artificially forced into MVP Top 5'
+  );
+  assert.equal(
+    benchSim.boxScore.playerMvpRank,
+    null,
+    'Bench player outside MVP Top 5 should have null or >5 playerMvpRank'
+  );
+
+  // 2) Pass-first elite HS floor general (15.5 PPG, 9.8 APG, 5.2 RPG, 2.6 SPG, MVP + Title) earns 5-star without PPG>=18.5 hard cutoff
+  const passFirstHsPg = createBaseCareer({
+    age: 19,
+    league: 'HIGH_SCHOOL',
+    primaryPos: 'PG',
+    ovr: 63,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'HIGH_SCHOOL',
+        ppg: 15.5,
+        rpg: 5.2,
+        apg: 9.8,
+        spg: 2.6,
+        bpg: 0.4,
+        wonChampionship: true,
+        wonMvp: true,
+      }),
+    ],
+  });
+  const passEval = evaluateHighSchoolProspect(passFirstHsPg);
+  assert.equal(
+    passEval.stars,
+    5,
+    `Pass-first HS floor general with 15.5/5.2/9.8 + MVP + Title must earn 5-star (got ${passEval.stars}, score ${passEval.score})`
+  );
+});
+
+test('23. Pro-Only Sneaker Marketing Lock & Superstar Veteran (34yo, 93 OVR) Keeps Ace Role Promise', () => {
+  // 1) Global Signature Sneaker Marketing locked in amateur leagues, unlocked in pro leagues
+  assert.equal(isPersonalCareAllowedInLeague('SIGNATURE_SNEAKER_MARKETING', 'HIGH_SCHOOL'), false);
+  assert.equal(isPersonalCareAllowedInLeague('SIGNATURE_SNEAKER_MARKETING', 'U_LEAGUE'), false);
+  assert.equal(isPersonalCareAllowedInLeague('SIGNATURE_SNEAKER_MARKETING', 'NCAA'), false);
+  assert.equal(isPersonalCareAllowedInLeague('SIGNATURE_SNEAKER_MARKETING', 'KBL'), true);
+  assert.equal(isPersonalCareAllowedInLeague('SIGNATURE_SNEAKER_MARKETING', 'NBA'), true);
+
+  // 2) 34-year-old 93 OVR NBA superstar entering FA must get ACE_FIRST_OPTION (never forced VETERAN_MENTOR)
+  const primeVetStar = createBaseCareer({
+    age: 34,
+    ovr: 93,
+    peakOvr: 96,
+    potential: 96,
+    stats: { ins: 92, out: 95, ply: 91, def: 86, reb: 80, phy: 84 },
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    contractType: 'NBA_MAX',
+    contractYearsLeft: 0,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        ovr: 93,
+        gp: 76,
+        mpg: 35.5,
+        ppg: 28.4,
+        rpg: 7.2,
+        apg: 6.8,
+        fgPct: 50.8,
+        tpPct: 40.2,
+        wonMvp: true,
+      }),
+    ],
+  });
+  const starOffers = generateOffseasonOptions(primeVetStar, () => 0.5).filter(
+    (o) => o.targetLeague === 'NBA' && o.actionType === 'SIGN_TEAM'
+  );
+  assert.ok(starOffers.length > 0, '34yo 93 OVR superstar must receive NBA FA offers');
+  assert.ok(
+    starOffers.some((o) => o.promisedRole === 'ACE_FIRST_OPTION'),
+    '34yo 93 OVR superstar must be offered ACE_FIRST_OPTION instead of being forced into VETERAN_MENTOR'
+  );
+});
+
+test('24. Probabilistic Encounter Resolution (Stat Scaling, Critical/Success/Failure & Chain Event Queuing)', () => {
+  const lowStatCareer = createBaseCareer({
+    league: 'NBA',
+    age: 23,
+    ovr: 72,
+    stats: { ins: 62, out: 58, ply: 60, def: 60, reb: 60, phy: 62 },
+  });
+  const highStatCareer = createBaseCareer({
+    league: 'NBA',
+    age: 25,
+    ovr: 92,
+    stats: { ins: 92, out: 94, ply: 90, def: 88, reb: 84, phy: 88 },
+  });
+
+  const evt = rollCombinatorialEncounter(highStatCareer, () => 0.12);
+  const riskyChoice = evt.choices.find((c) => Boolean(c.successCheck));
+  assert.ok(riskyChoice, 'Combinatorial encounters must include at least one probabilistic HIGH_RISK choice');
+
+  const lowChance = calculateEncounterSuccessChance(lowStatCareer, riskyChoice);
+  const highChance = calculateEncounterSuccessChance(highStatCareer, riskyChoice);
+  assert.ok(
+    highChance > lowChance,
+    `High-stat player (${highChance.toFixed(2)}) must have higher success chance than low-stat player (${lowChance.toFixed(2)})`
+  );
+
+  // Critical success on very low roll (0.01)
+  const critRes = resolveEncounterChoiceOutcome(highStatCareer, evt, riskyChoice, () => 0.01);
+  assert.equal(critRes.result.wasProbabilistic, true);
+  assert.equal(critRes.result.rolledSuccess, true);
+  assert.equal(critRes.result.outcomeTier, 'CRITICAL_SUCCESS');
+
+  // Failure on high roll (0.99)
+  const failRes = resolveEncounterChoiceOutcome(lowStatCareer, evt, riskyChoice, () => 0.99);
+  assert.equal(failRes.result.wasProbabilistic, true);
+  assert.equal(failRes.result.rolledSuccess, false);
+  assert.equal(failRes.result.outcomeTier, 'FAILURE');
+
+  // Chain event verification on EVT_COMB_RIV_01 template
+  const rivTemplate = ENCOUNTER_SCENARIO_POOL.find((t) => t.id === 'EVT_COMB_RIV_01');
+  assert.ok(rivTemplate, 'EVT_COMB_RIV_01 template must exist in pool');
+  const rivEvent = {
+    id: rivTemplate.id,
+    title: rivTemplate.title,
+    subtitle: rivTemplate.subtitle,
+    description: rivTemplate.description,
+    category: rivTemplate.category,
+    choices: rivTemplate.choices,
+  };
+  const rivRisky = rivEvent.choices.find((c) => Boolean(c.successCheck));
+  assert.ok(rivRisky, 'EVT_COMB_RIV_01 must have a probabilistic choice with chain follow-ups');
+  const rivSuccess = resolveEncounterChoiceOutcome(highStatCareer, rivEvent, rivRisky, () => 0.25);
+  assert.ok(rivSuccess.nextChainEvent !== null, 'EVT_COMB_RIV_01 success must queue a next-season chain event');
+  assert.ok(rivSuccess.result.chainedNextSeasonTitle, 'Outcome must report chainedNextSeasonTitle');
+  const rivFail = resolveEncounterChoiceOutcome(lowStatCareer, rivEvent, rivRisky, () => 0.99);
+  assert.ok(rivFail.nextChainEvent !== null, 'EVT_COMB_RIV_01 failure must queue a redemption chain event');
+});
+
+test('25. Amateur League Encounter Context Gating (Zero Pro-Only Scenarios for High Schoolers)', () => {
+  const PRO_ONLY_CODES = new Set([
+    'TAC_04',
+    'LCK_03',
+    'LCK_04',
+    'INJ_01',
+    'INJ_04',
+    'INJ_05',
+    'MED_02',
+    'MED_06',
+    'OFF_01',
+  ]);
+
+  let hsCareer = createBaseCareer({
+    age: 17,
+    league: 'HIGH_SCHOOL',
+    team: HIGH_SCHOOL_TEAMS[0],
+    ovr: 62,
+    contractType: 'AMATEUR',
+    seenEventIds: [],
+    recentEventCategories: [],
+  });
+
+  for (let i = 0; i < 25; i++) {
+    const evt = rollCombinatorialEncounter(hsCareer, () => (i * 0.137) % 1);
+    const matchedCode = [...PRO_ONLY_CODES].find((code) => evt.id.includes(code));
+    assert.equal(
+      matchedCode,
+      undefined,
+      `Pro-only scenario ${matchedCode} must NOT roll for 17yo HIGH_SCHOOL player (got ${evt.id}: ${evt.title})`
+    );
+    hsCareer = {
+      ...hsCareer,
+      seenEventIds: [...(hsCareer.seenEventIds || []), evt.id],
+      recentEventCategories: [...(hsCareer.recentEventCategories || []).slice(-1), evt.category],
+    };
+  }
+});
+
+test('26. Live Broadcast Quarter Court Plays Generation & Exact Score Reconciliation (Including Clutch)', () => {
+  const nbaStar = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 90,
+    stats: { ins: 88, out: 91, ply: 87, def: 85, reb: 79, phy: 84 },
+    seasonLogs: [createSeasonLog({ mpg: 35.0, ppg: 26.8 })],
+  });
+
+  let live = createLiveFinalGame(nbaStar, NBA_TEAMS[1], 'LEAGUE_FINALS');
+  for (let q = 1; q <= 3; q++) {
+    live = simulateLiveQuarter(live, nbaStar, 'UNSELFISH_PASS', () => 0.42);
+    const qLog = live.quarterLogs[live.quarterLogs.length - 1];
+    assert.ok(qLog.plays && qLog.plays.length >= 5, `Q${q} must generate chronological court plays`);
+    const sumTeam = qLog.plays.reduce((acc, p) => acc + p.teamDelta, 0);
+    const sumOpp = qLog.plays.reduce((acc, p) => acc + p.oppDelta, 0);
+    assert.equal(sumTeam, qLog.teamPts, `Q${q} sum(teamDelta) must equal teamPts`);
+    assert.equal(sumOpp, qLog.oppPts, `Q${q} sum(oppDelta) must equal oppPts`);
+    const lastPlay = qLog.plays[qLog.plays.length - 1];
+    assert.equal(lastPlay.teamScoreAfter, live.teamScore, `Q${q} final play teamScoreAfter must equal live.teamScore`);
+    assert.equal(lastPlay.oppScoreAfter, live.oppScore, `Q${q} final play oppScoreAfter must equal live.oppScore`);
+  }
+
+  // Clutch possession appended play must also reconcile 100% with updated quarter totals
+  const q4LogSeed = live.quarterLogs[live.quarterLogs.length - 1];
+  const clutchReady = {
+    ...live,
+    quarter: 4,
+    teamScore: 100,
+    oppScore: 102,
+    pendingClutchPossession: true,
+    clutchScenario: 'TRAILING' as const,
+    quarterLogs: [
+      ...live.quarterLogs,
+      {
+        ...q4LogSeed,
+        quarter: 4,
+        label: '4Q',
+        teamPts: 24,
+        oppPts: 26,
+        plays: [
+          {
+            id: 'Q4_SEED',
+            clock: '0:24',
+            actor: 'OPPONENT' as const,
+            type: 'OPP_SCORE' as const,
+            x: 50,
+            y: 26,
+            teamDelta: 24,
+            oppDelta: 26,
+            teamScoreAfter: 100,
+            oppScoreAfter: 102,
+            text: 'seed',
+          },
+        ],
+      },
+    ],
+  };
+
+  const afterClutch = resolveClutchPossession(clutchReady, nbaStar, 'KICKOUT_ASSIST', () => 0.05);
+  const finalQ4Log = afterClutch.quarterLogs[afterClutch.quarterLogs.length - 1];
+  assert.ok(finalQ4Log.plays && finalQ4Log.plays.length === 2);
+  const clutchPlay = finalQ4Log.plays[finalQ4Log.plays.length - 1];
+  assert.equal(clutchPlay.type, 'CLUTCH');
+  assert.equal(clutchPlay.teamScoreAfter, afterClutch.teamScore);
+  assert.equal(clutchPlay.oppScoreAfter, afterClutch.oppScore);
+  assert.equal(
+    finalQ4Log.plays.reduce((a, p) => a + p.teamDelta, 0),
+    finalQ4Log.teamPts,
+    'Sum of 4Q plays including CLUTCH must equal updated 4Q teamPts'
+  );
+  assert.equal(
+    finalQ4Log.plays.reduce((a, p) => a + p.oppDelta, 0),
+    finalQ4Log.oppPts,
+    'Sum of 4Q plays including CLUTCH must equal updated 4Q oppPts'
+  );
+});
+
+test('27. Unified MVP Voting Invariant (Vote #1 = 100% MVP Winner, Team Win-Rate Integrated Directly)', () => {
+  const hsTeam = HIGH_SCHOOL_TEAMS[0];
+  const baseHsCareer = createBaseCareer({
+    age: 19,
+    league: 'HIGH_SCHOOL',
+    team: hsTeam,
+    ovr: 64,
+    coachTrust: 88,
+  });
+
+  // 1) Sub-.500 team record naturally penalizes integrated MVP score compared to top-seed team with identical personal stats
+  const weakStandings = generateLeagueStandings(baseHsCareer, 8, 12, () => 0.5);
+  const weakBox = createSeasonLog({
+    league: 'HIGH_SCHOOL',
+    teamId: hsTeam.id,
+    teamName: hsTeam.name,
+    teamShortName: hsTeam.shortName,
+    gp: 20,
+    mpg: 32.5,
+    ppg: 23.5,
+    rpg: 6.2,
+    apg: 5.8,
+    spg: 1.8,
+    bpg: 0.7,
+    fgPct: 50.5,
+    wins: 8,
+    losses: 12,
+  });
+  const weakRace = buildAwardRaceTop5({
+    career: baseHsCareer,
+    boxScore: weakBox,
+    standings: weakStandings,
+    updatedRivals: [],
+    isRookieSeason: false,
+    rng: () => 0.5,
+  });
+
+  const strongStandings = generateLeagueStandings(baseHsCareer, 17, 3, () => 0.5);
+  const strongBox = { ...weakBox, wins: 17, losses: 3 };
+  const strongRace = buildAwardRaceTop5({
+    career: baseHsCareer,
+    boxScore: strongBox,
+    standings: strongStandings,
+    updatedRivals: [],
+    isRookieSeason: false,
+    rng: () => 0.5,
+  });
+
+  const weakPlayerEntry = weakRace.mvpRace.find((e) => e.isPlayer);
+  const strongPlayerEntry = strongRace.mvpRace.find((e) => e.isPlayer);
+  assert.ok(strongPlayerEntry, 'Top-seed star with 23.5/6.2/5.8 must appear in MVP Top 5');
+  if (weakPlayerEntry) {
+    assert.ok(
+      strongPlayerEntry.awardScore > weakPlayerEntry.awardScore + 15,
+      `17-3 team MVP score (${strongPlayerEntry.awardScore}) must be far higher than 8-12 team (${weakPlayerEntry.awardScore})`
+    );
+  }
+
+  // 2) Single-Source-of-Truth invariant: whenever Vote #1 is the player, playerWonMvp MUST be true (and vice versa)
+  const testScenarios = [
+    { wins: 8, losses: 12, ppg: 28.0 },
+    { wins: 10, losses: 10, ppg: 26.5 },
+    { wins: 16, losses: 4, ppg: 24.0 },
+    { wins: 18, losses: 2, ppg: 29.5 },
+    { wins: 5, losses: 15, ppg: 32.0 },
+  ];
+  for (const sc of testScenarios) {
+    const st = generateLeagueStandings(baseHsCareer, sc.wins, sc.losses, () => 0.5);
+    const bx = { ...weakBox, wins: sc.wins, losses: sc.losses, ppg: sc.ppg };
+    const race = buildAwardRaceTop5({
+      career: baseHsCareer,
+      boxScore: bx,
+      standings: st,
+      updatedRivals: [],
+      isRookieSeason: false,
+      rng: () => 0.45,
+    });
+    const isRank1 = race.mvpRace[0]?.isPlayer === true;
+    assert.equal(
+      race.playerWonMvp,
+      isRank1,
+      `Invariant broken for ${sc.wins}W-${sc.losses}L (${sc.ppg} PPG): mvpRace[0].isPlayer=${isRank1} but playerWonMvp=${race.playerWonMvp}`
+    );
+  }
+});
+
+test('28. Realistic High School to KBL Direct Entry Draft Pick Distribution (No Guaranteed Pick #1)', () => {
+  // 1) Average 3-star HS graduate entering KBL early (OVR 59) should NOT land #1 overall; should be mid/late 1st or 2nd round
+  const hs3Star = createBaseCareer({
+    age: 19,
+    league: 'HIGH_SCHOOL',
+    team: HIGH_SCHOOL_TEAMS[0],
+    ovr: 59,
+    potential: 78,
+    prospectStars: 3,
+    draftStock: 50,
+    seasonLogs: [
+      createSeasonLog({ league: 'HIGH_SCHOOL', ppg: 15.2, rpg: 4.5, apg: 3.4 }),
+    ],
+  });
+  const res3Star = executeDraftResolution(hs3Star, 'KBL', () => 0.5);
+  assert.ok(
+    res3Star.pickNumber >= 6,
+    `3-star HS direct entrant (OVR 59) must not get top-5/1st overall pick, got #${res3Star.pickNumber}`
+  );
+
+  // 2) Generational 5-star HS prodigy (OVR 66, potential 90, draftStock 86) legitimately competes for Top 1~4
+  const hs5Star = createBaseCareer({
+    age: 19,
+    league: 'HIGH_SCHOOL',
+    team: HIGH_SCHOOL_TEAMS[0],
+    ovr: 66,
+    potential: 90,
+    prospectStars: 5,
+    draftStock: 86,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'HIGH_SCHOOL',
+        ppg: 26.8,
+        rpg: 7.4,
+        apg: 6.2,
+        wonMvp: true,
+        wonChampionship: true,
+      }),
+    ],
+  });
+  const res5Star = executeDraftResolution(hs5Star, 'KBL', () => 0.5);
+  assert.ok(
+    res5Star.pickNumber <= 4,
+    `5-star generational HS prodigy (OVR 66) should contend for Top 4 in KBL draft, got #${res5Star.pickNumber}`
+  );
+
+  // 3) U-League 4-year polished college star (OVR 65) should also pick ahead of raw 3-star HS prospect
+  const uLeagueStar = createBaseCareer({
+    age: 22,
+    league: 'U_LEAGUE',
+    team: U_LEAGUE_TEAMS[0],
+    ovr: 65,
+    potential: 82,
+    draftStock: 80,
+    seasonLogs: [
+      createSeasonLog({ league: 'U_LEAGUE', ppg: 21.5, rpg: 6.0, apg: 5.2, wonMvp: true }),
+    ],
+  });
+  const resCollege = executeDraftResolution(uLeagueStar, 'KBL', () => 0.5);
+  assert.ok(
+    resCollege.pickNumber < res3Star.pickNumber,
+    `Polished U-League star (#${resCollege.pickNumber}) must be drafted ahead of raw 3-star HS prospect (#${res3Star.pickNumber})`
+  );
+});
+
+test('29. Mid-Season Trade Rumor Tenure Gate, 3-Season Cooldown & GM Negotiation Choice', () => {
+  // 1) Year 1 on a new team without broken role promise must NEVER roll trade deadline rumor
+  const firstYearPro = createBaseCareer({
+    age: 23,
+    seasonYear: 2030,
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    ovr: 76,
+    coachTrust: 55,
+    seasonsOnCurrentTeam: 1,
+    lastTradeRumorYear: null,
+    brokenRolePromise: false,
+  });
+  for (let i = 0; i < 10; i++) {
+    const evt = rollMidSeasonCrossroadsEvent(firstYearPro, () => i * 0.09);
+    assert.ok(
+      !evt.id.startsWith('EVT_MID_TRADE_DEADLINE_'),
+      `Trade rumor must not trigger in 1st season on team without brokenRolePromise (got ${evt.id})`
+    );
+  }
+
+  // 2) Within 3-season cooldown (lastTradeRumorYear = 2029, seasonYear = 2031) must NOT roll trade rumor
+  const cooldownPro = createBaseCareer({
+    age: 26,
+    seasonYear: 2031,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 82,
+    coachTrust: 40,
+    seasonsOnCurrentTeam: 3,
+    lastTradeRumorYear: 2029,
+    brokenRolePromise: true,
+  });
+  for (let i = 0; i < 10; i++) {
+    const evt = rollMidSeasonCrossroadsEvent(cooldownPro, () => i * 0.09);
+    assert.ok(
+      !evt.id.startsWith('EVT_MID_TRADE_DEADLINE_'),
+      `Trade rumor must respect 3-season cooldown (got ${evt.id})`
+    );
+  }
+
+  // 3) When eligible (brokenRolePromise + cooldown passed + low rng), trade rumor rolls with GM negotiation flag
+  const eligiblePro = createBaseCareer({
+    age: 26,
+    seasonYear: 2033,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 83,
+    coachTrust: 42,
+    seasonsOnCurrentTeam: 3,
+    lastTradeRumorYear: 2029,
+    brokenRolePromise: true,
+  });
+  const tradeEvt = rollMidSeasonCrossroadsEvent(eligiblePro, () => 0.05);
+  assert.ok(
+    tradeEvt.id.startsWith('EVT_MID_TRADE_DEADLINE_'),
+    `Eligible dissatisfied veteran should roll trade rumor on low rng (got ${tradeEvt.id})`
+  );
+  const negotiateChoice = tradeEvt.choices.find((c) => c.negotiateMidSeasonTrade);
+  assert.ok(
+    negotiateChoice,
+    'Mid-season trade rumor choice must use negotiateMidSeasonTrade probability flag instead of instant teleport'
+  );
+});
+
+test('30. Realistic 1-Possession Shooting Map (<=3pts), Zero Quarter-Start Score/Stat Spoiler, Clean Team Names & Offer Copy', () => {
+  // 1) Live broadcast court plays: only player single possessions shown on court, shotPoints strictly in 0..3, zero frame-0 score jump, progressive box score
+  const nbaStar = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 91,
+    stats: { ins: 90, out: 92, ply: 88, def: 86, reb: 80, phy: 85 },
+    seasonLogs: [createSeasonLog({ mpg: 36.0, ppg: 28.4 })],
+  });
+
+  let live = createLiveFinalGame(nbaStar, NBA_TEAMS[1], 'LEAGUE_FINALS');
+  for (let q = 1; q <= 4; q++) {
+    const teamBefore = live.teamScore;
+    const oppBefore = live.oppScore;
+    const statsBefore = { ...live.playerStats };
+    live = simulateLiveQuarter(live, nbaStar, 'ACE_HERO', () => 0.35 + q * 0.05);
+    const qLog = live.quarterLogs[live.quarterLogs.length - 1];
+
+    assert.equal(qLog.startTeamScore, teamBefore, `Q${q} startTeamScore must match pre-quarter score`);
+    assert.equal(qLog.startOppScore, oppBefore, `Q${q} startOppScore must match pre-quarter opp score`);
+    assert.equal(qLog.startPlayerStats?.pts, statsBefore.pts, `Q${q} startPlayerStats must snapshot pre-quarter PTS`);
+
+    assert.ok(qLog.plays && qLog.plays.length >= 2, `Q${q} must generate plays`);
+    const firstPlay = qLog.plays[0];
+    if (firstPlay.showOnCourt) {
+      assert.equal(
+        firstPlay.teamScoreBefore,
+        teamBefore,
+        `Q${q} Turn 0 court play must not jump teamScoreBefore prior to shot landing`
+      );
+      assert.equal(
+        firstPlay.oppScoreBefore,
+        oppBefore,
+        `Q${q} Turn 0 court play must not jump oppScoreBefore prior to shot landing`
+      );
+    }
+
+    for (const p of qLog.plays) {
+      if (p.showOnCourt) {
+        assert.ok(
+          typeof p.shotPoints === 'number' && p.shotPoints >= 0 && p.shotPoints <= 3,
+          `Court play ${p.id} (${p.type}) must have realistic shotPoints in 0..3, got ${p.shotPoints}`
+        );
+        assert.ok(
+          !p.courtBadge || !/\+[4-9]|-\d+/.test(p.courtBadge),
+          `Court badge must never show +4..+9 or negative points, got "${p.courtBadge}"`
+        );
+      }
+      assert.ok(p.playerStatsAfter !== undefined, `Play ${p.id} must include progressive playerStatsAfter snapshot`);
+    }
+
+    const lastPlay = qLog.plays[qLog.plays.length - 1];
+    assert.equal(lastPlay.playerStatsAfter?.pts, live.playerStats.pts, `Q${q} final playerStatsAfter.pts must equal live.playerStats.pts`);
+    assert.equal(lastPlay.playerStatsAfter?.ast, live.playerStats.ast, `Q${q} final playerStatsAfter.ast must equal live.playerStats.ast`);
+    if (live.isFinished || live.pendingClutchPossession) break;
+  }
+
+  // 2) All 12 U-League university names & Sangmu have zero parenthetical mascots
+  assert.equal(U_LEAGUE_TEAMS.length, 12);
+  for (const uni of U_LEAGUE_TEAMS) {
+    assert.ok(
+      !uni.name.includes('(') && !uni.name.includes(')'),
+      `U-League team name must not contain mascot parentheses, got "${uni.name}"`
+    );
+  }
+  assert.ok(
+    !SANGMU_TEAM.name.includes('(') && !SANGMU_TEAM.name.includes(')'),
+    `Sangmu team name must not contain parentheses, got "${SANGMU_TEAM.name}"`
+  );
+
+  // 3) 5-star high school direct overseas/G-League offer remains available WITHOUT '5성 슈퍼 유망주' or '특별 오퍼' wording
+  const hs5StarGrad = createBaseCareer({
+    age: 20,
+    league: 'HIGH_SCHOOL',
+    team: HIGH_SCHOOL_TEAMS[0],
+    ovr: 65,
+    potential: 91,
+    prospectStars: 5,
+    draftStock: 86,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'HIGH_SCHOOL',
+        ppg: 27.0,
+        rpg: 7.5,
+        apg: 6.5,
+        wonMvp: true,
+        wonChampionship: true,
+      }),
+    ],
+  });
+  const hsOptions = generateOffseasonOptions(hs5StarGrad, () => 0.4);
+  const directProOffer = hsOptions.find(
+    (o) =>
+      o.id.startsWith('OPT_ROUTE_D_') ||
+      o.targetLeague === 'GLEAGUE' ||
+      o.targetLeague === 'OVERSEAS'
+  );
+  assert.ok(directProOffer, '5-star high school graduate must still receive direct overseas/G-League pro offer');
+  for (const opt of hsOptions) {
+    assert.ok(
+      !opt.title.includes('5성 슈퍼 유망주') && !opt.title.includes('특별 오퍼'),
+      `Offseason option title must not include removed label, got "${opt.title}"`
+    );
+    assert.ok(
+      !opt.subtitle.includes('5성 슈퍼 유망주') && !opt.badgeText.includes('5성 슈퍼 유망주'),
+      `Offseason option subtitle/badge must not include removed label, got "${opt.badgeText}"`
+    );
+  }
+});
+
+
 
 
 

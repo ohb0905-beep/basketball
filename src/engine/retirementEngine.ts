@@ -10,6 +10,11 @@ import {
   StatDelta,
   TeamInfo,
 } from '../types/game';
+import {
+  AGING_RETIREMENT_CONFIG,
+  ECONOMY_CONFIG,
+  clampNum,
+} from '../config/balanceConfig';
 import { getTeamById } from '../data/teams';
 import { LEAGUE_CONFIG } from '../data/leagues';
 
@@ -60,23 +65,36 @@ export function applyAgingCurve(
       ? 1.15
       : 1.0;
 
-  // 통산 누적 출전 시간(마일리지) 과부하 여부 (28,000분 이상 시 마일리지 피로 누적)
-  const mileageOffset =
-    careerMinutes >= 30000 ? -1 : careerMinutes <= 9000 ? 1 : 0;
+  // 통산 누적 출전 시간(마일리지) 연속 오프셋 (18,000분 기준, 많을수록 조기 노쇠화)
+  const mileageOffset = clampNum(
+    (AGING_RETIREMENT_CONFIG.mileageReferenceMinutes - careerMinutes) /
+      AGING_RETIREMENT_CONFIG.mileageScaleDivisor,
+    -1.8,
+    1.4
+  );
 
-  // 피지컬(PHY) 자기관리 보정 (PHY 82+ 시 노쇠화 완충, PHY 58 이하 시 가속)
-  const phyConditionBonus = prev.phy >= 82 ? 0.82 : prev.phy <= 58 ? 1.2 : 1.0;
-  const biomechCareBonus = hasBiomechLab ? 0.78 : 1.0;
+  // 피지컬(PHY) 자기관리 연속 보정 (PHY 72 기준, 높을수록 노쇠화 완충)
+  const phyConditionBonus = clampNum(
+    1.0 +
+      (AGING_RETIREMENT_CONFIG.phyReference - prev.phy) *
+        AGING_RETIREMENT_CONFIG.phySlopePerPoint,
+    0.72,
+    1.32
+  );
+  const biomechCareBonus = hasBiomechLab
+    ? ECONOMY_CONFIG.personalCare.BIOMECH_SKILL_LAB.agingReductionFactor
+    : 1.0;
 
-  // 개인별 실질 노쇠화 진행 연차 (기본 만 30세 기준)
-  const onsetAge = 30 + dnaOnsetOffset + mileageOffset;
+  // 개인별 실질 노쇠화 진행 연차 (연속 실수)
+  const onsetAge =
+    AGING_RETIREMENT_CONFIG.baseOnsetAge + dnaOnsetOffset + mileageOffset;
   const agingYears = age - onsetAge;
 
   const nextStats: PlayerStats = { ...prev };
   const delta: StatDelta = { ins: 0, out: 0, ply: 0, def: 0, reb: 0, phy: 0 };
 
   if (agingYears < 0) {
-    // 아직 개인 노쇠화 시작 전 (철강왕/대기만성형의 30~31세 구간 등): 기량 유지 및 노련미(PLY) 소폭 상승 가능
+    // 아직 개인 노쇠화 시작 전: 기량 유지 및 노련미(PLY) 소폭 상승 가능
     if (rng() < 0.5 && prev.ply < 99) {
       nextStats.ply = clamp(prev.ply + 1);
       delta.ply = nextStats.ply - prev.ply;
@@ -85,10 +103,15 @@ export function applyAgingCurve(
   }
 
   const combinedMult = dnaSeverityMult * phyConditionBonus * biomechCareBonus;
+  // 연속 노쇠화 강도 곡선 (0년차: 1.0 → 3년차: ~1.9 → 6년차: ~2.9 → 8년차+: ~3.8)
+  const continuousSeverity = 1.0 + Math.pow(agingYears, 1.15) * 0.28;
 
-  if (agingYears <= 2) {
-    // 초기 베테랑기: 운동능력(PHY) 소폭 감소, 노련미(PLY) 보정
-    const rawPhyDrop = Math.max(1, Math.round(randInt(1, 2) * combinedMult));
+  if (agingYears <= 2.2) {
+    // 초기 베테랑기: 운동능력(PHY) 소폭 감소, 노련미(PLY) 및 진화 시 OUT 보정
+    const rawPhyDrop = Math.max(
+      1,
+      Math.round((0.8 + rng() * 1.1) * continuousSeverity * combinedMult)
+    );
     const plyBoost = veteranReinvented ? 1 : rng() < 0.7 ? 1 : 0;
     const outBoost = veteranReinvented && rng() < 0.65 ? 1 : 0;
     nextStats.phy = clamp(prev.phy - rawPhyDrop);
@@ -97,15 +120,30 @@ export function applyAgingCurve(
     delta.phy = nextStats.phy - prev.phy;
     delta.ply = nextStats.ply - prev.ply;
     delta.out = nextStats.out - prev.out;
-  } else if (agingYears <= 5) {
-    // 중기 노쇠화 구간: 운동능력 및 공수 기동력 감소 (단, 베테랑 스타일 진화 시 외곽슛·패스 시야는 도사급으로 유지!)
-    const phyDrop = Math.max(1, Math.round(randInt(2, 4) * combinedMult));
-    const insDrop = Math.max(1, Math.round(randInt(1, 3) * combinedMult));
+  } else if (agingYears <= 5.5) {
+    // 중기 노쇠화 구간: 연속 강도 곡선 기반 운동능력/공수 기동력 감소 (베테랑 스타일 진화 시 외곽슛·패스 보호)
+    const phyDrop = Math.max(
+      1,
+      Math.round((1.15 + rng() * 0.95) * continuousSeverity * combinedMult)
+    );
+    const insDrop = Math.max(
+      1,
+      Math.round((0.75 + rng() * 0.75) * continuousSeverity * combinedMult)
+    );
     const defDrop = veteranReinvented
-      ? Math.max(0, Math.round(randInt(0, 2) * combinedMult * 0.7))
-      : Math.max(1, Math.round(randInt(1, 3) * combinedMult));
-    const rebDrop = Math.max(1, Math.round(randInt(1, 3) * combinedMult));
-    const outDrop = veteranReinvented ? 0 : rng() < 0.4 * combinedMult ? 1 : 0;
+      ? Math.max(
+          0,
+          Math.round((0.45 + rng() * 0.55) * continuousSeverity * combinedMult * 0.7)
+        )
+      : Math.max(
+          1,
+          Math.round((0.75 + rng() * 0.75) * continuousSeverity * combinedMult)
+        );
+    const rebDrop = Math.max(
+      1,
+      Math.round((0.7 + rng() * 0.75) * continuousSeverity * combinedMult)
+    );
+    const outDrop = veteranReinvented ? 0 : rng() < 0.42 * combinedMult ? 1 : 0;
 
     nextStats.phy = clamp(prev.phy - phyDrop);
     nextStats.ins = clamp(prev.ins - insDrop);
@@ -123,7 +161,7 @@ export function applyAgingCurve(
     delta.out = nextStats.out - prev.out;
     delta.ply = nextStats.ply - prev.ply;
   } else {
-    // 황혼기 급감 구간: 전 영역 노쇠화 진행 (베테랑 스타일 진화 시 OUT/PLY 방어력 대폭 상승)
+    // 황혼기 노쇠화 구간: 전 영역 하락 (베테랑 스타일 진화 시 OUT/PLY 방어)
     const keys: (keyof PlayerStats)[] = ['ins', 'out', 'ply', 'def', 'reb', 'phy'];
     for (const k of keys) {
       const isSkillStat = k === 'out' || k === 'ply';
@@ -149,7 +187,9 @@ export function checkRetirementEligibility(career: CareerState): {
   isOutOfLeague: boolean;
   isMandatoryAge40: boolean;
 } {
-  const canRetireVoluntarily = career.age >= 31 || career.seasonsPlayed >= 10;
+  const canRetireVoluntarily =
+    career.age >= AGING_RETIREMENT_CONFIG.voluntaryRetireAge ||
+    career.seasonsPlayed >= AGING_RETIREMENT_CONFIG.voluntaryRetireSeasons;
 
   const hasLegendResume =
     career.totals.championships >= 1 ||
@@ -157,7 +197,7 @@ export function checkRetirementEligibility(career: CareerState): {
     career.totals.mvps >= 1;
 
   const canDeclareFarewellTour =
-    career.age >= 34 &&
+    career.age >= AGING_RETIREMENT_CONFIG.farewellTourMinAge &&
     hasLegendResume &&
     !career.isFarewellTour &&
     !career.farewellTourCompleted;
@@ -177,11 +217,12 @@ export function checkRetirementEligibility(career: CareerState): {
     lastLog.rpg + lastLog.apg < 2.8;
 
   const isOutOfLeague =
-    career.age >= 33 &&
+    career.age >= AGING_RETIREMENT_CONFIG.outOfLeagueMinAge &&
     ((ovrGapFromLeague <= -12 && (!lastLog || lastLog.ppg < 4.5)) ||
       (ovrGapFromLeague <= -8 && severeRealGameDecline));
 
-  const isMandatoryAge40 = career.age >= 40;
+  const isMandatoryAge40 =
+    career.age >= AGING_RETIREMENT_CONFIG.mandatoryRetireAge;
 
   return {
     canRetireVoluntarily,
@@ -280,12 +321,15 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
   const isProFranchise =
     PRO_LEAGUES.includes(honoredTeam.league) && !honoredTeam.isMilitaryTeam;
 
+  const jerseyCfg = AGING_RETIREMENT_CONFIG.jerseyRetirement;
   const requiredFranchisePoints =
-    honoredTeam.league === 'NBA' ? 10000 : 6000;
+    honoredTeam.league === 'NBA'
+      ? jerseyCfg.nbaMinPoints
+      : jerseyCfg.otherProMinPoints;
 
   const meetsCommitment =
     isProFranchise &&
-    honoredTeamSeasons >= 7 &&
+    honoredTeamSeasons >= jerseyCfg.minSeasons &&
     honoredTeamPoints >= requiredFranchisePoints;
 
   const meetsDominantAchievement =
@@ -329,11 +373,12 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
 
   const finalsMvps = career.totals.finalsMvps || 0;
 
+  const goatReq = AGING_RETIREMENT_CONFIG.goatRequirements;
   // GOAT 필수 조건: NBA MVP >= 3 AND NBA 우승 >= 3 AND 파이널 MVP >= 2 (점수 합산 우회 진입 완전 금지)
   if (
-    career.totals.nbaMvps >= 3 &&
-    career.totals.nbaChampionships >= 3 &&
-    finalsMvps >= 2
+    career.totals.nbaMvps >= goatReq.minNbaMvps &&
+    career.totals.nbaChampionships >= goatReq.minNbaChampionships &&
+    finalsMvps >= goatReq.minFinalsMvps
   ) {
     tierId = 'GOAT';
     tierTitle = '🐐 GOAT (역대 최고 농구 황제)';
