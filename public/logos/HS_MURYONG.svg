@@ -1,22 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <defs>
-    <linearGradient id="bg_HS_MURYONG" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0F766E"/>
-      <stop offset="100%" stop-color="#090D16"/>
-    </linearGradient>
-    <linearGradient id="rim_HS_MURYONG" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="50%" stop-color="#5EEAD4"/>
-      <stop offset="100%" stop-color="#0F766E"/>
-    </linearGradient>
-  </defs>
-  <path d="M100 8 L176 32 V96 C176 144 142 176 100 192 C58 176 24 144 24 96 V32 Z" fill="url(#bg_HS_MURYONG)" stroke="url(#rim_HS_MURYONG)" stroke-width="7"/>
-  <path d="M100 18 L164 39 V95 C164 136 135 164 100 179 C65 164 36 136 36 95 V39 Z" fill="none" stroke="#5EEAD4" stroke-width="1.8" opacity="0.65"/>
-  <circle cx="100" cy="84" r="48" fill="none" stroke="#5EEAD4" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.55"/>
-  <rect x="68" y="28" width="64" height="18" rx="9" fill="#090D16" fill-opacity="0.75" stroke="#5EEAD4" stroke-width="1.2"/>
-  <text x="100" y="41" text-anchor="middle" fill="#5EEAD4" font-family="sans-serif" font-size="11" font-weight="800" letter-spacing="1.5">EST.1996</text>
-  <text x="100" y="102" text-anchor="middle" fill="#FFFFFF" font-family="serif" font-size="44" font-weight="900" letter-spacing="3">舞龍</text>
-  <path d="M40 128 H160 L152 150 H48 Z" fill="#5EEAD4"/>
-  <text x="100" y="143" text-anchor="middle" fill="#090D16" font-family="sans-serif" font-size="13" font-weight="900" letter-spacing="0.5">무룡고등학교</text>
-  <text x="100" y="166" text-anchor="middle" fill="#FFFFFF" fill-opacity="0.85" font-family="sans-serif" font-size="8.5" font-weight="700" letter-spacing="1.2">BASKETBALL CLUB</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <circle cx="60" cy="60" r="55" fill="#FFFFFF" stroke="#0F766E" stroke-width="3"/>
+  <polygon points="60,12 101,36 101,84 60,108 19,84 19,36" fill="#0F766E" stroke="#134E4A" stroke-width="2.5"/>
+  <polygon points="60,20 93,39 93,81 60,100 27,81 27,39" fill="none" stroke="#5EEAD4" stroke-width="1.8"/>
+  <!-- Rising mountain peak & wave -->
+  <path d="M 32 76 L 48 48 L 60 62 L 73 42 L 88 76 Z" fill="#14B8A6" opacity="0.45"/>
+  <text x="60" y="66" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="22" font-weight="900" letter-spacing="1">무룡고</text>
+  <path d="M 36 79 Q 48 73 60 79 T 84 79" fill="none" stroke="#99F6E4" stroke-width="2.5" stroke-linecap="round"/>
 </svg>

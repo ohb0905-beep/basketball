@@ -1,4 +1,8 @@
-import { DRAFT_SCOUTING_CONFIG, ECONOMY_CONFIG } from '../config/balanceConfig';
+import {
+  DRAFT_SCOUTING_CONFIG,
+  ECONOMY_CONFIG,
+  clampNum,
+} from '../config/balanceConfig';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import {
   getTeamsByLeague,
@@ -9,13 +13,17 @@ import {
   CareerState,
   CombineState,
   ContractType,
+  LeagueId,
   OffseasonOption,
   Position,
   RolePromiseType,
   TeamInfo,
 } from '../types/game';
 import { checkRetirementEligibility } from './retirementEngine';
-import { getContractDefaultSalary } from './seasonSimulator';
+import {
+  calculateTeamContractOfferSalary,
+  getContractDefaultSalary,
+} from './seasonSimulator';
 import {
   calculateBiomechanicalProfile,
   calculateHeightMismatchPenalty,
@@ -47,27 +55,125 @@ function getFrontOfficeInterestLabel(scoutingScore: number): string {
   return '전력 보강 영입 제안';
 }
 
+function getLeagueDefaultContract(league: LeagueId): ContractType {
+  switch (league) {
+    case 'B_LEAGUE':
+      return 'BLEAGUE_CONTRACT';
+    case 'NBL':
+      return 'NBL_CONTRACT';
+    case 'EUROLEAGUE':
+      return 'EUROLEAGUE_CONTRACT';
+    case 'GLEAGUE':
+      return 'GLEAGUE_EXHIBIT';
+    case 'KBL':
+      return 'KBL_MAX';
+    case 'NBA':
+      return 'NBA_STANDARD';
+    default:
+      return 'AMATEUR';
+  }
+}
+
 /**
- * 구단 기조, 전력 격차, 선수 나이를 종합해 구단이 제시하는 역할 약속(Role Promise) 결정
+ * 구단 기조, 전력 격차, 직전 시즌 주전·에이스 실적, 감독 신뢰도를 종합해 구단이 제시하는 역할 약속(Role Promise) 결정
  */
 export function determineTeamRolePromise(
-  career: Pick<CareerState, 'ovr' | 'age' | 'potential'>,
+  career: Pick<CareerState, 'ovr' | 'age' | 'potential'> & {
+    role?: string;
+    promisedRole?: RolePromiseType;
+    coachTrust?: number;
+    league?: LeagueId;
+    team?: TeamInfo;
+    seasonLogs?: CareerState['seasonLogs'];
+  },
   targetTeam: TeamInfo,
-  contractType: ContractType
+  contractType: ContractType,
+  options?: { isResigning?: boolean }
 ): { promisedRole: RolePromiseType; promisedRoleLabel: string } {
   const gap = career.ovr - targetTeam.rating;
   const dir = targetTeam.direction || 'PLAYOFF_HUNT';
+  const targetLdr = LEAGUE_CONFIG[targetTeam.league]?.ldr ?? 68;
+  const isResigning =
+    options?.isResigning ??
+    (career.team?.id === targetTeam.id && career.league === targetTeam.league);
+
+  const lastLog =
+    career.seasonLogs && career.seasonLogs.length > 0
+      ? career.seasonLogs[career.seasonLogs.length - 1]
+      : null;
+  const sameLeagueLastLog =
+    lastLog && lastLog.league === targetTeam.league ? lastLog : null;
+
+  const trust = career.coachTrust ?? 60;
+  const wasAce =
+    Boolean(career.role?.includes('에이스') || career.role?.includes('1옵션')) ||
+    Boolean(
+      sameLeagueLastLog &&
+        sameLeagueLastLog.mpg >= 30.5 &&
+        (sameLeagueLastLog.ppg >= 18 ||
+          sameLeagueLastLog.wonMvp ||
+          sameLeagueLastLog.allStarSelected ||
+          sameLeagueLastLog.allLeagueTeam === 1)
+    );
+  const wasStarter =
+    wasAce ||
+    Boolean(career.role?.includes('주전') || career.role?.includes('스타터')) ||
+    Boolean(sameLeagueLastLog && sameLeagueLastLog.mpg >= 25.0);
 
   let promisedRole: RolePromiseType = 'SIXTH_MAN_CORE';
+
+  // [핵심 보호 규칙] 현 소속팀 재계약 시 직전 시즌 주전·에이스 실적과 감독 신뢰도를 최우선 반영
+  if (
+    isResigning &&
+    contractType !== 'TWO_WAY' &&
+    contractType !== 'GLEAGUE_EXHIBIT' &&
+    contractType !== 'SUMMER_LEAGUE_INVITE'
+  ) {
+    if (
+      wasAce &&
+      trust >= 55 &&
+      career.ovr >= targetTeam.rating - 9 &&
+      career.ovr >= targetLdr - 3
+    ) {
+      promisedRole =
+        (career.age >= 35 && gap <= -4) || gap < -6
+          ? 'STARTER_GUARANTEE'
+          : 'ACE_FIRST_OPTION';
+      return {
+        promisedRole,
+        promisedRoleLabel: ROLE_PROMISE_LABELS[promisedRole],
+      };
+    }
+    if (
+      wasStarter &&
+      trust >= 52 &&
+      career.ovr >= targetTeam.rating - 10 &&
+      career.ovr >= targetLdr - 4
+    ) {
+      promisedRole =
+        gap >= 2 || (wasAce && trust >= 65)
+          ? 'ACE_FIRST_OPTION'
+          : 'STARTER_GUARANTEE';
+      return {
+        promisedRole,
+        promisedRoleLabel: ROLE_PROMISE_LABELS[promisedRole],
+      };
+    }
+  }
+
   if (
     contractType === 'NBA_VET_MIN' ||
     contractType === 'KBL_VET' ||
-    (career.age >= 33 && gap < 1)
+    (career.age >= 35 && gap < -1)
   ) {
-    promisedRole = gap >= 2 ? 'STARTER_GUARANTEE' : 'VETERAN_MENTOR';
+    promisedRole = gap >= 1 ? 'STARTER_GUARANTEE' : 'VETERAN_MENTOR';
   } else if (gap >= 4 || (dir === 'REBUILDING' && gap >= 0)) {
     promisedRole = 'ACE_FIRST_OPTION';
-  } else if (gap >= -1 || (dir === 'REBUILDING' && career.age <= 24)) {
+  } else if (
+    gap >= -1 ||
+    (wasStarter && gap >= -2 && career.ovr >= targetLdr - 1) ||
+    (dir === 'REBUILDING' && career.age <= 24)
+  ) {
     promisedRole =
       career.age <= 22 && gap < 0 ? 'PROSPECT_DEVELOPMENT' : 'STARTER_GUARANTEE';
   } else if (career.age <= 22 && dir === 'REBUILDING') {
@@ -154,11 +260,11 @@ export function evaluateHighSchoolProspect(
   }
 
   const starLabels: Record<number, string> = {
-    5: '⭐⭐⭐⭐⭐ (5성급 초고교급 글로벌 유망주)',
-    4: '⭐⭐⭐⭐ (4성급 전국구 톱클래스 유망주)',
-    3: '⭐⭐⭐ (3성급 대학/얼리 드래프트 유망주)',
-    2: '⭐⭐ (2성급 성장형 고교 유망주)',
-    1: '⭐ (1성급 원석 유망주)',
+    5: '5성급 전국 최상위 유망주',
+    4: '4성급 전국구 상위 유망주',
+    3: '3성급 대학·얼리 드래프트 유망주',
+    2: '2성급 성장형 고교 유망주',
+    1: '1성급 원석 유망주',
   };
 
   return {
@@ -267,8 +373,12 @@ export function evaluateTeamScouting(
     const minCompetenceRequired =
       targetTeam.league === 'NBA'
         ? 10.5
-        : targetTeam.league === 'GLEAGUE' || targetTeam.league === 'OVERSEAS'
+        : targetTeam.league === 'EUROLEAGUE'
+        ? 9.2
+        : targetTeam.league === 'GLEAGUE' || targetTeam.league === 'NBL'
         ? 7.8
+        : targetTeam.league === 'B_LEAGUE'
+        ? 7.2
         : 6.5;
 
     if (effectiveCompetenceIndex < minCompetenceRequired) {
@@ -277,8 +387,10 @@ export function evaluateTeamScouting(
   } else if (
     bioEfficiencyDrag >= 11.0 &&
     (targetTeam.league === 'NBA' ||
+      targetTeam.league === 'EUROLEAGUE' ||
       targetTeam.league === 'GLEAGUE' ||
-      targetTeam.league === 'OVERSEAS')
+      targetTeam.league === 'NBL' ||
+      targetTeam.league === 'B_LEAGUE')
   ) {
     // 경기 기록이 없거나 부족한 상태에서 극단적 물리 부하 포지션을 고집할 경우 실전 경쟁력 미달
     realGameCompetence = false;
@@ -361,8 +473,12 @@ export function evaluateTeamScouting(
   const baseLeagueBar =
     targetTeam.league === 'NBA'
       ? 64
-      : targetTeam.league === 'OVERSEAS' || targetTeam.league === 'GLEAGUE'
+      : targetTeam.league === 'EUROLEAGUE'
+      ? 60
+      : targetTeam.league === 'NBL' || targetTeam.league === 'GLEAGUE'
       ? 55
+      : targetTeam.league === 'B_LEAGUE'
+      ? 53
       : 51;
   const directionOffset =
     teamDirection === 'CONTENDER' ? 6 : teamDirection === 'PLAYOFF_HUNT' ? 3 : -1;
@@ -374,25 +490,53 @@ export function evaluateTeamScouting(
   }
 
   const passesOfferThreshold = realGameCompetence && scoutingScore >= threshold;
+  const isResigning =
+    targetTeam.id === career.team.id && targetTeam.league === career.league;
+  const wasStarterOrAce =
+    career.role.includes('에이스') ||
+    career.role.includes('1옵션') ||
+    career.role.includes('주전') ||
+    career.role.includes('스타터') ||
+    Boolean(lastLog && lastLog.mpg >= 25.0);
 
   let recommendedContract: ContractType = 'FREE_AGENT';
   if (targetTeam.league === 'NBA') {
-    if (scoutingScore >= 84 && relativeGap >= 3) {
+    if (
+      (scoutingScore >= 84 && relativeGap >= 3) ||
+      (isResigning &&
+        wasStarterOrAce &&
+        scoutingScore >= 79 &&
+        career.ovr >= 85 &&
+        career.age <= 34)
+    ) {
       recommendedContract = 'NBA_MAX';
     } else if (scoutingScore >= 68) {
-      recommendedContract = career.age >= 32 ? 'NBA_VET_MIN' : 'NBA_STANDARD';
+      // 32세 이상이라도 리그 기준선(LDR-1) 이상 핵심 기량이면 베테랑 미니멈으로 강등하지 않음
+      const isDeclinedVet =
+        career.age >= 35
+          ? career.ovr < targetLeagueCfg.ldr - 1
+          : career.age >= 32 &&
+            career.ovr < targetLeagueCfg.ldr - 2 &&
+            !(isResigning && wasStarterOrAce);
+      recommendedContract = isDeclinedVet ? 'NBA_VET_MIN' : 'NBA_STANDARD';
     } else {
       recommendedContract = career.age >= 31 ? 'NBA_VET_MIN' : 'TWO_WAY';
     }
   } else if (targetTeam.league === 'KBL') {
-    recommendedContract =
-      scoutingScore >= 66
-        ? 'KBL_MAX'
-        : career.age >= 31
-        ? 'KBL_VET'
-        : 'KBL_ROOKIE';
-  } else if (targetTeam.league === 'OVERSEAS') {
-    recommendedContract = 'OVERSEAS_CONTRACT';
+    if (
+      scoutingScore >= 66 ||
+      (isResigning && wasStarterOrAce && career.ovr >= targetLeagueCfg.ldr)
+    ) {
+      recommendedContract = 'KBL_MAX';
+    } else {
+      recommendedContract = career.age >= 31 ? 'KBL_VET' : 'KBL_ROOKIE';
+    }
+  } else if (targetTeam.league === 'B_LEAGUE') {
+    recommendedContract = 'BLEAGUE_CONTRACT';
+  } else if (targetTeam.league === 'NBL') {
+    recommendedContract = 'NBL_CONTRACT';
+  } else if (targetTeam.league === 'EUROLEAGUE') {
+    recommendedContract = 'EUROLEAGUE_CONTRACT';
   } else if (targetTeam.league === 'GLEAGUE') {
     recommendedContract = 'GLEAGUE_EXHIBIT';
   } else {
@@ -402,7 +546,8 @@ export function evaluateTeamScouting(
   const { promisedRole, promisedRoleLabel } = determineTeamRolePromise(
     career,
     targetTeam,
-    recommendedContract
+    recommendedContract,
+    { isResigning }
   );
 
   return {
@@ -699,6 +844,31 @@ export function evaluateTwoWaySurvival(
 }
 
 /**
+ * 오프시즌 계약 중 트레이드 요청 승인 확률 계산 (draftEngine UI 표시 & useCareerStore 협상 판정 단일 진실 소스)
+ */
+export function calculateOffseasonTradeAcceptProb(
+  career: Pick<
+    CareerState,
+    'ovr' | 'team' | 'coachTrust' | 'brokenRolePromise' | 'contractYearsLeft'
+  >,
+  targetTeam: TeamInfo,
+  scoutingScore: number = 70
+): number {
+  const trCfg = DRAFT_SCOUTING_CONFIG.trade;
+  const scoutingInterestBonus = clampNum((scoutingScore - 68) * 0.0045, -0.08, 0.1);
+  const contenderDifficulty = targetTeam.direction === 'CONTENDER' ? -0.05 : 0.02;
+  const prob =
+    trCfg.baseAcceptanceProb +
+    (career.brokenRolePromise ? trCfg.brokenPromiseBonus : 0) +
+    (career.ovr - career.team.rating) * trCfg.highOvrLeverageSlope +
+    (career.coachTrust < 45 ? trCfg.lowTrustBonus : 0) +
+    (career.contractYearsLeft <= 1 ? trCfg.expiringContractBonus : 0) +
+    scoutingInterestBonus +
+    contenderDifficulty;
+  return Number(clampNum(prob, 0.18, 0.94).toFixed(3));
+}
+
+/**
  * 동적 구단 생태계, 리그 수준 환산(League Translation), 베테랑 최저연봉, 구단 역할 약속(Role Promise)이 반영된 오프시즌 선택지 생성
  */
 export function generateOffseasonOptions(
@@ -718,9 +888,34 @@ export function generateOffseasonOptions(
   const uLeagueTeams = getTeamsByLeague('U_LEAGUE', career.teamRatingsMap);
   const kblTeams = getTeamsByLeague('KBL', career.teamRatingsMap);
   const ncaaTeams = getTeamsByLeague('NCAA', career.teamRatingsMap);
-  const overseasTeams = getTeamsByLeague('OVERSEAS', career.teamRatingsMap);
+  const bLeagueTeams = getTeamsByLeague('B_LEAGUE', career.teamRatingsMap);
+  const nblTeams = getTeamsByLeague('NBL', career.teamRatingsMap);
+  const euroleagueTeams = getTeamsByLeague('EUROLEAGUE', career.teamRatingsMap);
   const gleagueTeams = getTeamsByLeague('GLEAGUE', career.teamRatingsMap);
   const nbaTeams = getTeamsByLeague('NBA', career.teamRatingsMap);
+
+  const getPoolByLeague = (league: LeagueId): TeamInfo[] => {
+    switch (league) {
+      case 'NBA':
+        return nbaTeams;
+      case 'EUROLEAGUE':
+        return euroleagueTeams;
+      case 'NBL':
+        return nblTeams;
+      case 'B_LEAGUE':
+        return bLeagueTeams;
+      case 'KBL':
+        return kblTeams;
+      case 'GLEAGUE':
+        return gleagueTeams;
+      case 'NCAA':
+        return ncaaTeams;
+      case 'U_LEAGUE':
+        return uLeagueTeams;
+      default:
+        return [];
+    }
+  };
 
   // [특수 Case 0] 국군체육부대 상무 복무 중인 경우
   if (career.militaryServiceSeasonsLeft > 0) {
@@ -737,13 +932,14 @@ export function generateOffseasonOptions(
       promisedRole: 'STARTER_GUARANTEE',
       promisedRoleLabel: ROLE_PROMISE_LABELS.STARTER_GUARANTEE,
       actionType: 'STAY_TEAM',
+      isExistingContract: true,
     });
     return options;
   }
 
-  // [Case 1] 고교 농구 재학 및 졸업 (만 20세 고교 졸업 시 유망주 평가에 따른 제한적 오퍼)
+  // [Case 1] 고교 농구 재학 및 졸업 (만 16세 고1 입학 -> 3시즌 후 만 19세 고교 졸업 시 진로 선택)
   if (career.league === 'HIGH_SCHOOL') {
-    if (career.age < 20) {
+    if (career.age < 19 && career.contractYearsLeft > 0) {
       options.push({
         id: 'OPT_HS_NEXT_GRADE',
         title: `${career.team.name} 다음 학년 진급`,
@@ -752,11 +948,12 @@ export function generateOffseasonOptions(
         targetLeague: 'HIGH_SCHOOL',
         targetTeam: career.team,
         contractType: 'AMATEUR',
-        contractYears: 1,
+        contractYears: career.contractYearsLeft,
         annualSalary: 0,
         promisedRole: 'STARTER_GUARANTEE',
         promisedRoleLabel: ROLE_PROMISE_LABELS.STARTER_GUARANTEE,
         actionType: 'STAY_TEAM',
+        isExistingContract: true,
       });
       return options;
     }
@@ -850,31 +1047,43 @@ export function generateOffseasonOptions(
       }
     }
 
-    // 4) 해외 프로/G리그 직행: 최상위 고교 유망주에게 스카우팅 적합도 최상위 1개 구단 오퍼 발생
+    // 4) 해외 프로/G리그 직행: 5성 고교 유망주에게 NBL Next Stars / B.리그 / G리그 중 스카우팅 적합도 최상위 구단 오퍼 발생
     if (prospect.stars === 5) {
-      const directCandidates = [...overseasTeams, ...gleagueTeams]
+      const directCandidates = [...nblTeams, ...bLeagueTeams, ...gleagueTeams]
         .map((team) => ({
           team,
           scout: evaluateTeamScouting(career, team, rng),
         }))
         .sort((a, b) => b.scout.scoutingScore - a.scout.scoutingScore);
 
-      const pickedDirect = directCandidates[0]?.team;
-      if (pickedDirect) {
-        const directContract: ContractType =
-          pickedDirect.league === 'GLEAGUE'
-            ? 'GLEAGUE_EXHIBIT'
-            : 'OVERSEAS_CONTRACT';
+      const bestDirect = directCandidates[0];
+      if (bestDirect) {
+        const pickedDirect = bestDirect.team;
+        const directContract = getLeagueDefaultContract(pickedDirect.league);
+        const directSalary = calculateTeamContractOfferSalary({
+          contractType: directContract,
+          ovr: career.ovr,
+          team: pickedDirect,
+          promisedRole: 'PROSPECT_DEVELOPMENT',
+          scoutingScore: bestDirect.scout.scoutingScore,
+          primaryPos: career.primaryPos,
+          secondaryPos: career.secondaryPos,
+          rng,
+        });
         options.push({
           id: `OPT_ROUTE_D_${pickedDirect.id}`,
           title: `${pickedDirect.name} 영입 오퍼`,
-          subtitle: '해외 구단 스카우트의 공식 프로 직행 계약 제안입니다.',
-          badgeText: '해외 직행',
+          subtitle:
+            pickedDirect.league === 'NBL'
+              ? '호주 NBL Next Stars 유망주 직행 프로그램 공식 제안입니다.'
+              : `${LEAGUE_CONFIG[pickedDirect.league].shortName} 구단 스카우트의 프로 직행 제안입니다.`,
+          badgeText: `${LEAGUE_CONFIG[pickedDirect.league].shortName} 직행`,
           targetLeague: pickedDirect.league,
           targetTeam: pickedDirect,
           contractType: directContract,
           contractYears: 2,
-          annualSalary: getContractDefaultSalary(directContract, career.ovr),
+          annualSalary: directSalary,
+          scoutingScore: bestDirect.scout.scoutingScore,
           promisedRole: 'PROSPECT_DEVELOPMENT',
           promisedRoleLabel: ROLE_PROMISE_LABELS.PROSPECT_DEVELOPMENT,
           actionType: 'SIGN_TEAM',
@@ -902,6 +1111,7 @@ export function generateOffseasonOptions(
         promisedRole: 'ACE_FIRST_OPTION',
         promisedRoleLabel: ROLE_PROMISE_LABELS.ACE_FIRST_OPTION,
         actionType: 'STAY_TEAM',
+        isExistingContract: true,
       });
     }
 
@@ -944,7 +1154,17 @@ export function generateOffseasonOptions(
   if (career.league === 'NBA' && career.contractType === 'TWO_WAY') {
     const survival = evaluateTwoWaySurvival(career, lastPpg, rng);
     if (survival.status === 'PROMOTED') {
-      const stdSalary = getContractDefaultSalary('NBA_STANDARD', career.ovr);
+      const stdSalary = calculateTeamContractOfferSalary({
+        contractType: 'NBA_STANDARD',
+        ovr: career.ovr,
+        team: career.team,
+        promisedRole: 'SIXTH_MAN_CORE',
+        isResigning: true,
+        coachTrust: career.coachTrust,
+        primaryPos: career.primaryPos,
+        secondaryPos: career.secondaryPos,
+        rng,
+      });
       options.push({
         id: 'OPT_TWOWAY_PROMOTED_STANDARD',
         title: `${career.team.name} 정식 보장 계약 승격`,
@@ -980,8 +1200,14 @@ export function generateOffseasonOptions(
       return options;
     }
 
-    // WAIVED (웨이버 방출): 리그 환산(League Translation)이 적용된 G리그, 해외, KBL 구단 스카우팅으로 현실적 재기 오퍼 생성!
-    const rebuildCandidates = [...gleagueTeams, ...overseasTeams, ...kblTeams];
+    // WAIVED (웨이버 방출): 유로리그, G리그, NBL, B.리그, KBL 구단 스카우팅으로 재기 오퍼 생성
+    const rebuildCandidates = [
+      ...euroleagueTeams,
+      ...gleagueTeams,
+      ...nblTeams,
+      ...bLeagueTeams,
+      ...kblTeams,
+    ];
     const interestedTeams = rebuildCandidates
       .map((t) => ({
         team: t,
@@ -992,10 +1218,16 @@ export function generateOffseasonOptions(
       .slice(0, 3);
 
     for (const item of interestedTeams) {
-      const sal = getContractDefaultSalary(
-        item.scout.recommendedContract,
-        career.ovr
-      );
+      const sal = calculateTeamContractOfferSalary({
+        contractType: item.scout.recommendedContract,
+        ovr: career.ovr,
+        team: item.team,
+        promisedRole: item.scout.promisedRole,
+        scoutingScore: item.scout.scoutingScore,
+        primaryPos: career.primaryPos,
+        secondaryPos: career.secondaryPos,
+        rng,
+      });
       options.push({
         id: `OPT_WAIVED_REBUILD_${item.team.id}`,
         title: `${item.team.name} 계약 오퍼`,
@@ -1033,7 +1265,7 @@ export function generateOffseasonOptions(
   // [Case 4] 프로 리그(KBL / 해외 / G리그 / NBA) 소속 선수들의 오프시즌 FA 및 역할 약속(Role Promise) 협상
   let teamOffersCount = 0;
 
-  // 1) 잔여 계약 기간이 남아있고 노쇠화 방출 대상이 아닌 경우 소속팀 잔류 가능
+  // 1) 잔여 계약 기간이 남아있는 경우: 기존 계약 유지(소속팀 잔류) + 복수 행선지 트레이드 요청(구단 심사 적용)
   if (career.contractYearsLeft > 0 && !isOutOfLeague) {
     const stayPromise =
       career.promisedRole ||
@@ -1041,7 +1273,7 @@ export function generateOffseasonOptions(
     options.push({
       id: 'OPT_STAY_CURRENT_CONTRACT',
       title: `${career.team.name} 잔류`,
-      subtitle: `${ROLE_PROMISE_LABELS[stayPromise]} 역할로 잔여 계약을 이어갑니다.`,
+      subtitle: `신규 재계약 없이 기존 계약(잔여 ${career.contractYearsLeft}년 · ${ROLE_PROMISE_LABELS[stayPromise]})을 이어갑니다.`,
       badgeText: '잔여 계약',
       targetLeague: career.league,
       targetTeam: career.team,
@@ -1051,66 +1283,101 @@ export function generateOffseasonOptions(
       promisedRole: stayPromise,
       promisedRoleLabel: ROLE_PROMISE_LABELS[stayPromise],
       actionType: 'STAY_TEAM',
+      isExistingContract: true,
     });
     teamOffersCount += 1;
 
-    // 만약 구단이 약속한 역할(Role Promise)을 어겼거나 다년 계약 중 새로운 도전을 원할 경우 공식 트레이드 이적 요구 선택지 제공!
-    const sameLeaguePoolForTrade = (
-      career.league === 'NBA'
-        ? nbaTeams
-        : career.league === 'KBL'
-        ? kblTeams
-        : career.league === 'OVERSEAS'
-        ? overseasTeams
-        : gleagueTeams
-    ).filter((t) => t.id !== career.team.id);
+    // 다년 계약 중 트레이드 요청 후보 생성 (최대 3개 성격이 다른 구단 + 구단 단장 심사 확률 부여)
+    const sameLeaguePoolForTrade = getPoolByLeague(career.league).filter(
+      (t) => t.id !== career.team.id
+    );
 
-    const tradeTarget =
-      sameLeaguePoolForTrade.find((t) =>
-        t.neededPositions?.includes(career.primaryPos)
-      ) || sameLeaguePoolForTrade.sort((a, b) => a.rating - b.rating)[0];
+    const evaluatedTradeTargets = sameLeaguePoolForTrade
+      .map((t) => ({
+        team: t,
+        eval: evaluateTeamScouting(career, t, rng),
+      }))
+      .sort((a, b) => b.eval.scoutingScore - a.eval.scoutingScore);
 
-    if (tradeTarget) {
-      if (career.brokenRolePromise) {
-        options.push({
-          id: `OPT_DEMAND_TRADE_${tradeTarget.id}`,
-          title: `${tradeTarget.name} 트레이드 요구`,
-          subtitle: `출전 시간 약속 미이행에 따라 ${tradeTarget.name} 구단으로 트레이드를 요구합니다.`,
-          badgeText: '트레이드 요구',
-          targetLeague: tradeTarget.league,
-          targetTeam: tradeTarget,
-          contractType: career.contractType,
-          contractYears: career.contractYearsLeft,
-          annualSalary: career.annualSalary,
-          promisedRole: 'STARTER_GUARANTEE',
-          promisedRoleLabel: ROLE_PROMISE_LABELS.STARTER_GUARANTEE,
-          actionType: 'SIGN_TEAM',
-        });
-      } else {
-        const tradePromise = determineTeamRolePromise(
-          career,
-          tradeTarget,
-          career.contractType
-        );
-        options.push({
-          id: `OPT_CONTRACT_REQUEST_TRADE_${tradeTarget.id}`,
-          title: `${tradeTarget.name} 트레이드 요청`,
-          subtitle: `잔여 계약을 유지한 채 ${tradeTarget.name} 구단으로 이적을 타진합니다.`,
-          badgeText: '트레이드 요청',
-          targetLeague: tradeTarget.league,
-          targetTeam: tradeTarget,
-          contractType: career.contractType,
-          contractYears: career.contractYearsLeft,
-          annualSalary: career.annualSalary,
-          promisedRole: tradePromise.promisedRole,
-          promisedRoleLabel: tradePromise.promisedRoleLabel,
-          actionType: 'REQUEST_TRADE',
-        });
-      }
-      teamOffersCount += 1;
+    const contenderCandidate =
+      evaluatedTradeTargets.find(
+        (x) =>
+          x.team.direction === 'CONTENDER' &&
+          (x.eval.passesOfferThreshold || x.eval.scoutingScore >= 58)
+      ) ||
+      evaluatedTradeTargets.find((x) => x.team.direction === 'CONTENDER');
+
+    const posNeedCandidate = evaluatedTradeTargets.find(
+      (x) =>
+        x.team.id !== contenderCandidate?.team.id &&
+        x.team.neededPositions?.includes(career.primaryPos)
+    );
+
+    const pickedTradeTargets: typeof evaluatedTradeTargets = [];
+    const seenTradeIds = new Set<string>();
+    const addCandidate = (entry?: (typeof evaluatedTradeTargets)[number]) => {
+      if (!entry || seenTradeIds.has(entry.team.id)) return;
+      seenTradeIds.add(entry.team.id);
+      pickedTradeTargets.push(entry);
+    };
+
+    addCandidate(contenderCandidate);
+    addCandidate(posNeedCandidate);
+    for (const entry of evaluatedTradeTargets) {
+      if (pickedTradeTargets.length >= 3) break;
+      addCandidate(entry);
+    }
+
+    const tradeAlreadyRejected = Boolean(career.tradeRequestedThisYear);
+
+    for (const item of pickedTradeTargets) {
+      const acceptProb = calculateOffseasonTradeAcceptProb(
+        career,
+        item.team,
+        item.eval.scoutingScore
+      );
+      const acceptPct = Math.round(acceptProb * 100);
+      const tradePromise = career.brokenRolePromise
+        ? {
+            promisedRole:
+              item.eval.promisedRole === 'ACE_FIRST_OPTION'
+                ? ('ACE_FIRST_OPTION' as RolePromiseType)
+                : ('STARTER_GUARANTEE' as RolePromiseType),
+            promisedRoleLabel:
+              item.eval.promisedRole === 'ACE_FIRST_OPTION'
+                ? ROLE_PROMISE_LABELS.ACE_FIRST_OPTION
+                : ROLE_PROMISE_LABELS.STARTER_GUARANTEE,
+          }
+        : determineTeamRolePromise(career, item.team, career.contractType, {
+            isResigning: false,
+          });
+
+      options.push({
+        id: `OPT_CONTRACT_REQUEST_TRADE_${item.team.id}`,
+        title: `${item.team.name} 트레이드 요청`,
+        subtitle: career.brokenRolePromise
+          ? `약속 미이행 레버리지 반영 · 구단 승인 예상 ${acceptPct}%`
+          : `잔여 계약 승계 협상 · 구단 승인 예상 ${acceptPct}%`,
+        badgeText: career.brokenRolePromise ? '트레이드 요구' : '트레이드 요청',
+        targetLeague: item.team.league,
+        targetTeam: item.team,
+        contractType: career.contractType,
+        contractYears: career.contractYearsLeft,
+        annualSalary: career.annualSalary,
+        scoutingScore: item.eval.scoutingScore,
+        promisedRole: tradePromise.promisedRole,
+        promisedRoleLabel: tradePromise.promisedRoleLabel,
+        actionType: 'REQUEST_TRADE',
+        isExistingContract: true,
+        tradeAcceptChancePct: acceptPct,
+        locked: tradeAlreadyRejected,
+        lockReason: tradeAlreadyRejected
+          ? '이번 오프시즌 트레이드 요청이 이미 반려되었습니다.'
+          : undefined,
+      });
     }
   } else if (career.contractYearsLeft === 0 && !isOutOfLeague) {
-    // 2) 계약 만료(FA) 상태: 원소속팀 재계약 심사 (프랜차이즈의 심장 특성 보유 시 우대)
+    // 2) 계약 만료(FA) 상태: 원소속팀 재계약 심사 (프랜차이즈의 심장 특성 및 직전 시즌 핵심 실적 우대)
     const currentTeamEval = evaluateTeamScouting(career, career.team, rng);
     const hasFranchiseHeart = (career.traits || []).includes('FRANCHISE_HEART');
 
@@ -1118,10 +1385,18 @@ export function generateOffseasonOptions(
       currentTeamEval.passesOfferThreshold ||
       (hasFranchiseHeart && career.age <= 36 && currentTeamEval.scoutingScore >= 52)
     ) {
-      const sal = getContractDefaultSalary(
-        currentTeamEval.recommendedContract,
-        career.ovr
-      );
+      const sal = calculateTeamContractOfferSalary({
+        contractType: currentTeamEval.recommendedContract,
+        ovr: career.ovr,
+        team: career.team,
+        promisedRole: currentTeamEval.promisedRole,
+        scoutingScore: currentTeamEval.scoutingScore,
+        isResigning: true,
+        coachTrust: career.coachTrust,
+        primaryPos: career.primaryPos,
+        secondaryPos: career.secondaryPos,
+        rng,
+      });
       options.push({
         id: 'OPT_RESIGN_CURRENT_TEAM',
         title: `${career.team.name} 재계약 오퍼`,
@@ -1130,7 +1405,13 @@ export function generateOffseasonOptions(
         targetLeague: career.league,
         targetTeam: career.team,
         contractType: currentTeamEval.recommendedContract,
-        contractYears: career.age >= 33 ? 1 : 3,
+        contractYears:
+          career.age >= 35
+            ? 1
+            : career.age >= 33 &&
+              currentTeamEval.promisedRole === 'VETERAN_MENTOR'
+            ? 1
+            : 3,
         annualSalary: sal,
         scoutingScore: currentTeamEval.scoutingScore,
         promisedRole: currentTeamEval.promisedRole,
@@ -1140,16 +1421,10 @@ export function generateOffseasonOptions(
       teamOffersCount += 1;
     }
 
-    // 동일 리그 타 구단 동적 스카우팅: [주전/1옵션을 보장하는 리빌딩·중하위 팀] vs [식스맨·롤플레이어지만 우승을 노리는 컨텐더 팀]
-    const sameLeaguePool = (
-      career.league === 'NBA'
-        ? nbaTeams
-        : career.league === 'KBL'
-        ? kblTeams
-        : career.league === 'OVERSEAS'
-        ? overseasTeams
-        : gleagueTeams
-    ).filter((t) => t.id !== career.team.id);
+    // 동일 리그 타 구단 동적 스카우팅: [주전/1옵션을 보장하는 리빌딩·중하위 팀] vs [우승을 노리는 컨텐더 팀]
+    const sameLeaguePool = getPoolByLeague(career.league).filter(
+      (t) => t.id !== career.team.id
+    );
 
     const evaluatedSameLeague = sameLeaguePool
       .map((t) => ({
@@ -1168,7 +1443,8 @@ export function generateOffseasonOptions(
     const contenderOffer = evaluatedSameLeague.find(
       (x) =>
         x.team.id !== starterOffer?.team.id &&
-        (x.team.direction === 'CONTENDER' || x.eval.promisedRole === 'SIXTH_MAN_CORE')
+        (x.team.direction === 'CONTENDER' ||
+          x.eval.promisedRole === 'SIXTH_MAN_CORE')
     );
 
     const pickedOffers = [
@@ -1180,10 +1456,18 @@ export function generateOffseasonOptions(
     }
 
     for (const item of pickedOffers) {
-      const sal = getContractDefaultSalary(
-        item.eval.recommendedContract,
-        career.ovr
-      );
+      const sal = calculateTeamContractOfferSalary({
+        contractType: item.eval.recommendedContract,
+        ovr: career.ovr,
+        team: item.team,
+        promisedRole: item.eval.promisedRole,
+        scoutingScore: item.eval.scoutingScore,
+        isResigning: false,
+        coachTrust: career.coachTrust,
+        primaryPos: career.primaryPos,
+        secondaryPos: career.secondaryPos,
+        rng,
+      });
       options.push({
         id: `OPT_FA_OFFER_${item.team.id}`,
         title: `${item.team.name} FA 오퍼`,
@@ -1192,7 +1476,7 @@ export function generateOffseasonOptions(
         targetLeague: item.team.league,
         targetTeam: item.team,
         contractType: item.eval.recommendedContract,
-        contractYears: career.age >= 33 ? 1 : 2,
+        contractYears: career.age >= 34 ? 1 : 2,
         annualSalary: sal,
         scoutingScore: item.eval.scoutingScore,
         promisedRole: item.eval.promisedRole,
@@ -1230,7 +1514,17 @@ export function generateOffseasonOptions(
             ? 'NBA_VET_MIN'
             : vetTeam.league === 'KBL'
             ? 'KBL_VET'
-            : 'OVERSEAS_CONTRACT';
+            : getLeagueDefaultContract(vetTeam.league);
+        const vetSalary = calculateTeamContractOfferSalary({
+          contractType: vetContract,
+          ovr: career.ovr,
+          team: vetTeam,
+          promisedRole: 'VETERAN_MENTOR',
+          scoutingScore: 60,
+          primaryPos: career.primaryPos,
+          secondaryPos: career.secondaryPos,
+          rng,
+        });
         options.push({
           id: `OPT_VET_MIN_${vetTeam.id}`,
           title: `${vetTeam.name} 베테랑 최저연봉 오퍼`,
@@ -1240,7 +1534,7 @@ export function generateOffseasonOptions(
           targetTeam: vetTeam,
           contractType: vetContract,
           contractYears: 1,
-          annualSalary: getContractDefaultSalary(vetContract, career.ovr),
+          annualSalary: vetSalary,
           promisedRole: 'VETERAN_MENTOR',
           promisedRoleLabel: ROLE_PROMISE_LABELS.VETERAN_MENTOR,
           actionType: 'SIGN_TEAM',
@@ -1250,13 +1544,15 @@ export function generateOffseasonOptions(
     }
   }
 
-  // 4) KBL / 해외 / G리그 소속 선수의 상위 리그 및 NBA 단계적 도전 루트
-  if (career.league !== 'NBA' && !isOutOfLeague) {
+  // 4) 계약 만료(FA) 상태의 KBL / B.리그 / NBL / 유로리그 / G리그 소속 선수의 타 리그 진출 및 NBA 도전 루트
+  // - 다년 계약이 남아있는 선수(contractYearsLeft > 0)에게는 타 리그 신규 계약 오퍼를 제시하지 않음!
+  if (career.contractYearsLeft === 0 && career.league !== 'NBA' && !isOutOfLeague) {
     const per36Pts = lastLog
       ? (lastLog.ppg * 36) / Math.max(12, lastLog.mpg)
       : 15;
+    // 현실 NBA CBA 국제 선수 자동 자격 상한(만 22세) 적용 — 23세 이상은 FA/투웨이/서머리그 경로로 도전
     if (
-      career.age <= 24 &&
+      career.age <= 22 &&
       career.totals.nbaGp === 0 &&
       (per36Pts >= 14.5 || career.ovr >= 68) &&
       career.draftStock >= 36
@@ -1273,7 +1569,53 @@ export function generateOffseasonOptions(
       });
     }
 
-    if (career.league === 'KBL' || career.league === 'OVERSEAS') {
+    const pushTopLeagueOffer = (
+      pool: TeamInfo[],
+      idPrefix: string,
+      contractYears: number = 2
+    ) => {
+      const candidates = pool
+        .map((t) => ({
+          team: t,
+          eval: evaluateTeamScouting(career, t, rng),
+        }))
+        .filter((x) => x.eval.passesOfferThreshold)
+        .sort((a, b) => b.eval.scoutingScore - a.eval.scoutingScore);
+      if (candidates.length === 0) return;
+      const best = candidates[0];
+      const sal = calculateTeamContractOfferSalary({
+        contractType: best.eval.recommendedContract,
+        ovr: career.ovr,
+        team: best.team,
+        promisedRole: best.eval.promisedRole,
+        scoutingScore: best.eval.scoutingScore,
+        primaryPos: career.primaryPos,
+        secondaryPos: career.secondaryPos,
+        rng,
+      });
+      options.push({
+        id: `${idPrefix}_${best.team.id}`,
+        title: `${best.team.name} 영입 오퍼`,
+        subtitle: `${getFrontOfficeInterestLabel(best.eval.scoutingScore)}`,
+        badgeText: `${LEAGUE_CONFIG[best.team.league].shortName} 오퍼`,
+        targetLeague: best.team.league,
+        targetTeam: best.team,
+        contractType: best.eval.recommendedContract,
+        contractYears,
+        annualSalary: sal,
+        scoutingScore: best.eval.scoutingScore,
+        promisedRole: best.eval.promisedRole,
+        promisedRoleLabel: best.eval.promisedRoleLabel,
+        actionType: 'SIGN_TEAM',
+      });
+      teamOffersCount += 1;
+    };
+
+    if (
+      career.league === 'KBL' ||
+      career.league === 'B_LEAGUE' ||
+      career.league === 'NBL'
+    ) {
       const glShowcaseTeam = selectBestFitTeamForPlayer(
         'GLEAGUE',
         career.primaryPos,
@@ -1303,33 +1645,100 @@ export function generateOffseasonOptions(
       }
 
       if (career.league === 'KBL') {
-        const ovsCandidates = overseasTeams
+        // KBL → 일본 B.리그 / 호주 NBL / 유로리그 각각 독립 스카우팅
+        pushTopLeagueOffer(bLeagueTeams, 'OPT_KBL_TO_BLEAGUE', 2);
+        pushTopLeagueOffer(nblTeams, 'OPT_KBL_TO_NBL', 2);
+        pushTopLeagueOffer(euroleagueTeams, 'OPT_KBL_TO_EUROLEAGUE', 2);
+      } else if (career.league === 'B_LEAGUE') {
+        pushTopLeagueOffer(nblTeams, 'OPT_BL_TO_NBL', 2);
+        pushTopLeagueOffer(euroleagueTeams, 'OPT_BL_TO_EUROLEAGUE', 2);
+      } else if (career.league === 'NBL') {
+        pushTopLeagueOffer(euroleagueTeams, 'OPT_NBL_TO_EUROLEAGUE', 2);
+      }
+
+      // 만 23세 이상 정상급 아시아/호주 FA 프로 선수의 NBA 비지명 자유계약(FA/투웨이) 직접 도전 경로
+      if (career.age >= 23 && career.ovr >= 78 && per36Pts >= 18.0) {
+        const nbaFaCandidates = nbaTeams
           .map((t) => ({
             team: t,
             eval: evaluateTeamScouting(career, t, rng),
           }))
           .filter((x) => x.eval.passesOfferThreshold)
           .sort((a, b) => b.eval.scoutingScore - a.eval.scoutingScore);
-
-        if (ovsCandidates.length > 0) {
-          const bestOvs = ovsCandidates[0];
+        if (nbaFaCandidates.length > 0) {
+          const pickedNba = nbaFaCandidates[0];
+          const sal = calculateTeamContractOfferSalary({
+            contractType: pickedNba.eval.recommendedContract,
+            ovr: career.ovr,
+            team: pickedNba.team,
+            promisedRole: pickedNba.eval.promisedRole,
+            scoutingScore: pickedNba.eval.scoutingScore,
+            primaryPos: career.primaryPos,
+            secondaryPos: career.secondaryPos,
+            rng,
+          });
           options.push({
-            id: `OPT_KBL_TO_OVS_${bestOvs.team.id}`,
-            title: `${bestOvs.team.name} 영입 오퍼`,
-            subtitle: `${getFrontOfficeInterestLabel(bestOvs.eval.scoutingScore)}`,
-            badgeText: '해외 프로 오퍼',
-            targetLeague: 'OVERSEAS',
-            targetTeam: bestOvs.team,
-            contractType: 'OVERSEAS_CONTRACT',
-            contractYears: 2,
-            annualSalary: getContractDefaultSalary('OVERSEAS_CONTRACT', career.ovr),
-            scoutingScore: bestOvs.eval.scoutingScore,
-            promisedRole: bestOvs.eval.promisedRole,
-            promisedRoleLabel: bestOvs.eval.promisedRoleLabel,
+            id: `OPT_PRO_FA_TO_NBA_${pickedNba.team.id}`,
+            title: `${pickedNba.team.name} NBA FA 영입 오퍼`,
+            subtitle: `프로 무대 활약을 인정받아 ${pickedNba.team.shortName}의 NBA 자유계약 제안을 받았습니다.`,
+            badgeText:
+              pickedNba.eval.recommendedContract === 'TWO_WAY'
+                ? 'NBA 투웨이'
+                : 'NBA FA',
+            targetLeague: 'NBA',
+            targetTeam: pickedNba.team,
+            contractType: pickedNba.eval.recommendedContract,
+            contractYears: pickedNba.eval.recommendedContract === 'TWO_WAY' ? 1 : 2,
+            annualSalary: sal,
+            scoutingScore: pickedNba.eval.scoutingScore,
+            promisedRole: pickedNba.eval.promisedRole,
+            promisedRoleLabel: pickedNba.eval.promisedRoleLabel,
             actionType: 'SIGN_TEAM',
           });
           teamOffersCount += 1;
         }
+      }
+    } else if (career.league === 'EUROLEAGUE') {
+      // 유로리그 최정상급 활약 시 NBA 직행(Standard 또는 Two-Way) 오퍼
+      const nbaDirectCandidates = nbaTeams
+        .map((t) => ({
+          team: t,
+          eval: evaluateTeamScouting(career, t, rng),
+        }))
+        .filter((x) => x.eval.passesOfferThreshold && per36Pts >= 16.5)
+        .sort((a, b) => b.eval.scoutingScore - a.eval.scoutingScore);
+
+      if (nbaDirectCandidates.length > 0) {
+        const picked = nbaDirectCandidates[0];
+        const sal = calculateTeamContractOfferSalary({
+          contractType: picked.eval.recommendedContract,
+          ovr: career.ovr,
+          team: picked.team,
+          promisedRole: picked.eval.promisedRole,
+          scoutingScore: picked.eval.scoutingScore,
+          primaryPos: career.primaryPos,
+          secondaryPos: career.secondaryPos,
+          rng,
+        });
+        options.push({
+          id: `OPT_EUROLEAGUE_TO_NBA_${picked.team.id}`,
+          title: `${picked.team.name} NBA 직행 오퍼`,
+          subtitle: `유로리그 무대 활약을 인정받아 ${picked.team.name}의 공식 영입 제안을 받았습니다.`,
+          badgeText:
+            picked.eval.recommendedContract === 'TWO_WAY'
+              ? 'NBA 투웨이'
+              : 'NBA 직행',
+          targetLeague: 'NBA',
+          targetTeam: picked.team,
+          contractType: picked.eval.recommendedContract,
+          contractYears: picked.eval.recommendedContract === 'TWO_WAY' ? 1 : 2,
+          annualSalary: sal,
+          scoutingScore: picked.eval.scoutingScore,
+          promisedRole: picked.eval.promisedRole,
+          promisedRoleLabel: picked.eval.promisedRoleLabel,
+          actionType: 'SIGN_TEAM',
+        });
+        teamOffersCount += 1;
       }
     } else if (career.league === 'GLEAGUE') {
       const nbaTwoWayCandidates = nbaTeams
@@ -1359,6 +1768,7 @@ export function generateOffseasonOptions(
         });
         teamOffersCount += 1;
       }
+      pushTopLeagueOffer(euroleagueTeams, 'OPT_GL_TO_EUROLEAGUE', 2);
     }
   }
 
@@ -1372,9 +1782,17 @@ export function generateOffseasonOptions(
   if (needsStepDownOption && !isOutOfLeague) {
     const stepDownPools =
       career.league === 'NBA'
-        ? [...gleagueTeams, ...overseasTeams, ...kblTeams]
-        : career.league === 'GLEAGUE' || career.league === 'OVERSEAS'
-        ? [...overseasTeams, ...kblTeams]
+        ? [
+            ...euroleagueTeams,
+            ...gleagueTeams,
+            ...nblTeams,
+            ...bLeagueTeams,
+            ...kblTeams,
+          ]
+        : career.league === 'EUROLEAGUE'
+        ? [...nblTeams, ...bLeagueTeams, ...gleagueTeams, ...kblTeams]
+        : career.league === 'GLEAGUE' || career.league === 'NBL'
+        ? [...bLeagueTeams, ...kblTeams]
         : [...kblTeams];
 
     const fallbackCandidates = stepDownPools
@@ -1391,10 +1809,16 @@ export function generateOffseasonOptions(
       .slice(0, teamOffersCount === 0 ? 2 : 1);
 
     for (const item of fallbackCandidates) {
-      const sal = getContractDefaultSalary(
-        item.eval.recommendedContract,
-        career.ovr
-      );
+      const sal = calculateTeamContractOfferSalary({
+        contractType: item.eval.recommendedContract,
+        ovr: career.ovr,
+        team: item.team,
+        promisedRole: item.eval.promisedRole,
+        scoutingScore: item.eval.scoutingScore,
+        primaryPos: career.primaryPos,
+        secondaryPos: career.secondaryPos,
+        rng,
+      });
       options.push({
         id: `OPT_STEPDOWN_${item.team.id}`,
         title: `${item.team.name} 영입 오퍼`,

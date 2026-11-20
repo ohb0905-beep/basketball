@@ -1,4 +1,9 @@
-import { LeagueId, LiveTacticId, PersonalCareId } from '../types/game';
+import {
+  InternationalTournamentType,
+  LeagueId,
+  LiveTacticId,
+  PersonalCareId,
+} from '../types/game';
 
 /**
  * 중앙 밸런스 파라미터 설정 모듈 (Single Source of Truth)
@@ -71,17 +76,41 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     royBoardTitle: 'KBL 신인왕(ROY) 투표 레이스 TOP 5',
     allStarLabel: 'KBL 올스타',
   },
-  OVERSEAS: {
+  B_LEAGUE: {
+    isPro: true,
+    isAmateur: false,
+    foulLimit: 5,
+    liveQuarterBasePts: 19,
+    liveOppQuarterBasePts: 20,
+    liveOvertimeBasePts: 9,
+    minAttendanceRatio: 0.67,
+    mvpBoardTitle: 'B.리그 B1 정규시즌 MVP 투표 TOP 5',
+    royBoardTitle: 'B.리그 B1 신인왕(ROY) 투표 TOP 5',
+    allStarLabel: 'B.리그 올스타',
+  },
+  NBL: {
+    isPro: true,
+    isAmateur: false,
+    foulLimit: 5,
+    liveQuarterBasePts: 21,
+    liveOppQuarterBasePts: 22,
+    liveOvertimeBasePts: 9,
+    minAttendanceRatio: 0.66,
+    mvpBoardTitle: '호주 NBL 정규시즌 MVP 투표 TOP 5',
+    royBoardTitle: '호주 NBL 신인왕(ROY) 투표 TOP 5',
+    allStarLabel: 'All-NBL 선정',
+  },
+  EUROLEAGUE: {
     isPro: true,
     isAmateur: false,
     foulLimit: 5,
     liveQuarterBasePts: 20,
-    liveOppQuarterBasePts: 21,
+    liveOppQuarterBasePts: 20,
     liveOvertimeBasePts: 9,
-    minAttendanceRatio: 0.67,
-    mvpBoardTitle: '리그 정규시즌 MVP 투표 레이스 TOP 5',
-    royBoardTitle: '리그 신인왕(ROY) 투표 레이스 TOP 5',
-    allStarLabel: '리그 올스타',
+    minAttendanceRatio: 0.66,
+    mvpBoardTitle: '유로리그 정규시즌 MVP 투표 TOP 5',
+    royBoardTitle: '유로리그 라이징 스타(Rising Star) TOP 5',
+    allStarLabel: '올-유로리그 선정',
   },
   GLEAGUE: {
     isPro: true,
@@ -119,7 +148,9 @@ export const ECONOMY_CONFIG = {
       proOnly: false,
       costs: {
         NBA: 450000,
-        OVERSEAS: 180000,
+        EUROLEAGUE: 220000,
+        NBL: 110000,
+        B_LEAGUE: 85000,
         KBL: 45000,
         GLEAGUE: 18000,
         NCAA: 10000,
@@ -133,7 +164,9 @@ export const ECONOMY_CONFIG = {
       proOnly: false,
       costs: {
         NBA: 350000,
-        OVERSEAS: 140000,
+        EUROLEAGUE: 170000,
+        NBL: 85000,
+        B_LEAGUE: 65000,
         KBL: 35000,
         GLEAGUE: 14000,
         NCAA: 8000,
@@ -147,7 +180,9 @@ export const ECONOMY_CONFIG = {
       proOnly: true, // 고교·대학 아마추어는 글로벌 시그니처 스니커즈 런칭 불가
       costs: {
         NBA: 800000,
-        OVERSEAS: 280000,
+        EUROLEAGUE: 340000,
+        NBL: 160000,
+        B_LEAGUE: 120000,
         KBL: 75000,
         GLEAGUE: 30000,
         NCAA: 0,
@@ -178,10 +213,105 @@ export function getPersonalCareCostFromConfig(
   return ECONOMY_CONFIG.personalCare[careId].costs[league] ?? 10000;
 }
 
+export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
+  InternationalTournamentType,
+  {
+    id: InternationalTournamentType;
+    name: string;
+    shortName: string;
+    yearMod4: 0 | 1 | 2 | 3;
+    minOvr: number;
+    ldr: number;
+    baseKorRating: number;
+    aceRatingWeight: number;
+    aceRatingMaxBonus: number;
+    winProbCap: number;
+    militaryExemptionMinMedal: 'GOLD' | 'BRONZE' | null;
+    draftStockBonus: number;
+    legacyPoints: { gold: number; silver: number; bronze: number; mvp: number };
+    subtitle: string;
+  }
+> = {
+  ASIA_CUP: {
+    id: 'ASIA_CUP',
+    name: 'FIBA 아시아컵',
+    shortName: '아시아컵',
+    yearMod4: 1,
+    minOvr: 68,
+    ldr: 72,
+    baseKorRating: 75.0,
+    aceRatingWeight: 0.56,
+    aceRatingMaxBonus: 14.0,
+    winProbCap: 0.91,
+    militaryExemptionMinMedal: null,
+    draftStockBonus: 5,
+    legacyPoints: { gold: 350, silver: 160, bronze: 80, mvp: 180 },
+    subtitle: '아시아·오세아니아 12개국 대륙 최강자전',
+  },
+  ASIAN_GAMES: {
+    id: 'ASIAN_GAMES',
+    name: '아시안게임 남자농구',
+    shortName: '아시안게임',
+    yearMod4: 2,
+    minOvr: 65,
+    ldr: 67,
+    baseKorRating: 77.8,
+    aceRatingWeight: 0.72,
+    aceRatingMaxBonus: 15.5,
+    winProbCap: 0.93,
+    militaryExemptionMinMedal: 'GOLD',
+    draftStockBonus: 6,
+    legacyPoints: { gold: 400, silver: 140, bronze: 70, mvp: 160 },
+    subtitle: '조별리그 · 8강 · 4강 · 결승 우승 시 병역특례 획득',
+  },
+  FIBA_WORLD_CUP: {
+    id: 'FIBA_WORLD_CUP',
+    name: 'FIBA 농구 월드컵',
+    shortName: 'FIBA 월드컵',
+    yearMod4: 3,
+    minOvr: 72,
+    ldr: 82,
+    baseKorRating: 75.5,
+    aceRatingWeight: 0.68,
+    aceRatingMaxBonus: 18.0,
+    winProbCap: 0.89,
+    militaryExemptionMinMedal: null,
+    draftStockBonus: 9,
+    legacyPoints: { gold: 1100, silver: 650, bronze: 380, mvp: 520 },
+    subtitle: '전 세계 16개국 최강자들이 격돌하는 농구 월드컵',
+  },
+  OLYMPICS: {
+    id: 'OLYMPICS',
+    name: '하계 올림픽 남자농구',
+    shortName: '올림픽',
+    yearMod4: 0,
+    minOvr: 75,
+    ldr: 85,
+    baseKorRating: 76.0,
+    aceRatingWeight: 0.72,
+    aceRatingMaxBonus: 19.5,
+    winProbCap: 0.88,
+    militaryExemptionMinMedal: 'BRONZE',
+    draftStockBonus: 11,
+    legacyPoints: { gold: 1400, silver: 850, bronze: 500, mvp: 650 },
+    subtitle: '세계 최정예 12개국 본선 · 동메달 이상 획득 시 병역특례',
+  },
+};
+
+export function getInternationalTournamentByYear(
+  year: number
+): InternationalTournamentType {
+  const mod = ((year % 4) + 4) % 4;
+  if (mod === 1) return 'ASIA_CUP';
+  if (mod === 2) return 'ASIAN_GAMES';
+  if (mod === 3) return 'FIBA_WORLD_CUP';
+  return 'OLYMPICS';
+}
+
 export const LIVE_GAME_CONFIG = {
   clutchMaxPointGap: 4, // 실제 ±4점 이내 접전일 때만 클러치 마지막 1포제션 자연 발동
   maxOvertimePeriods: 3, // 최대 3차 연장(3OT)
-  asianGamesLdr: 72,
+  asianGamesLdr: 67,
   asianGamesFoulLimit: 5,
   clutchProbMin: 0.2,
   clutchProbMax: 0.85,
@@ -339,6 +469,13 @@ export const DRAFT_SCOUTING_CONFIG = {
   },
 };
 
+export const MILITARY_SERVICE_CONFIG = {
+  defaultEnlistAge: 27,
+  nbaDeferredEnlistAge: 29, // NBA 소속 선수는 만 28세 시즌까지 병역 연기 허용 (만 29세 미필 시 영장 발부)
+  defaultExemptionMaxAge: 26,
+  nbaExemptionMaxAge: 28,
+};
+
 export const AGING_RETIREMENT_CONFIG = {
   baseOnsetAge: 30,
   mileageReferenceMinutes: 18000,
@@ -350,6 +487,10 @@ export const AGING_RETIREMENT_CONFIG = {
   farewellTourMinAge: 34,
   outOfLeagueMinAge: 33,
   mandatoryRetireAge: 40,
+  hardRetireAge: 45, // 기량 유지 시 40~44세 연장 가능, 만 45세 절대 상한
+  age40ExtensionMaxLdrGap: -4, // 소속 리그 LDR 대비 -4 이내 경쟁력 유지 시 연장 가능
+  age40ExtensionMinPpg: 10.0,
+  age40ExtensionMinMpg: 18.0,
   jerseyRetirement: {
     minSeasons: 7,
     nbaMinPoints: 10000,

@@ -4,8 +4,8 @@ import React, { useEffect } from 'react';
 import { BookOpen, Moon, RotateCcw, Sun } from 'lucide-react';
 import { generateLeagueFallbackSvgDataUri } from '../../data/logoFallbacks';
 import {
+  ALL_INTERNATIONAL_TEAMS,
   ALL_TEAMS,
-  ASIAN_NATIONAL_TEAMS,
   GLEAGUE_TEAMS,
   NBA_TEAMS,
   NCAA_TEAMS,
@@ -19,7 +19,7 @@ interface HeaderProps {
   wide?: boolean;
 }
 
-const CLIENT_LOGO_CACHE_KEY = 'bench_to_mvp_logo_cache_v2';
+const CLIENT_LOGO_CACHE_KEY = 'bench_to_mvp_logo_cache_v3';
 const CLIENT_LOGO_CACHE_TTL = 60 * 60 * 1000;
 
 export function Header({
@@ -38,11 +38,23 @@ export function Header({
 
   useEffect(() => {
     const baseLogos: Record<string, string> = {};
-    for (const t of [...ALL_TEAMS, ...ASIAN_NATIONAL_TEAMS]) {
+    for (const t of [...ALL_TEAMS, ...ALL_INTERNATIONAL_TEAMS]) {
       const svgFallback = generateLeagueFallbackSvgDataUri(t);
       baseLogos[`FALLBACK_${t.id}`] = svgFallback;
       baseLogos[t.id] = t.logoUrl || svgFallback;
     }
+    baseLogos.KOR_NAT_TEAM = '/logos/NAT_KOR.svg';
+    baseLogos.FALLBACK_KOR_NAT_TEAM = generateLeagueFallbackSvgDataUri({
+      id: 'KOR_NAT_TEAM',
+      name: '대한민국 남자농구 국가대표팀',
+      shortName: '대한민국',
+      city: '서울',
+      league: 'KBL',
+      rating: 78,
+      primaryColor: '#0047A0',
+      secondaryColor: '#CD2E3A',
+      prestigeDesc: '',
+    });
     for (const t of NBA_TEAMS) {
       if (t.espnAbbr) {
         const url = `https://a.espncdn.com/i/teamlogos/nba/500/${t.espnAbbr.toLowerCase()}.png`;
@@ -137,20 +149,19 @@ export function Header({
         <button
           type="button"
           onClick={() => setView('HOME')}
-          className="min-h-[44px] flex items-center gap-2 text-left cursor-pointer min-w-0 t-tap"
+          className="min-h-[44px] flex items-center text-left cursor-pointer min-w-0 t-tap"
         >
-          <span className="w-2.5 h-2.5 rounded-full bg-[var(--t-accent)] shrink-0" />
           <span className="font-bold tracking-[-0.03em] text-[17px] text-[var(--t-g900)] whitespace-nowrap truncate">
             벤치에서 MVP까지
           </span>
         </button>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-0.5 shrink-0">
           {career && view !== 'DASHBOARD' && !career.retirementReason && (
             <button
               type="button"
               onClick={() => setView('DASHBOARD')}
-              className="min-h-[36px] px-3 rounded-xl bg-[var(--t-accent-soft)] text-[var(--t-accent-ink)] text-[13px] font-semibold whitespace-nowrap cursor-pointer t-tap"
+              className="min-h-[40px] px-3 rounded-xl bg-[var(--t-accent-soft)] text-[var(--t-accent-ink)] text-[13px] font-semibold whitespace-nowrap cursor-pointer t-tap"
             >
               이어하기
             </button>
@@ -159,7 +170,7 @@ export function Header({
           <button
             type="button"
             onClick={toggleTheme}
-            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
             aria-label={theme === 'dark' ? '라이트 모드 전환' : '다크 모드 전환'}
             title={theme === 'dark' ? '라이트 모드' : '다크 모드'}
           >
@@ -175,7 +186,7 @@ export function Header({
               type="button"
               data-testid="open-save-guide-btn"
               onClick={onRequestSaveGuideModal}
-              className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
               title="저장 및 가이드"
               aria-label="저장 및 가이드"
             >
@@ -194,7 +205,7 @@ export function Header({
                   resetActiveCareer();
                 }
               }}
-              className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:text-[var(--t-up)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-[var(--t-g600)] hover:text-[var(--t-up)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap"
               title="새 커리어"
               aria-label="새 커리어"
             >

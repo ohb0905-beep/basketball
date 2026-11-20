@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { isInternationalLiveGame } from '../../engine/playoffEngine';
 import { useCareerStore } from '../../store/useCareerStore';
 import {
   LiveCourtPlay,
@@ -642,6 +643,23 @@ export function LiveGameBroadcast() {
           </div>
         </div>
 
+        {/* 국제대회 예선·토너먼트 경로 요약 (결승/3·4위전 입장 시) */}
+        {isInternationalLiveGame(liveGame.gameType) &&
+          liveGame.internationalPreMatches &&
+          liveGame.internationalPreMatches.length > 0 && (
+            <div className="px-3 py-2 rounded-xl bg-[var(--t-g100)] text-[12px] text-[var(--t-g600)] flex flex-wrap items-center gap-x-2.5 gap-y-1 tabular-nums">
+              <span className="font-bold text-[var(--t-accent-ink)]">
+                이전 경기
+              </span>
+              {liveGame.internationalPreMatches.map((m, idx) => (
+                <span key={`${m.stageLabel}-${idx}`}>
+                  {m.stageLabel} {m.korScore}:{m.oppScore} {m.opponentName} (
+                  {m.won ? '승' : '패'})
+                </span>
+              ))}
+            </div>
+          )}
+
         {/* 스코어보드 */}
         <div className="grid grid-cols-3 items-center text-center py-2">
           <div className="flex flex-col items-center gap-1 min-w-0">
@@ -916,7 +934,26 @@ export function LiveGameBroadcast() {
 
       {/* 5. 종료 헤드라인 */}
       {liveGame.finalOutcome && !isReplaying && (
-        <section className="t-card">
+        <section className="t-card space-y-2">
+          {liveGame.finalOutcome.medal && (
+            <div className="flex flex-wrap items-center gap-2 text-[12px] font-bold">
+              <span className="text-[var(--t-gold)]">
+                {liveGame.finalOutcome.medal === 'GOLD'
+                  ? '금메달 확정'
+                  : liveGame.finalOutcome.medal === 'SILVER'
+                  ? '은메달 확정'
+                  : liveGame.finalOutcome.medal === 'BRONZE'
+                  ? '동메달 확정'
+                  : '4위 마감'}
+              </span>
+              {liveGame.finalOutcome.wonTournamentMvp && (
+                <span className="text-[var(--t-accent-ink)]">· 대회 MVP</span>
+              )}
+              {liveGame.finalOutcome.grantedMilitaryExemption && (
+                <span className="text-[var(--t-ok)]">· 병역 특례 확정</span>
+              )}
+            </div>
+          )}
           <p className="text-[15px] font-bold text-[var(--t-g900)] leading-relaxed">
             {liveGame.finalOutcome.headline}
           </p>
@@ -959,7 +996,7 @@ export function LiveGameBroadcast() {
                   ? 'NBA 파이널로 이동'
                   : liveGame.gameType === 'CONF_FINALS_GAME7' && !userWon
                   ? '대진표 결과 확인'
-                  : liveGame.gameType === 'ASIAN_GAMES_FINAL'
+                  : isInternationalLiveGame(liveGame.gameType)
                   ? '오프시즌 복귀'
                   : userWon
                   ? '우승 확정 · 오프시즌으로'

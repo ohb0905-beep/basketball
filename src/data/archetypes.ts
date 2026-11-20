@@ -35,8 +35,8 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetypeInfo> = {
   PG: {
     pos: 'PG',
     name: '포인트가드 (PG)',
-    title: '코트 위의 야전사령관 (Floor General)',
-    description: '정교한 볼핸들링과 시야로 팀 공격을 조율하고 외곽 슈팅으로 수비를 흔드는 사령탑이에요.',
+    title: '볼핸들링 · 경기 조율형',
+    description: '볼핸들링과 패스 시야를 바탕으로 팀 공격 템포를 조절하고 외곽 슈팅으로 공간을 여는 포지션입니다.',
     recommendedHeightRange: [176, 195],
     defaultHeightCm: 186,
     baseStats: { ins: 52, out: 56, ply: 62, def: 52, reb: 41, phy: 55 },
@@ -46,8 +46,8 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetypeInfo> = {
   SG: {
     pos: 'SG',
     name: '슈팅가드 (SG)',
-    title: '폭발적인 외곽 스코어러 (Sharpshooter & Slasher)',
-    description: '정교한 3점슛과 날카로운 돌파로 팀의 주득점원 역할을 수행하는 백코트 에이스예요.',
+    title: '외곽 슈팅 · 돌파 스코어러',
+    description: '캐치앤슛 3점과 온볼 돌파로 팀의 주요 득점 루트를 맡는 백코트 득점 포지션입니다.',
     recommendedHeightRange: [185, 201],
     defaultHeightCm: 193,
     baseStats: { ins: 56, out: 60, ply: 52, def: 52, reb: 45, phy: 56 },
@@ -57,8 +57,8 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetypeInfo> = {
   SF: {
     pos: 'SF',
     name: '스몰포워드 (SF)',
-    title: '공수겸장 올라운드 윙 (Two-Way Wing)',
-    description: '내외곽 득점과 대인 수비, 리바운드 가담까지 코트 전역을 지배하는 다재다능한 에이스예요.',
+    title: '공수 겸비 올라운드 윙',
+    description: '내외곽 득점, 스위치 수비, 리바운드 가담까지 균형 있게 수행하는 멀티 윙 포지션입니다.',
     recommendedHeightRange: [193, 206],
     defaultHeightCm: 199,
     baseStats: { ins: 56, out: 56, ply: 51, def: 56, reb: 53, phy: 56 },
@@ -68,8 +68,8 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetypeInfo> = {
   PF: {
     pos: 'PF',
     name: '파워포워드 (PF)',
-    title: '기동력과 파워의 인사이드·스트레치 빅 (Modern Forward)',
-    description: '강력한 보드 장악력과 골밑 피니시, 스트레치 슈팅으로 공수 밸런스를 잡아주는 프론트코트의 핵심이에요.',
+    title: '인사이드 · 스트레치 빅',
+    description: '골밑 피니시와 보드 경합, 외곽 스페이싱을 병행해 프론트코트 균형을 잡는 포지션입니다.',
     recommendedHeightRange: [198, 211],
     defaultHeightCm: 204,
     baseStats: { ins: 58, out: 50, ply: 46, def: 55, reb: 59, phy: 57 },
@@ -79,8 +79,8 @@ export const POSITION_ARCHETYPES: Record<Position, PositionArchetypeInfo> = {
   C: {
     pos: 'C',
     name: '센터 (C)',
-    title: '페인트존의 지배자 (Rim Protector & Post Anchor)',
-    description: '압도적인 높이와 림 프로텍팅, 리바운드와 포스트업으로 골밑을 장악하는 최후의 보루예요.',
+    title: '림 프로텍션 · 포스트 앵커',
+    description: '높이와 몸싸움을 앞세워 리바운드, 스크린, 림 수비의 축을 담당하는 골밑 포지션입니다.',
     recommendedHeightRange: [204, 222],
     defaultHeightCm: 210,
     baseStats: { ins: 61, out: 43, ply: 43, def: 57, reb: 63, phy: 58 },
@@ -104,14 +104,14 @@ export function getHeightModifiers(heightCm: number): {
     phy: Math.round(-Math.abs(deltaFrom195) * 0.06),
   };
 
-  let label = '밸런스형 피지컬';
-  let physicsDesc = '공수 밸런스와 기동력·타점이 조화를 이루는 표준 체격이에요.';
+  let label = '표준 밸런스 체격';
+  let physicsDesc = '기동력과 타점이 고르게 배분된 표준 체격입니다.';
   if (heightCm <= 182) {
-    label = '초저중심 스피드스터';
-    physicsDesc = '낮은 무게중심으로 볼핸들링과 방향전환이 매우 빠르지만 골밑 경합과 타점에서 불리해요.';
+    label = '저중심 스피드형';
+    physicsDesc = '무게중심이 낮아 볼핸들링과 방향 전환에 유리하지만 골밑 경합과 타점에서 불리합니다.';
   } else if (heightCm >= 210) {
-    label = '초장신 타점 지배자';
-    physicsDesc = '압도적인 타점과 림 프로텍팅을 자랑하지만 드리블 궤적이 길고 민첩성 소모가 커요.';
+    label = '장신 타점 우위형';
+    physicsDesc = '높은 타점과 림 수비에서 강점이 크지만 드리블 궤적이 길고 민첩성 부담이 큽니다.';
   }
 
   return { statModifiers, label, physicsDesc };

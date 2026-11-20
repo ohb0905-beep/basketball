@@ -20,7 +20,7 @@ export function HeroSection({ onRequestResetModal }: HeroSectionProps = {}) {
       {/* 메인 히어로 카드 */}
       <section className="t-card space-y-6">
         <div className="space-y-2">
-          <h1 className="text-[28px] sm:text-[32px] font-bold tracking-[-0.03em] text-[var(--t-g900)] leading-[1.24]">
+          <h1 className="text-[28px] sm:text-[32px] font-bold tracking-[-0.03em] text-[var(--t-g900)] leading-[1.24] text-balance">
             벤치 끝자락에서
             <br />
             <span className="text-[var(--t-accent)]">NBA MVP까지</span>

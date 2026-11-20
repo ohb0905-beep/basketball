@@ -2,9 +2,36 @@
 
 import React, { useState } from 'react';
 import { LEAGUE_CONFIG } from '../../data/leagues';
+import { getLeagueRecordChases } from '../../engine/recordBookEngine';
 import { getAwardsByLeague } from '../../engine/seasonSimulator';
 import { useCareerStore } from '../../store/useCareerStore';
-import { SeasonBoxScore } from '../../types/game';
+import {
+  InternationalTournamentRecord,
+  LeagueId,
+  SeasonBoxScore,
+} from '../../types/game';
+import { formatCurrencyCompact } from '../../utils/formatters';
+
+function getIntlResultLabel(result: InternationalTournamentRecord['result']): string {
+  if (result === 'GOLD') return '금메달';
+  if (result === 'SILVER') return '은메달';
+  if (result === 'BRONZE') return '동메달';
+  if (result === 'FOURTH') return '4위';
+  if (result === 'QUARTERFINAL') return '8강';
+  return '조별리그';
+}
+
+const RECORD_LEAGUES: LeagueId[] = [
+  'NBA',
+  'KBL',
+  'EUROLEAGUE',
+  'NBL',
+  'B_LEAGUE',
+  'NCAA',
+  'U_LEAGUE',
+  'GLEAGUE',
+  'HIGH_SCHOOL',
+];
 
 function formatAwardsClean(log: SeasonBoxScore): string[] {
   const badges: string[] = [];
@@ -22,20 +49,25 @@ function formatAwardsClean(log: SeasonBoxScore): string[] {
   return badges;
 }
 
-function formatEarnings(amount: number): string {
-  if (amount >= 1_000_000) return `$${(amount / 1_000_000).toFixed(1)}M`;
-  if (amount >= 1_000) return `$${Math.round(amount / 1000).toLocaleString()}K`;
-  return `$${amount.toLocaleString()}`;
-}
-
 export function HistoryTab() {
   const career = useCareerStore((s) => s.career);
-  const [timelineTab, setTimelineTab] = useState<'SEASONS' | 'MILESTONES'>('SEASONS');
+  const recordBook = useCareerStore((s) => s.recordBook);
+  const [timelineTab, setTimelineTab] = useState<
+    'SEASONS' | 'MILESTONES' | 'RECORDS'
+  >('SEASONS');
+  const [selectedRecordLeague, setSelectedRecordLeague] =
+    useState<LeagueId | null>(null);
 
   if (!career) return null;
 
   const { seasonLogs, milestones, totals, careerHighs, rivals } = career;
   const leagueSummaries = getAwardsByLeague(seasonLogs);
+  const activeRecordLeague = selectedRecordLeague || career.league;
+  const recordChases = getLeagueRecordChases(
+    recordBook,
+    career,
+    activeRecordLeague
+  );
 
   const avgPpg = totals.gp > 0 ? (totals.points / totals.gp).toFixed(1) : '0.0';
   const avgRpg = totals.gp > 0 ? (totals.rebounds / totals.gp).toFixed(1) : '0.0';
@@ -76,7 +108,7 @@ export function HistoryTab() {
           </div>
           <div>
             <span className="block text-[18px] font-bold text-[var(--t-g900)]">
-              {formatEarnings(career.careerEarnings || 0)}
+              {formatCurrencyCompact(career.careerEarnings || 0)}
             </span>
             <span className="text-[11px] text-[var(--t-g500)]">통산 연봉</span>
           </div>
@@ -114,6 +146,61 @@ export function HistoryTab() {
         </div>
       </section>
 
+      {/* 1.5 국가대표 국제대회 이력 */}
+      {career.internationalHistory && career.internationalHistory.length > 0 && (
+        <section
+          data-testid="international-history-section"
+          className="t-card space-y-3"
+        >
+          <div className="flex items-baseline justify-between gap-2">
+            <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
+              국가대표 국제대회 기록
+            </h2>
+            <span className="text-[12px] font-semibold text-[var(--t-g500)] tabular-nums">
+              A매치 {totals.internationalCaps || 0}G · 금 {totals.internationalMedals?.gold || 0} · 은{' '}
+              {totals.internationalMedals?.silver || 0} · 동{' '}
+              {totals.internationalMedals?.bronze || 0}
+            </span>
+          </div>
+
+          <div className="divide-y divide-[var(--t-g100)]">
+            {career.internationalHistory.map((rec) => {
+              const isGold = rec.result === 'GOLD';
+              const isMedal =
+                rec.result === 'GOLD' ||
+                rec.result === 'SILVER' ||
+                rec.result === 'BRONZE';
+              return (
+                <div key={rec.id} className="py-2.5 first:pt-0 last:pb-0 space-y-0.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[14px] font-bold text-[var(--t-g900)] truncate">
+                      {rec.year} {rec.tournamentName}
+                    </span>
+                    <span
+                      className={`text-[13px] font-bold shrink-0 ${
+                        isGold
+                          ? 'text-[var(--t-gold)]'
+                          : isMedal
+                          ? 'text-[var(--t-accent-ink)]'
+                          : 'text-[var(--t-g500)]'
+                      }`}
+                    >
+                      {getIntlResultLabel(rec.result)}
+                      {rec.wonMvp ? ' · MVP' : ''}
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-[var(--t-g500)] tabular-nums">
+                    평균 {rec.avgPts.toFixed(1)}점 · {rec.avgReb.toFixed(1)}리바 ·{' '}
+                    {rec.avgAst.toFixed(1)}도움 ({rec.matches.length}경기)
+                    {rec.grantedMilitaryExemption ? ' · 병역 특례' : ''}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* 2. 드래프트 동기 라이벌 */}
       {rivals && rivals.length > 0 && (
         <section className="t-card space-y-3">
@@ -149,24 +236,24 @@ export function HistoryTab() {
         </section>
       )}
 
-      {/* 3. 시즌별 기록 & 연대기 타임라인 */}
+      {/* 3. 시즌별 기록 · 연대기 · 역대 기록실 */}
       <section className="t-card space-y-4">
-        <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-[var(--t-g100)] text-[13px] font-semibold">
+        <div className="grid grid-cols-3 gap-1 p-1 rounded-2xl bg-[var(--t-g100)] text-[13px] font-semibold">
           <button
             type="button"
             onClick={() => setTimelineTab('SEASONS')}
-            className={`min-h-[38px] rounded-xl transition cursor-pointer ${
+            className={`min-h-[40px] rounded-xl transition cursor-pointer ${
               timelineTab === 'SEASONS'
                 ? 'bg-[var(--t-card)] text-[var(--t-g900)]'
                 : 'text-[var(--t-g500)]'
             }`}
           >
-            시즌 기록 ({seasonLogs.length})
+            시즌 ({seasonLogs.length})
           </button>
           <button
             type="button"
             onClick={() => setTimelineTab('MILESTONES')}
-            className={`min-h-[38px] rounded-xl transition cursor-pointer ${
+            className={`min-h-[40px] rounded-xl transition cursor-pointer ${
               timelineTab === 'MILESTONES'
                 ? 'bg-[var(--t-card)] text-[var(--t-g900)]'
                 : 'text-[var(--t-g500)]'
@@ -174,12 +261,24 @@ export function HistoryTab() {
           >
             연대기 ({milestones.length})
           </button>
+          <button
+            type="button"
+            data-testid="history-records-tab"
+            onClick={() => setTimelineTab('RECORDS')}
+            className={`min-h-[40px] rounded-xl transition cursor-pointer ${
+              timelineTab === 'RECORDS'
+                ? 'bg-[var(--t-card)] text-[var(--t-g900)]'
+                : 'text-[var(--t-g500)]'
+            }`}
+          >
+            역대 기록실
+          </button>
         </div>
 
         {timelineTab === 'SEASONS' ? (
           seasonLogs.length === 0 ? (
             <p className="text-[14px] text-[var(--t-g500)] py-8 text-center">
-              완료된 시즌 기록이 아직 없어요
+              완료된 시즌 기록이 없습니다.
             </p>
           ) : (
             <div className="relative pl-5 space-y-5 before:content-[''] before:absolute before:left-[5px] before:top-2 before:bottom-2 before:w-[2px] before:bg-[var(--t-g100)]">
@@ -238,7 +337,7 @@ export function HistoryTab() {
                 })}
             </div>
           )
-        ) : (
+        ) : timelineTab === 'MILESTONES' ? (
           <div className="relative pl-5 space-y-4 before:content-[''] before:absolute before:left-[5px] before:top-2 before:bottom-2 before:w-[2px] before:bg-[var(--t-g100)]">
             {milestones
               .slice()
@@ -257,6 +356,89 @@ export function HistoryTab() {
                   </p>
                 </div>
               ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* 리그 필터 바 */}
+            <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+              {RECORD_LEAGUES.map((lg) => {
+                const selected = activeRecordLeague === lg;
+                return (
+                  <button
+                    key={lg}
+                    type="button"
+                    onClick={() => setSelectedRecordLeague(lg)}
+                    className={`min-h-[36px] px-3 rounded-xl text-[12px] font-bold whitespace-nowrap shrink-0 cursor-pointer t-tap ${
+                      selected
+                        ? 'bg-[var(--t-g900)] text-[var(--t-card)]'
+                        : 'bg-[var(--t-g100)] text-[var(--t-g600)]'
+                    }`}
+                  >
+                    {LEAGUE_CONFIG[lg].shortName}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="divide-y divide-[var(--t-g100)]">
+              {recordChases.map(({ entry, currentValue, progressPct, isAlreadyHolder }) => {
+                const isInt = entry.unit === '점' || entry.unit === '회';
+                const formattedTarget = isInt
+                  ? `${entry.value.toLocaleString()}${entry.unit}`
+                  : `${entry.value.toFixed(1)} ${entry.unit}`;
+                const formattedCurr = isInt
+                  ? `${currentValue.toLocaleString()}${entry.unit}`
+                  : `${currentValue.toFixed(1)} ${entry.unit}`;
+
+                return (
+                  <div key={entry.id} className="py-3 first:pt-0 last:pb-0 space-y-1.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[14px] font-bold text-[var(--t-g900)]">
+                        {entry.label}
+                      </span>
+                      <span
+                        className={`text-[15px] font-bold tabular-nums shrink-0 ${
+                          entry.isUserRecord
+                            ? 'text-[var(--t-accent)]'
+                            : 'text-[var(--t-g900)]'
+                        }`}
+                      >
+                        {formattedTarget}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 text-[12px] text-[var(--t-g500)]">
+                      <span className="truncate">
+                        {entry.isUserRecord && (
+                          <span className="font-bold text-[var(--t-accent-ink)] mr-1">
+                            신기록
+                          </span>
+                        )}
+                        {entry.holderName} · {entry.teamName} ({entry.year})
+                      </span>
+                      {currentValue > 0 && !isAlreadyHolder && (
+                        <span className="tabular-nums shrink-0 font-semibold text-[var(--t-g700)]">
+                          내 기록 {formattedCurr}
+                        </span>
+                      )}
+                    </div>
+
+                    {currentValue > 0 && (
+                      <div className="w-full h-1.5 rounded-full bg-[var(--t-g100)] overflow-hidden">
+                        <div
+                          style={{ width: `${progressPct}%` }}
+                          className={`h-full rounded-full ${
+                            isAlreadyHolder
+                              ? 'bg-[var(--t-gold)]'
+                              : 'bg-[var(--t-accent)]'
+                          }`}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </section>

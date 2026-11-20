@@ -13,7 +13,7 @@ interface TeamEmblemProps {
 
 export function TeamEmblem({ team, size = 'md', className = '' }: TeamEmblemProps) {
   const espnLogos = useCareerStore((s) => s.espnLogos);
-  const [failedLogoUrl, setFailedLogoUrl] = useState<string | null>(null);
+  const [failedLogoKey, setFailedLogoKey] = useState<string | null>(null);
 
   const leaguePrefix =
     team.league === 'NBA'
@@ -31,8 +31,9 @@ export function TeamEmblem({ team, size = 'md', className = '' }: TeamEmblemProp
   const fallbackDataUri =
     espnLogos[`FALLBACK_${team.id}`] || generateLeagueFallbackSvgDataUri(team);
 
+  const currentLogoKey = primaryLogoUrl ? `${team.id}::${primaryLogoUrl}` : null;
   const useFallback =
-    !primaryLogoUrl || Boolean(primaryLogoUrl && failedLogoUrl === primaryLogoUrl);
+    !primaryLogoUrl || Boolean(currentLogoKey && failedLogoKey === currentLogoKey);
   const activeSrc = useFallback ? fallbackDataUri : primaryLogoUrl;
 
   const sizeClasses = {
@@ -43,20 +44,26 @@ export function TeamEmblem({ team, size = 'md', className = '' }: TeamEmblemProp
     xl: 'w-20 h-20 text-lg',
   }[size];
 
+  const isNationalFlag =
+    team.id === 'KOR_NAT_TEAM' || team.id.startsWith('NAT_');
+
   return (
     <div
-      className={`${sizeClasses} ${className} relative flex items-center justify-center rounded-full bg-[var(--t-g100)] p-1 shrink-0 overflow-hidden select-none`}
+      className={`${sizeClasses} ${className} relative flex items-center justify-center ${
+        isNationalFlag ? 'rounded-xl p-0.5' : 'rounded-full p-1'
+      } bg-[var(--t-g100)] shrink-0 overflow-hidden select-none`}
       title={team.name}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        key={activeSrc}
         src={activeSrc}
         alt={team.name}
         className="w-full h-full object-contain"
         referrerPolicy="no-referrer"
         onError={() => {
-          if (primaryLogoUrl && !useFallback) {
-            setFailedLogoUrl(primaryLogoUrl);
+          if (currentLogoKey && !useFallback) {
+            setFailedLogoKey(currentLogoKey);
           }
         }}
       />

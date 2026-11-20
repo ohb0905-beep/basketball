@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateLeagueFallbackSvgDataUri } from '../../../data/logoFallbacks';
 import {
-  ASIAN_NATIONAL_TEAMS,
+  ALL_INTERNATIONAL_TEAMS,
+  B_LEAGUE_TEAMS,
+  EUROLEAGUE_TEAMS,
   GLEAGUE_TEAMS,
   HIGH_SCHOOL_TEAMS,
   KBL_TEAMS,
   NBA_TEAMS,
+  NBL_TEAMS,
   NCAA_TEAMS,
-  OVERSEAS_TEAMS,
   SANGMU_TEAM,
   U_LEAGUE_TEAMS,
 } from '../../../data/teams';
@@ -51,10 +53,24 @@ const KBL_OFFICIAL_SYMBOL_MAP: Record<string, string> = {
   KBL_SANGMU: 'https://www.kbl.or.kr/assets/img/ico/logo/ic-sangmu.svg',
 };
 
+const KOREA_NATIONAL_TEAM_ENTRY: TeamInfo = {
+  id: 'KOR_NAT_TEAM',
+  name: '대한민국 남자농구 국가대표팀',
+  shortName: '대한민국',
+  city: '서울',
+  league: 'KBL',
+  rating: 78,
+  primaryColor: '#0047A0',
+  secondaryColor: '#CD2E3A',
+  espnAbbr: 'KOR',
+  logoUrl: '/logos/NAT_KOR.svg',
+  prestigeDesc: '대한민국 남자농구 국가대표팀입니다.',
+};
+
 /**
- * 실시간/주기적 전 리그(고교, 대학, KBL, 해외, G리그, NCAA, NBA) 구단 공식 로고 획득 및 캐싱 엔드포인트
+ * 실시간/주기적 전 리그(고교, 대학, KBL, 해외, G리그, NCAA, NBA, 국제대회 국가대표) 구단 공식 로고 획득 및 캐싱 엔드포인트
  * - NBA / NCAA / G-League: ESPN 공식 API에서 실시간 획득 및 리그별 네임스페이스 캐싱
- * - KBL / 한국 대학(U-League) / 한국 고교: 연맹 및 학교 공식 페이지에서 획득한 정적 에셋과 원격 엔드포인트 동기화
+ * - KBL / 한국 대학(U-League) / 한국 고교 / 대한민국 대표팀: 정적 에셋과 원격 엔드포인트 동기화
  * - 네트워크 오류 시 각 리그의 규격에 맞춘 고품질 SVG 이니셜 로고(fallbacks) 자동 생성 및 폴백
  */
 export async function GET(request: NextRequest) {
@@ -92,11 +108,14 @@ export async function GET(request: NextRequest) {
     ...U_LEAGUE_TEAMS,
     ...KBL_TEAMS,
     SANGMU_TEAM,
-    ...OVERSEAS_TEAMS,
+    ...B_LEAGUE_TEAMS,
+    ...NBL_TEAMS,
+    ...EUROLEAGUE_TEAMS,
     ...GLEAGUE_TEAMS,
     ...NCAA_TEAMS,
     ...NBA_TEAMS,
-    ...ASIAN_NATIONAL_TEAMS,
+    ...ALL_INTERNATIONAL_TEAMS,
+    KOREA_NATIONAL_TEAM_ENTRY,
   ];
 
   // 1. 전 구단 리그별 맞춤형 고품질 SVG 폴백 로고 생성 및 기본 공식 로고 등록

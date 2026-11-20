@@ -1,12 +1,19 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Trash2 } from 'lucide-react';
+import { LEAGUE_CONFIG } from '../../data/leagues';
+import {
+  buildHofCompendium,
+  LEGACY_TIER_CATALOG,
+  normalizeRecordBook,
+} from '../../engine/recordBookEngine';
 import { getTraitInfo } from '../../engine/statCalculator';
 import { useCareerStore } from '../../store/useCareerStore';
-import { HallOfFameEntry, Position } from '../../types/game';
+import { HallOfFameEntry, LeagueId, Position } from '../../types/game';
+import { formatCurrencyDetailed } from '../../utils/formatters';
 import { TeamEmblem } from '../common/TeamEmblem';
-import { Modal } from '../common/Modal';
+import { Modal, SelectiveResetModal } from '../common/Modal';
 
 const COURT_POSITIONS: {
   pos: Position;
@@ -19,13 +26,28 @@ const COURT_POSITIONS: {
   { pos: 'C', coordClass: 'top-[64%] left-[73%] -translate-x-1/2' },
 ];
 
-function stripLeadingSymbol(text: string): string {
-  return text.replace(/^[^\p{L}\p{N}#]+/u, '').trim();
-}
+const COMPENDIUM_LEAGUES: LeagueId[] = [
+  'NBA',
+  'KBL',
+  'EUROLEAGUE',
+  'NBL',
+  'B_LEAGUE',
+  'NCAA',
+  'U_LEAGUE',
+  'GLEAGUE',
+  'HIGH_SCHOOL',
+];
 
 export function BestFiveCourt() {
   const hofList = useCareerStore((s) => s.hofList);
+  const recordBook = useCareerStore((s) => s.recordBook);
   const [selectedEntry, setSelectedEntry] = useState<HallOfFameEntry | null>(null);
+  const [compendiumTab, setCompendiumTab] = useState<'TIERS' | 'RECORDS'>('TIERS');
+  const [selectedRecordLeague, setSelectedRecordLeague] = useState<LeagueId>('NBA');
+  const [showResetSheet, setShowResetSheet] = useState(false);
+
+  const normalizedRecords = normalizeRecordBook(recordBook);
+  const compendium = buildHofCompendium(hofList, normalizedRecords);
 
   const bestFiveByPos: Record<Position, HallOfFameEntry | null> = {
     PG: null,
@@ -185,10 +207,10 @@ export function BestFiveCourt() {
         {hofList.length === 0 ? (
           <div className="py-8 text-center">
             <p className="text-[14px] font-semibold text-[var(--t-g600)]">
-              아직 헌액된 선수가 없어요
+              헌액된 선수가 없습니다
             </p>
             <p className="text-[12px] text-[var(--t-g400)] mt-1">
-              은퇴한 선수의 기록이 이곳에 남습니다
+              은퇴한 선수의 커리어 기록이 이곳에 누적됩니다
             </p>
           </div>
         ) : (
@@ -226,6 +248,191 @@ export function BestFiveCourt() {
                 </div>
               </button>
             ))}
+          </div>
+        )}
+      </section>
+
+      {/* 3. 명예의 전당 도감 & 역대 리그 기록실 */}
+      <section data-testid="hof-compendium-card" className="t-card space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)] truncate">
+              커리어 도감 · 역대 기록실
+            </h2>
+            <span className="block text-[12px] font-semibold text-[var(--t-g500)] tabular-nums">
+              신기록 {compendium.userBrokenRecordsCount} / {compendium.totalRecordSlots}
+            </span>
+          </div>
+          <button
+            type="button"
+            data-testid="open-selective-reset-btn"
+            onClick={() => setShowResetSheet(true)}
+            className="min-h-[40px] px-3 rounded-xl bg-[var(--t-g100)] hover:bg-[var(--t-g200)]/80 text-[12px] font-semibold text-[var(--t-g600)] hover:text-[var(--t-up)] inline-flex items-center gap-1.5 shrink-0 cursor-pointer t-tap"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>기록 초기화</span>
+          </button>
+        </div>
+
+        {/* 4열 도감 달성 지표 */}
+        <div className="grid grid-cols-4 pt-3 border-t border-[var(--t-g100)] text-center gap-1 tabular-nums">
+          <div>
+            <span className="block text-[17px] font-bold text-[var(--t-g900)]">
+              {compendium.bestFiveFilled}/5
+            </span>
+            <span className="text-[11px] text-[var(--t-g500)]">베스트 5</span>
+          </div>
+          <div>
+            <span className="block text-[17px] font-bold text-[var(--t-accent)]">
+              {compendium.unlockedTierCount}/{compendium.totalTiers}
+            </span>
+            <span className="text-[11px] text-[var(--t-g500)]">등급 도감</span>
+          </div>
+          <div>
+            <span className="block text-[17px] font-bold text-[var(--t-gold)]">
+              {compendium.retiredJerseysCount}
+            </span>
+            <span className="text-[11px] text-[var(--t-g500)]">영구결번</span>
+          </div>
+          <div>
+            <span className="block text-[17px] font-bold text-[var(--t-ok)]">
+              {compendium.userBrokenRecordsCount}
+            </span>
+            <span className="text-[11px] text-[var(--t-g500)]">리그 신기록</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-[var(--t-g100)] text-[13px] font-semibold">
+          <button
+            type="button"
+            onClick={() => setCompendiumTab('TIERS')}
+            className={`min-h-[40px] rounded-xl transition cursor-pointer ${
+              compendiumTab === 'TIERS'
+                ? 'bg-[var(--t-card)] text-[var(--t-g900)]'
+                : 'text-[var(--t-g500)]'
+            }`}
+          >
+            등급 도감
+          </button>
+          <button
+            type="button"
+            data-testid="home-records-tab"
+            onClick={() => setCompendiumTab('RECORDS')}
+            className={`min-h-[40px] rounded-xl transition cursor-pointer ${
+              compendiumTab === 'RECORDS'
+                ? 'bg-[var(--t-card)] text-[var(--t-g900)]'
+                : 'text-[var(--t-g500)]'
+            }`}
+          >
+            역대 기록실
+          </button>
+        </div>
+
+        {compendiumTab === 'TIERS' ? (
+          <div className="space-y-3">
+            <div className="divide-y divide-[var(--t-g100)]">
+              {LEGACY_TIER_CATALOG.map((tier) => {
+                const count = compendium.tiersUnlocked[tier.id] || 0;
+                const unlocked = count > 0;
+                return (
+                  <div
+                    key={tier.id}
+                    className="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <span
+                        className={`block text-[14px] font-bold truncate ${
+                          unlocked ? 'text-[var(--t-g900)]' : 'text-[var(--t-g400)]'
+                        }`}
+                      >
+                        {tier.title}
+                      </span>
+                      <span className="block text-[12px] text-[var(--t-g500)] truncate">
+                        {tier.criteria}
+                      </span>
+                    </div>
+                    <span
+                      className={`text-[12px] font-bold tabular-nums shrink-0 ${
+                        unlocked ? 'text-[var(--t-accent-ink)]' : 'text-[var(--t-g400)]'
+                      }`}
+                    >
+                      {unlocked ? `${count}명 달성` : '미달성'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {compendium.retiredTeams.length > 0 && (
+              <div className="pt-3 border-t border-[var(--t-g100)] space-y-1">
+                <span className="text-[12px] font-bold text-[var(--t-gold)]">
+                  영구결번 헌액 구단
+                </span>
+                <p className="text-[13px] text-[var(--t-g700)] leading-relaxed">
+                  {compendium.retiredTeams.join(' · ')}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+              {COMPENDIUM_LEAGUES.map((lg) => {
+                const selected = selectedRecordLeague === lg;
+                return (
+                  <button
+                    key={lg}
+                    type="button"
+                    onClick={() => setSelectedRecordLeague(lg)}
+                    className={`min-h-[36px] px-3 rounded-xl text-[12px] font-bold whitespace-nowrap shrink-0 cursor-pointer t-tap ${
+                      selected
+                        ? 'bg-[var(--t-g900)] text-[var(--t-card)]'
+                        : 'bg-[var(--t-g100)] text-[var(--t-g600)]'
+                    }`}
+                  >
+                    {LEAGUE_CONFIG[lg].shortName}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="divide-y divide-[var(--t-g100)]">
+              {normalizedRecords[selectedRecordLeague].map((rec) => {
+                const isInt = rec.unit === '점' || rec.unit === '회';
+                const formatted = isInt
+                  ? `${rec.value.toLocaleString()}${rec.unit}`
+                  : `${rec.value.toFixed(1)} ${rec.unit}`;
+                return (
+                  <div
+                    key={rec.id}
+                    className="py-2.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <span className="block text-[14px] font-bold text-[var(--t-g900)] truncate">
+                        {rec.label}
+                      </span>
+                      <span className="block text-[12px] text-[var(--t-g500)] truncate">
+                        {rec.isUserRecord && (
+                          <span className="font-bold text-[var(--t-accent-ink)] mr-1">
+                            신기록
+                          </span>
+                        )}
+                        {rec.holderName} · {rec.teamName} ({rec.year})
+                      </span>
+                    </div>
+                    <span
+                      className={`text-[14px] font-bold tabular-nums shrink-0 ${
+                        rec.isUserRecord
+                          ? 'text-[var(--t-accent)]'
+                          : 'text-[var(--t-g900)]'
+                      }`}
+                    >
+                      {formatted}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </section>
@@ -295,12 +502,45 @@ export function BestFiveCourt() {
                   {selectedEntry.totals.allStars}
                 </span>
               </div>
+              {((selectedEntry.totals.nbaFinalsMvps || 0) > 0 ||
+                (selectedEntry.totals.kblFinalsMvps || 0) > 0) && (
+                <div className="py-2.5 flex items-center justify-between">
+                  <span className="text-[var(--t-g600)]">파이널 MVP</span>
+                  <span className="font-bold text-[var(--t-accent-ink)] tabular-nums">
+                    {[
+                      (selectedEntry.totals.nbaFinalsMvps || 0) > 0
+                        ? `NBA ${selectedEntry.totals.nbaFinalsMvps}회`
+                        : null,
+                      (selectedEntry.totals.kblFinalsMvps || 0) > 0
+                        ? `KBL ${selectedEntry.totals.kblFinalsMvps}회`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </div>
+              )}
+              {selectedEntry.totals.internationalMedals &&
+                selectedEntry.totals.internationalMedals.gold +
+                  selectedEntry.totals.internationalMedals.silver +
+                  selectedEntry.totals.internationalMedals.bronze >
+                  0 && (
+                  <div className="py-2.5 flex items-center justify-between">
+                    <span className="text-[var(--t-g600)]">국제대회 메달</span>
+                    <span className="font-bold text-[var(--t-ok)] tabular-nums">
+                      금 {selectedEntry.totals.internationalMedals.gold} · 은{' '}
+                      {selectedEntry.totals.internationalMedals.silver} · 동{' '}
+                      {selectedEntry.totals.internationalMedals.bronze}
+                      {(selectedEntry.totals.internationalMvps || 0) > 0
+                        ? ` (MVP ${selectedEntry.totals.internationalMvps})`
+                        : ''}
+                    </span>
+                  </div>
+                )}
               <div className="py-2.5 flex items-center justify-between">
                 <span className="text-[var(--t-g600)]">통산 연봉</span>
                 <span className="font-bold text-[var(--t-g900)] tabular-nums">
-                  {(selectedEntry.careerEarnings || 0) >= 1000000
-                    ? `$${((selectedEntry.careerEarnings || 0) / 1000000).toFixed(2)}M`
-                    : `$${Math.round((selectedEntry.careerEarnings || 0) / 1000).toLocaleString()}K`}
+                  {formatCurrencyDetailed(selectedEntry.careerEarnings || 0)}
                 </span>
               </div>
               {selectedEntry.traits && selectedEntry.traits.length > 0 && (
@@ -308,7 +548,7 @@ export function BestFiveCourt() {
                   <span className="text-[var(--t-g600)] shrink-0">보유 특성</span>
                   <span className="font-semibold text-[var(--t-g800)] text-right truncate">
                     {selectedEntry.traits
-                      .map((tId) => stripLeadingSymbol(getTraitInfo(tId).badge))
+                      .map((tId) => getTraitInfo(tId).name)
                       .join(' · ')}
                   </span>
                 </div>
@@ -321,6 +561,11 @@ export function BestFiveCourt() {
           </div>
         )}
       </Modal>
+
+      <SelectiveResetModal
+        open={showResetSheet}
+        onClose={() => setShowResetSheet(false)}
+      />
     </div>
   );
 }

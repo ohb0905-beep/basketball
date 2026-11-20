@@ -26,7 +26,47 @@ export function generateLeagueFallbackSvgDataUri(team: TeamInfo): string {
 
   let svg = '';
 
-  if (league === 'HIGH_SCHOOL') {
+  if (team.id === 'KOR_NAT_TEAM' || team.id === 'NAT_KOR') {
+    svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 120">
+      <rect x="0.75" y="0.75" width="178.5" height="118.5" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+      <g transform="translate(90,60) rotate(33.6901)">
+        <circle cx="0" cy="0" r="30" fill="#0047A0"/>
+        <path d="M -30 0 A 30 30 0 0 1 30 0 Z" fill="#CD2E3A"/>
+        <circle cx="-15" cy="0" r="15" fill="#CD2E3A"/>
+        <circle cx="15" cy="0" r="15" fill="#0047A0"/>
+        <g fill="#000000">
+          <rect x="-50" y="-15" width="5" height="30"/>
+          <rect x="-57.5" y="-15" width="5" height="30"/>
+          <rect x="-65" y="-15" width="5" height="30"/>
+          <rect x="45" y="-15" width="5" height="13.75"/>
+          <rect x="45" y="1.25" width="5" height="13.75"/>
+          <rect x="52.5" y="-15" width="5" height="13.75"/>
+          <rect x="52.5" y="1.25" width="5" height="13.75"/>
+          <rect x="60" y="-15" width="5" height="13.75"/>
+          <rect x="60" y="1.25" width="5" height="13.75"/>
+        </g>
+      </g>
+      <g transform="translate(90,60) rotate(-33.6901)" fill="#000000">
+        <rect x="45" y="-15" width="5" height="13.75"/>
+        <rect x="45" y="1.25" width="5" height="13.75"/>
+        <rect x="52.5" y="-15" width="5" height="30"/>
+        <rect x="60" y="-15" width="5" height="13.75"/>
+        <rect x="60" y="1.25" width="5" height="13.75"/>
+        <rect x="-50" y="-15" width="5" height="30"/>
+        <rect x="-57.5" y="-15" width="5" height="13.75"/>
+        <rect x="-57.5" y="1.25" width="5" height="13.75"/>
+        <rect x="-65" y="-15" width="5" height="30"/>
+      </g>
+    </svg>`;
+  } else if (team.id.startsWith('NAT_')) {
+    const code = escapeXml(team.id.replace('NAT_', '').slice(0, 3).toUpperCase());
+    svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 120">
+      <rect x="1" y="1" width="178" height="118" rx="10" fill="${primary}" stroke="#E2E8F0" stroke-width="2"/>
+      <rect x="1" y="84" width="178" height="35" fill="${secondary}" opacity="0.9"/>
+      <text x="90" y="64" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="38" font-weight="900" letter-spacing="3">${code}</text>
+      <text x="90" y="106" text-anchor="middle" fill="#0F172A" font-family="sans-serif" font-size="13" font-weight="800" letter-spacing="1.5">NATIONAL TEAM</text>
+    </svg>`;
+  } else if (league === 'HIGH_SCHOOL') {
     // 고교 리그 규격: 전통 방패 교표 + 월계수 크레스트 + 상단 리본
     svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
       <defs>
@@ -92,8 +132,17 @@ export function generateLeagueFallbackSvgDataUri(team: TeamInfo): string {
       <text x="60" y="92" text-anchor="middle" fill="#F8FAFC" font-family="sans-serif" font-size="8.5" font-weight="800">${cityLabel}</text>
     </svg>`;
   } else {
-    // KBL / OVERSEAS 규격: 모던 프로 구단 크레스트
-    const proLabel = league === 'KBL' ? 'KBL PRO' : 'PRO CLUB';
+    // KBL / B_LEAGUE / NBL / EUROLEAGUE 규격: 모던 프로 구단 크레스트
+    const proLabel =
+      league === 'KBL'
+        ? 'KBL PRO'
+        : league === 'B_LEAGUE'
+        ? 'B.LEAGUE'
+        : league === 'NBL'
+        ? 'NBL PRO'
+        : league === 'EUROLEAGUE'
+        ? 'EUROLEAGUE'
+        : 'PRO CLUB';
     svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
       <defs>
         <linearGradient id="proGrad" x1="0%" y1="0%" x2="100%" y2="100%">

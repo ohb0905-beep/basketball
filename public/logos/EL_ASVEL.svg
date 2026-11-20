@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <polygon points="64,8 114,34 114,94 64,120 14,94 14,34" fill="#18181B" stroke="#CBD5E1" stroke-width="5"/>
+  <polygon points="64,16 106,38 106,90 64,112 22,90 22,38" fill="none" stroke="#CBD5E1" stroke-width="1.5" opacity="0.5"/>
+  <text x="64" y="42" text-anchor="middle" fill="#CBD5E1" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="800" letter-spacing="1.2">EUROLEAGUE</text>
+  <text x="64" y="75" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="900" letter-spacing="0.5">ASV</text>
+  <text x="64" y="96" text-anchor="middle" fill="#FFFFFF" opacity="0.85" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="0.8">LYON</text>
+</svg>

@@ -1,22 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
-  <defs>
-    <linearGradient id="bg_HS_MASAN" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#9A3412"/>
-      <stop offset="100%" stop-color="#090D16"/>
-    </linearGradient>
-    <linearGradient id="rim_HS_MASAN" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="50%" stop-color="#FDBA74"/>
-      <stop offset="100%" stop-color="#9A3412"/>
-    </linearGradient>
-  </defs>
-  <path d="M100 8 L176 32 V96 C176 144 142 176 100 192 C58 176 24 144 24 96 V32 Z" fill="url(#bg_HS_MASAN)" stroke="url(#rim_HS_MASAN)" stroke-width="7"/>
-  <path d="M100 18 L164 39 V95 C164 136 135 164 100 179 C65 164 36 136 36 95 V39 Z" fill="none" stroke="#FDBA74" stroke-width="1.8" opacity="0.65"/>
-  <path d="M34 76 Q66 42 100 66 Q134 42 166 76 Q134 64 100 84 Q66 64 34 76 Z" fill="#FDBA74" opacity="0.28"/>
-  <rect x="68" y="28" width="64" height="18" rx="9" fill="#090D16" fill-opacity="0.75" stroke="#FDBA74" stroke-width="1.2"/>
-  <text x="100" y="41" text-anchor="middle" fill="#FDBA74" font-family="sans-serif" font-size="11" font-weight="800" letter-spacing="1.5">EST.1936</text>
-  <text x="100" y="102" text-anchor="middle" fill="#FFFFFF" font-family="serif" font-size="44" font-weight="900" letter-spacing="3">馬高</text>
-  <path d="M40 128 H160 L152 150 H48 Z" fill="#FDBA74"/>
-  <text x="100" y="143" text-anchor="middle" fill="#090D16" font-family="sans-serif" font-size="13" font-weight="900" letter-spacing="0.5">마산고등학교</text>
-  <text x="100" y="166" text-anchor="middle" fill="#FFFFFF" fill-opacity="0.85" font-family="sans-serif" font-size="8.5" font-weight="700" letter-spacing="1.2">BASKETBALL CLUB</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <circle cx="60" cy="60" r="55" fill="#FFFFFF" stroke="#9A3412" stroke-width="3.5"/>
+  <!-- Octagonal heritage crest -->
+  <polygon points="41,16 79,16 104,41 104,79 79,104 41,104 16,79 16,41" fill="#9A3412" stroke="#FDBA74" stroke-width="3.5"/>
+  <polygon points="45,24 75,24 96,45 96,75 75,96 45,96 24,75 24,45" fill="none" stroke="#FED7AA" stroke-width="1.5"/>
+  <text x="60" y="69" text-anchor="middle" fill="#FFFFFF" font-family="serif" font-size="30" font-weight="900">馬高</text>
+  <text x="60" y="88" text-anchor="middle" fill="#FDE68A" font-family="sans-serif" font-size="8.5" font-weight="800" letter-spacing="1.4">MASAN</text>
 </svg>

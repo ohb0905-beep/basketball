@@ -364,58 +364,58 @@ export const PLAYER_TRAIT_META: Record<PlayerTraitId, PlayerTraitInfo> = {
   IRON_STAMINA: {
     id: 'IRON_STAMINA',
     name: '강철 체력',
-    badge: '🦾 강철 체력',
+    badge: '강철 체력',
     kind: 'INNATE',
-    description: '타고난 회복력과 유연성으로 부상 발생 확률이 대폭 감소하고 풀타임 체력을 유지해요.',
+    description: '회복력과 내구도가 뛰어나 부상 발생 확률이 크게 줄고 긴 출전 시간을 안정적으로 소화합니다.',
   },
   SLOW_STARTER: {
     id: 'SLOW_STARTER',
     name: '슬로우 스타터',
-    badge: '🌱 슬로우 스타터',
+    badge: '슬로우 스타터',
     kind: 'INNATE',
-    description: '20대 중후반부터 성장 속도가 가속화되며 프로 무대에서 잠재력 한계 돌파 확률이 높아져요.',
+    description: '20대 중후반부터 성장 속도가 높아지며 프로 무대에서 잠재력 상한 확장 확률이 상승합니다.',
   },
   GLASS_BODY: {
     id: 'GLASS_BODY',
     name: '유리몸 천재성',
-    badge: '💎 유리몸 천재성',
+    badge: '유리몸 천재성',
     kind: 'INNATE',
-    description: '선천적 재능과 성장 잠재력 상한선이 높지만, 잔부상 위험이 높아 피지컬(PHY) 관리가 필수예요.',
+    description: '선천적 재능과 성장 잠재력 상한은 높지만 잔부상 위험이 커 피지컬(PHY) 관리가 필수입니다.',
   },
   CLUTCH_PERFORMER: {
     id: 'CLUTCH_PERFORMER',
     name: '승부사 기질',
-    badge: '🔥 클러치 승부사',
+    badge: '클러치 승부사',
     kind: 'INNATE',
-    description: '강팀 상대 및 플레이오프·우승 경쟁 무대에서 야투 효율과 팀 승률 보정을 받아요.',
+    description: '강팀 맞대결과 플레이오프·우승 경쟁 무대에서 야투 효율과 승률 보정을 받습니다.',
   },
   CONTRACT_YEAR_BOOST: {
     id: 'CONTRACT_YEAR_BOOST',
-    name: 'FA 로이드',
-    badge: '💰 FA 로이드',
+    name: '계약 해 집중력',
+    badge: 'FA 시즌 집중력',
     kind: 'ACQUIRED',
-    description: '계약 마지막 해(FA 직전 시즌)에 집중력이 폭발해 실전 생산성과 슈팅 효율이 상승해요.',
+    description: '계약 마지막 해(FA 직전 시즌)에 집중력이 높아져 실전 생산성과 슈팅 효율이 상승합니다.',
   },
   FRANCHISE_HEART: {
     id: 'FRANCHISE_HEART',
-    name: '프랜차이즈의 심장',
-    badge: '❤️ 프랜차이즈의 심장',
+    name: '원클럽맨',
+    badge: '프랜차이즈 중심',
     kind: 'ACQUIRED',
-    description: '단일 구단에서 6시즌 이상 헌신하여 감독 신뢰도와 원소속팀 재계약·영구결번 평가에서 우대받아요.',
+    description: '단일 구단에서 6시즌 이상 활약해 감독 신뢰도와 원소속팀 재계약·영구결번 평가에서 우대받습니다.',
   },
   BENCH_ACE: {
     id: 'BENCH_ACE',
-    name: '벤치의 에이스',
-    badge: '⚡ 벤치의 에이스',
+    name: '세컨드 유닛 에이스',
+    badge: '벤치 에이스',
     kind: 'ACQUIRED',
-    description: '식스맨상 수상으로 검증된 세컨드 유닛 리더로, 벤치·식스맨 기용 시 분당 득점 효율이 크게 올라가요.',
+    description: '식스맨상 수상으로 검증된 벤치 득점원으로, 식스맨·벤치 기용 시 분당 생산성이 크게 올라갑니다.',
   },
   SNIPER: {
     id: 'SNIPER',
-    name: '스나이퍼',
-    badge: '🎯 외곽 스나이퍼',
+    name: '외곽 슈터',
+    badge: '외곽 슈터',
     kind: 'ACQUIRED',
-    description: '시즌 3점슛 성공률 40% 이상을 증명한 전문 슈터로, 컨텐더 구단의 스카우팅 선호도가 상승해요.',
+    description: '시즌 3점슛 성공률 40% 이상을 기록한 전문 슈터로, 우승권 구단의 영입 선호도가 높아집니다.',
   },
 };
 
@@ -475,7 +475,9 @@ export function evaluateAcquiredTraits(
   career: Pick<
     CareerState,
     'traits' | 'contractYearsLeft' | 'team' | 'seasonLogs' | 'league'
-  >,
+  > & {
+    stats?: Pick<PlayerStats, 'out'>;
+  },
   latestBox: SeasonBoxScore
 ): { nextTraits: PlayerTraitId[]; newlyAcquired: PlayerTraitInfo[] } {
   const current = [...(career.traits || [])];
@@ -487,7 +489,14 @@ export function evaluateAcquiredTraits(
     newlyAcquired.push(PLAYER_TRAIT_META[id]);
   };
 
-  if (latestBox.tpPct >= 40.0 && latestBox.gp >= 20) {
+  // 외곽 슈터(SNIPER)는 단순 성공률 40%+뿐만 아니라 실제 경기당 3점슛 시도 볼륨(tpa)까지 충족해야 부여
+  const hasSniperVolume =
+    typeof latestBox.tpa === 'number'
+      ? latestBox.tpa >= 2.5 ||
+        ((career.stats?.out ?? 0) >= 72 && latestBox.tpa >= 2.0)
+      : (career.stats?.out ?? 75) >= 68;
+
+  if (latestBox.tpPct >= 40.0 && latestBox.gp >= 20 && hasSniperVolume) {
     tryAdd('SNIPER');
   }
 
@@ -530,34 +539,38 @@ export function getSpecialCampOptions(career: CareerState): {
   const baseUnit =
     career.league === 'NBA'
       ? 250000
-      : career.league === 'OVERSEAS' || career.league === 'KBL'
+      : career.league === 'EUROLEAGUE'
+      ? 90000
+      : career.league === 'NBL'
+      ? 55000
+      : career.league === 'B_LEAGUE' || career.league === 'KBL'
       ? 45000
       : 15000;
 
   return [
     {
       id: 'LEGEND_SKILL_CAMP',
-      title: '🏆 레전드 스킬 멘토링 캠프',
+      title: '베테랑 스킬 워크아웃',
       subtitle:
-        '은퇴한 올스타 레전드의 비공개 워크아웃에 참가해 주력 무기를 가다듬고 잠재력 한계 돌파를 노려요.',
+        '은퇴 올스타 출신 트레이너와 비공개 워크아웃을 진행해 주력 기술을 다듬고 잠재력 확장을 노립니다.',
       costUsd: baseUnit,
-      effectText: '중점 능력치 +2~3 · 프로 리그 잠재력(POT) +1 확장 기회 · 스카우트 주가 +4',
+      effectText: '중점 능력치 +2~3 · 프로 잠재력(POT) +1 기회 · 스카우트 평가 +4',
     },
     {
       id: 'BULK_UP',
-      title: '🦍 골밑 파워 벌크업 (신체 개조)',
+      title: '인사이드 파워 벌크업',
       subtitle:
-        '체중과 근력을 집중 증량해 페인트존 몸싸움과 리바운드 장악력을 끌어올려요 (포워드/빅맨 전향에 유리).',
+        '체중과 근력을 증량해 페인트존 몸싸움과 리바운드 경합력을 끌어올립니다. 포워드·빅맨 전환에 유리합니다.',
       costUsd: Math.round(baseUnit * 0.85),
-      effectText: 'INS +2, REB +2, PHY +1 상승 · PLY -1, OUT -1 소폭 감소',
+      effectText: 'INS +2, REB +2, PHY +1 · PLY -1, OUT -1',
     },
     {
       id: 'LEAN_MASS',
-      title: '⚡ 퍼리미터 린매스업 (신체 개조)',
+      title: '퍼리미터 린매스업',
       subtitle:
-        '체지방을 줄이고 퍼스트 스텝과 외곽 슈팅 밸런스를 극대화해요 (가드/윙맨 전향에 유리).',
+        '체지방을 줄여 퍼스트 스텝과 외곽 슈팅 밸런스를 높입니다. 가드·윙 포지션 소화에 유리합니다.',
       costUsd: Math.round(baseUnit * 0.85),
-      effectText: 'PLY +2, OUT +2, DEF +1 상승 · REB -1, INS -1 소폭 감소',
+      effectText: 'PLY +2, OUT +2, DEF +1 · REB -1, INS -1',
     },
   ];
 }
@@ -611,8 +624,8 @@ export function applySpecialCampProgram(
     nextPotential = Math.min(97, career.potential + potGain);
     summary =
       potGain > 0
-        ? `레전드 스킬 캠프 수료! 핵심 능력치 상승 및 잠재력 상한선이 ${nextPotential}(+${potGain})로 확장되었어요!`
-        : '레전드 스킬 캠프 수료! 레전드 멘토의 지도로 중점 기술 완성도가 한 단계 높아졌어요!';
+        ? `베테랑 스킬 워크아웃 수료: 핵심 능력치 상승 및 잠재력 상한이 ${nextPotential}(+${potGain})로 확장되었습니다.`
+        : '베테랑 스킬 워크아웃 수료: 중점 기술 완성도가 한 단계 올라갔습니다.';
   } else if (campType === 'BULK_UP') {
     nextStats.ins = clamp(nextStats.ins + 2);
     nextStats.reb = clamp(nextStats.reb + 2);
@@ -620,7 +633,7 @@ export function applySpecialCampProgram(
     nextStats.ply = clamp(nextStats.ply - 1);
     nextStats.out = clamp(nextStats.out - 1);
     summary =
-      '벌크업 신체 개조 완료! 골밑 파괴력(INS +2, REB +2, PHY +1)이 강화되어 인사이드 경쟁력이 높아졌어요.';
+      '벌크업 프로그램 완료: 골밑 득점(INS +2), 리바운드(REB +2), 피지컬(PHY +1)이 강화되었습니다.';
   } else {
     nextStats.ply = clamp(nextStats.ply + 2);
     nextStats.out = clamp(nextStats.out + 2);
@@ -628,7 +641,7 @@ export function applySpecialCampProgram(
     nextStats.reb = clamp(nextStats.reb - 1);
     nextStats.ins = clamp(nextStats.ins - 1);
     summary =
-      '린매스업 신체 개조 완료! 스피드와 외곽 기술(PLY +2, OUT +2, DEF +1)이 예리해져 가드/윙 포지션 소화력이 상승했어요.';
+      '린매스업 프로그램 완료: 패스·핸들링(PLY +2), 외곽 슈팅(OUT +2), 수비력(DEF +1)이 향상되었습니다.';
   }
 
   // 생체역학적 물리 상한선 적용
@@ -661,9 +674,9 @@ export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
     case 'EARLY_BLOOMER':
       return {
         id: 'EARLY_BLOOMER',
-        label: '조숙형 천재',
-        badge: '⚡ 조숙형 DNA',
-        description: '10대 후반~20대 초반 성장 속도가 매우 빠르지만, 30대 진입 후 노쇠화가 조금 일찍 찾아와요.',
+        label: '조숙형',
+        badge: '조숙형 성장',
+        description: '10대 후반~20대 초반 성장 속도가 빠르지만, 30대 진입 이후 기량 하락이 다소 빠르게 찾아옵니다.',
         peakAgeRange: [24, 27],
         agingOnsetOffset: -1,
       };
@@ -671,17 +684,17 @@ export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
       return {
         id: 'LATE_BLOOMER',
         label: '대기만성형',
-        badge: '🌱 대기만성 DNA',
-        description: '초기 성장은 완만하지만 20대 중후반~30세까지도 기량이 꺾이지 않고 만개해요.',
+        badge: '대기만성형',
+        description: '초기 성장은 완만하지만 20대 중후반부터 30세 전후까지 꾸준히 기량이 올라갑니다.',
         peakAgeRange: [27, 31],
         agingOnsetOffset: 1,
       };
     case 'IRONMAN':
       return {
         id: 'IRONMAN',
-        label: '철강왕 내구도',
-        badge: '🛡️ 철강왕 DNA',
-        description: '타고난 강철 몸매로 잔부상 확률이 낮고 30대 중반까지 신체 능력 하락이 크게 억제돼요.',
+        label: '내구도 특화형',
+        badge: '고내구도형',
+        description: '잔부상 발생 확률이 낮고 30대 중반까지 신체 능력 하락 폭이 완만하게 유지됩니다.',
         peakAgeRange: [26, 32],
         agingOnsetOffset: 2,
       };
@@ -689,9 +702,9 @@ export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
     default:
       return {
         id: 'STANDARD',
-        label: '정통 밸런스형',
-        badge: '⚖️ 표준형 DNA',
-        description: '20대 중반에 전성기에 도달하고 30대 초반부터 자연스러운 에이징 커브를 겪는 정석적인 성장형이에요.',
+        label: '표준 균형형',
+        badge: '표준 성장형',
+        description: '20대 중반에 전성기에 도달하고 30대 초반부터 완만한 에이징 커브를 따릅니다.',
         peakAgeRange: [26, 29],
         agingOnsetOffset: 0,
       };
@@ -699,9 +712,30 @@ export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
 }
 
 /**
- * 플레이 성향 아키타입 메타 정보 반환
+ * 포지션별 허용 플레이 성향 매트릭스 (현실 농구 고증: 센터 3&D, 가드 림 프로텍터 등 부조화 원천 차단)
  */
-export function getPlaystyleInfo(style: PlaystyleArchetype = 'ALL_ROUNDER'): {
+export const ALLOWED_PLAYSTYLES_BY_POS: Record<Position, PlaystyleArchetype[]> = {
+  PG: ['PLAYMAKER', 'SCORER', 'THREE_AND_D', 'ALL_ROUNDER'],
+  SG: ['SCORER', 'THREE_AND_D', 'PLAYMAKER', 'ALL_ROUNDER'],
+  SF: ['THREE_AND_D', 'SCORER', 'PLAYMAKER', 'ALL_ROUNDER'],
+  PF: ['RIM_PROTECTOR', 'STRETCH_BIG', 'POST_SCORER', 'SCORER', 'ALL_ROUNDER'],
+  C: ['RIM_PROTECTOR', 'POST_SCORER', 'STRETCH_BIG', 'ALL_ROUNDER'],
+};
+
+export function isPlaystyleAllowedForPosition(
+  style: PlaystyleArchetype,
+  pos: Position
+): boolean {
+  return ALLOWED_PLAYSTYLES_BY_POS[pos].includes(style);
+}
+
+/**
+ * 플레이 성향 아키타입 메타 정보 반환 (포지션에 맞는 명칭 보정 지원)
+ */
+export function getPlaystyleInfo(
+  style: PlaystyleArchetype = 'ALL_ROUNDER',
+  pos?: Position
+): {
   id: PlaystyleArchetype;
   label: string;
   badge: string;
@@ -711,40 +745,147 @@ export function getPlaystyleInfo(style: PlaystyleArchetype = 'ALL_ROUNDER'): {
     case 'SCORER':
       return {
         id: 'SCORER',
-        label: '크리에이티브 스코어러',
-        badge: '🔥 스코어러',
-        description: '내외곽을 가리지 않고 림을 공략해 득점 볼륨을 책임지는 공격 특화 성향이에요.',
+        label: '득점원',
+        badge: '스코어러',
+        description: '내외곽을 가리지 않고 공격 마무리를 책임지는 득점 중심 성향입니다.',
       };
     case 'PLAYMAKER':
       return {
         id: 'PLAYMAKER',
-        label: '플로어 제너럴',
-        badge: '🪄 플레이메이커',
-        description: '넓은 시야와 패스 센스로 동료들의 슛 기회를 살려주는 야전사령관 성향이에요.',
+        label: '볼핸들러 · 패서',
+        badge: '플레이메이커',
+        description: '넓은 시야와 패스 타이밍으로 팀 공격 전개를 조율하는 리딩 성향입니다.',
       };
-    case 'THREE_AND_D':
+    case 'THREE_AND_D': {
+      const label = pos === 'PG' ? '3&D 가드' : '3&D 윙';
       return {
         id: 'THREE_AND_D',
-        label: '3&D 스페셜리스트',
-        badge: '🎯 3&D 윙맨',
-        description: '순도 높은 외곽 3점슛과 끈질긴 대인 수비로 모든 우승권 구단이 탐내는 공수 알짜 성향이에요.',
+        label,
+        badge: label,
+        description: '안정적인 외곽 3점슛과 퍼리미터 대인 수비로 우승권 로테이션에 적합한 공수 겸비 성향입니다.',
       };
+    }
     case 'RIM_PROTECTOR':
       return {
         id: 'RIM_PROTECTOR',
-        label: '림 프로텍터 & 보드 장악',
-        badge: '🦍 림 프로텍터',
-        description: '골밑 블록슛과 리바운드, 든든한 스크린으로 페인트존을 지배하는 수비형 빅맨 성향이에요.',
+        label: '림 프로텍터',
+        badge: '림 프로텍터',
+        description: '골밑 블록슛, 리바운드, 스크린으로 페인트존을 지키는 수비형 빅맨 성향입니다.',
+      };
+    case 'STRETCH_BIG':
+      return {
+        id: 'STRETCH_BIG',
+        label: '스트레치 빅',
+        badge: '스트레치 빅',
+        description: '외곽 3점슛 스페이싱과 빅맨 피지컬을 겸비해 상대 골밑 수비를 끌어내는 현대형 빅맨 성향입니다.',
+      };
+    case 'POST_SCORER':
+      return {
+        id: 'POST_SCORER',
+        label: '포스트 스코어러',
+        badge: '포스트 스코어러',
+        description: '페인트존 풋워크와 훅샷, 피지컬을 앞세워 골밑 득점을 주도하는 정통 인사이드 공격형 성향입니다.',
       };
     case 'ALL_ROUNDER':
     default:
       return {
         id: 'ALL_ROUNDER',
-        label: '공수겸장 올라운더',
-        badge: '🌟 올라운더',
-        description: '득점, 리바운드, 패스, 수비까지 코트 위 모든 영역에서 고른 효율을 보여주는 다재다능한 성향이에요.',
+        label: '올라운더',
+        badge: '올라운더',
+        description: '득점, 리바운드, 패스, 수비 전 영역에서 고른 생산성을 내는 균형형 성향입니다.',
       };
   }
+}
+
+function scorePlaystylesForPosition(
+  stats: PlayerStats,
+  pos: Position,
+  rng: () => number
+): { id: PlaystyleArchetype; score: number }[] {
+  const base = POSITION_ARCHETYPES[pos].baseStats;
+  const dIns = stats.ins - base.ins;
+  const dOut = stats.out - base.out;
+  const dPly = stats.ply - base.ply;
+  const dDef = stats.def - base.def;
+  const dReb = stats.reb - base.reb;
+  const dPhy = stats.phy - base.phy;
+  const minDelta = Math.min(dIns, dOut, dPly, dDef, dReb, dPhy);
+  const avgDelta = (dIns + dOut + dPly + dDef + dReb + dPhy) / 6;
+
+  const allowed = ALLOWED_PLAYSTYLES_BY_POS[pos];
+  const jitter = () => rng() * 5.0 - 2.5;
+
+  const rawScores: Record<PlaystyleArchetype, number> = {
+    PLAYMAKER:
+      dPly * 1.35 +
+      dOut * 0.25 +
+      (pos === 'PG' ? 2.6 : pos === 'SG' ? -1.2 : -2.2),
+    SCORER:
+      Math.max(dIns, dOut) * 1.1 +
+      (dIns + dOut) * 0.35 +
+      (pos === 'SG' ? 2.2 : pos === 'PF' ? 0.2 : 0.7),
+    THREE_AND_D:
+      (dOut + dDef) * 0.92 +
+      (pos === 'SF' ? 2.4 : pos === 'SG' ? 1.1 : -1.0),
+    RIM_PROTECTOR:
+      (dDef + dReb) * 0.92 +
+      (pos === 'C' ? 1.8 : 0.9),
+    POST_SCORER:
+      dIns * 1.15 +
+      dPhy * 0.55 +
+      dReb * 0.3 +
+      (pos === 'C' ? 1.4 : 0.9),
+    STRETCH_BIG:
+      dOut * 1.25 +
+      dDef * 0.35 +
+      (stats.out >= 56 ? 1.8 : -1.8) +
+      (pos === 'PF' ? 1.4 : -0.3),
+    ALL_ROUNDER:
+      avgDelta * 0.9 + minDelta * 0.45 + 1.4,
+  };
+
+  return allowed
+    .map((id) => ({ id, score: rawScores[id] + jitter() }))
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * 포지션 전향 또는 레거시 세이브 복구 시 현재 포지션과 충돌하는 플레이 성향을 자동 재평가
+ */
+export function reconcilePlaystyleForPosition(
+  currentStyle: PlaystyleArchetype | undefined,
+  stats: PlayerStats,
+  pos: Position
+): PlaystyleArchetype {
+  if (currentStyle && isPlaystyleAllowedForPosition(currentStyle, pos)) {
+    return currentStyle;
+  }
+
+  // 의미적으로 가장 자연스러운 대응 성향 매핑 우선 적용
+  const isBig = pos === 'PF' || pos === 'C';
+  if (currentStyle === 'THREE_AND_D' && isBig) {
+    return 'STRETCH_BIG';
+  }
+  if (currentStyle === 'STRETCH_BIG' && !isBig) {
+    return stats.def >= 65 ? 'THREE_AND_D' : 'SCORER';
+  }
+  if (currentStyle === 'PLAYMAKER' && pos === 'C') {
+    return stats.out >= 74 ? 'STRETCH_BIG' : 'ALL_ROUNDER';
+  }
+  if (currentStyle === 'PLAYMAKER' && pos === 'PF') {
+    return stats.out >= 74 ? 'STRETCH_BIG' : 'ALL_ROUNDER';
+  }
+  if (
+    (currentStyle === 'RIM_PROTECTOR' || currentStyle === 'POST_SCORER') &&
+    !isBig
+  ) {
+    if (stats.def >= 68 && stats.out >= 66) return 'THREE_AND_D';
+    if (stats.ins >= 68 || stats.out >= 68) return 'SCORER';
+    return 'ALL_ROUNDER';
+  }
+
+  const ranked = scorePlaystylesForPosition(stats, pos, () => 0.5);
+  return ranked[0]?.id || 'ALL_ROUNDER';
 }
 
 /**
@@ -770,27 +911,8 @@ export function rollPlayerDnaAndPlaystyle(
     growthDna = 'STANDARD';
   }
 
-  let playstyle: PlaystyleArchetype = 'ALL_ROUNDER';
-  const attackScore = Math.max(stats.ins, stats.out) + (stats.ins + stats.out) * 0.35;
-  const playmakeScore = stats.ply * 1.45 + stats.out * 0.2;
-  const threeAndDScore = (stats.out + stats.def) * 0.85;
-  const rimScore = (stats.reb + stats.def) * 0.85 + (pos === 'C' || pos === 'PF' ? 8 : -6);
-
-  const candidates: { id: PlaystyleArchetype; score: number }[] = [
-    { id: 'SCORER', score: attackScore + (rng() * 6 - 3) },
-    { id: 'PLAYMAKER', score: playmakeScore + (pos === 'PG' ? 6 : 0) + (rng() * 6 - 3) },
-    { id: 'THREE_AND_D', score: threeAndDScore + (pos === 'SG' || pos === 'SF' ? 5 : 0) + (rng() * 6 - 3) },
-    { id: 'RIM_PROTECTOR', score: rimScore + (rng() * 6 - 3) },
-    {
-      id: 'ALL_ROUNDER',
-      score:
-        ((stats.ins + stats.out + stats.ply + stats.def + stats.reb + stats.phy) / 6) * 1.65 +
-        (rng() * 5 - 2.5),
-    },
-  ];
-
-  candidates.sort((a, b) => b.score - a.score);
-  playstyle = candidates[0].id;
+  const candidates = scorePlaystylesForPosition(stats, pos, rng);
+  const playstyle: PlaystyleArchetype = candidates[0]?.id || 'ALL_ROUNDER';
 
   return { growthDna, playstyle };
 }
@@ -913,13 +1035,13 @@ export function analyzePositionFit(
 
   let coachAdvice = '';
   if (currentMismatch.isSevereMismatch) {
-    coachAdvice = `⚠️ 현재 신장(${heightCm}cm)으로 '${currentPrimary}' 포지션을 소화하기엔 골밑 높이와 리바운드 물리적 열세(미스매치 감점 -${currentMismatch.scoutingPenalty}점)가 너무 커요! 신체 조건에 맞는 '${bestPrimary.pos}' 포지션으로 전향하는 것을 강력히 권고해요.`;
+    coachAdvice = `현재 신장(${heightCm}cm)으로 ${currentPrimary} 포지션을 소화하기엔 높이·리바운드 미스매치 감점(-${currentMismatch.scoutingPenalty})이 큽니다. 신체 조건에 맞는 ${bestPrimary.pos} 전향을 권고합니다.`;
   } else if (bestPrimary.pos !== currentPrimary && bestPrimary.ovr > currentPosOvr) {
-    coachAdvice = `현재 기술과 ${heightCm}cm의 신장을 고려하면 '${bestPrimary.pos}' 포지션으로 전향했을 때 OVR이 ${currentPosOvr}에서 ${bestPrimary.ovr}(으)로 상승해요! 인접 포지션 단계별 변경을 고려해 봐요.`;
+    coachAdvice = `현재 기술 구성과 ${heightCm}cm 신장을 감안하면 ${bestPrimary.pos} 전향 시 OVR이 ${currentPosOvr}에서 ${bestPrimary.ovr}로 상승합니다.`;
   } else if (!currentSecondary) {
-    coachAdvice = `주포지션 '${currentPrimary}'에 아주 잘 맞고 있어요! 여기에 '${secondBest.pos}' 부포지션까지 소화해주면 로테이션 출전 시간(roleIndex +2.5 보너스)을 훨씬 많이 부여할 수 있어요.`;
+    coachAdvice = `주포지션 ${currentPrimary} 적합도가 높습니다. ${secondBest.pos} 부포지션을 해금하면 로테이션 기용 폭이 넓어집니다.`;
   } else {
-    coachAdvice = `'${currentPrimary}/${currentSecondary}' 듀얼 포지션 소화 능력 덕분에 팀 전술 운용에 큰 힘이 되고 있어요! 지금처럼 훈련에 매진해 주세요.`;
+    coachAdvice = `${currentPrimary}/${currentSecondary} 멀티 포지션 소화가 팀 전술 운용에 안정적으로 기여하고 있습니다.`;
   }
 
   return {
@@ -934,21 +1056,24 @@ export function analyzePositionFit(
 }
 
 /**
- * 보유 능력치 및 고유 DNA/성향/특성에 따른 자동 배지 부여
+ * 보유 능력치 및 고유 DNA/성향/특성에 따른 자동 배지 부여 (포지션별 자연스러운 명칭 적용)
  */
 export function evaluatePlayerBadges(
   stats: PlayerStats,
   secondaryPos: Position | null,
   growthDna?: GrowthDna,
   playstyle?: PlaystyleArchetype,
-  traits?: PlayerTraitId[]
+  traits?: PlayerTraitId[],
+  primaryPos?: Position
 ): string[] {
   const badges: string[] = [];
+  const isBig = primaryPos === 'PF' || primaryPos === 'C';
+
   if (growthDna) {
     badges.push(getGrowthDnaInfo(growthDna).badge);
   }
   if (playstyle) {
-    badges.push(getPlaystyleInfo(playstyle).badge);
+    badges.push(getPlaystyleInfo(playstyle, primaryPos).badge);
   }
   if (traits && traits.length > 0) {
     for (const tr of traits) {
@@ -956,25 +1081,31 @@ export function evaluatePlayerBadges(
     }
   }
 
-  if (stats.out >= 85) badges.push('🎯 데드아이 스나이퍼');
-  else if (stats.out >= 75) badges.push('🔥 캐치앤슛 스페셜리스트');
+  if (stats.out >= 85) badges.push('엘리트 3점 슈터');
+  else if (stats.out >= 75) badges.push('캐치앤슛 슈터');
 
-  if (stats.ins >= 85) badges.push('🔨 림 브레이커');
-  else if (stats.ins >= 75) badges.push('⚡ 아크로바틱 피니셔');
+  if (stats.ins >= 85) badges.push('엘리트 림 피니셔');
+  else if (stats.ins >= 75) badges.push('인사이드 피니셔');
 
-  if (stats.ply >= 85) badges.push('🧠 플로어 제너럴');
-  else if (stats.ply >= 75) badges.push('🪄 다임 드로퍼');
+  if (stats.ply >= 85) {
+    badges.push(isBig ? '하이포스트 패싱 허브' : '1옵션 볼핸들러');
+  } else if (stats.ply >= 75) {
+    badges.push('패스 스페셜리스트');
+  }
 
-  if (stats.def >= 85) badges.push('🔒 1군 락다운 디펜더');
-  else if (stats.def >= 75) badges.push('🛡️ 퍼리미터 스토퍼');
+  if (stats.def >= 85) {
+    badges.push('올-디펜시브 수비수');
+  } else if (stats.def >= 75) {
+    badges.push(isBig ? '페인트존 수비수' : '퍼리미터 수비수');
+  }
 
-  if (stats.reb >= 85) badges.push('🦍 보드 지배자');
-  else if (stats.reb >= 75) badges.push('🧲 리바운드 허슬러');
+  if (stats.reb >= 85) badges.push('엘리트 리바운더');
+  else if (stats.reb >= 75) badges.push('보드 경합 우수');
 
-  if (stats.phy >= 85) badges.push('🚀 강철의 운동능력');
+  if (stats.phy >= 85) badges.push('상위권 운동능력');
 
   if (secondaryPos) {
-    badges.push(`🔄 듀얼 포지션 (${secondaryPos} 겸임)`);
+    badges.push(`멀티 포지션 (${secondaryPos})`);
   }
 
   return badges;

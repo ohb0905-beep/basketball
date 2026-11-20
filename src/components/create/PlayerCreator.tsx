@@ -116,7 +116,7 @@ export function PlayerCreator() {
     if (step === 1) {
       const trimmed = name.trim();
       if (!trimmed) {
-        setErrorMsg('이름을 입력해 주세요');
+        setErrorMsg('선수 이름을 입력해 주세요.');
         return;
       }
       setErrorMsg(null);
@@ -132,7 +132,7 @@ export function PlayerCreator() {
     const trimmed = name.trim();
     if (!trimmed) {
       setStep(1);
-      setErrorMsg('이름을 입력해 주세요');
+      setErrorMsg('선수 이름을 입력해 주세요.');
       return;
     }
 
@@ -156,7 +156,7 @@ export function PlayerCreator() {
         <button
           type="button"
           onClick={handleBack}
-          className="min-h-[40px] -ml-2 px-2 inline-flex items-center gap-1 text-[14px] font-semibold text-[var(--t-g600)] hover:text-[var(--t-g900)] cursor-pointer t-tap"
+          className="min-h-[44px] -ml-2 px-2.5 inline-flex items-center gap-1 text-[14px] font-semibold text-[var(--t-g600)] hover:text-[var(--t-g900)] cursor-pointer t-tap"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>{step === 1 ? '홈' : '이전'}</span>
@@ -186,11 +186,11 @@ export function PlayerCreator() {
       {step === 1 && (
         <section className="t-card space-y-6">
           <div className="space-y-1">
-            <h1 className="text-[24px] font-bold tracking-[-0.03em] text-[var(--t-g900)] leading-snug">
-              선수 이름을 정해주세요
+            <h1 className="text-[24px] font-bold tracking-[-0.03em] text-[var(--t-g900)] leading-snug text-balance">
+              선수 프로필 입력
             </h1>
             <p className="text-[14px] text-[var(--t-g600)]">
-              만 17세 고교 신입생으로 시작합니다
+              만 16세 고교 신입생으로 커리어를 시작합니다.
             </p>
           </div>
 
@@ -258,8 +258,8 @@ export function PlayerCreator() {
         <div className="space-y-3">
           <section className="t-card space-y-5">
             <div className="space-y-1">
-              <h1 className="text-[22px] font-bold tracking-[-0.03em] text-[var(--t-g900)]">
-                포지션과 신장을 선택하세요
+              <h1 className="text-[22px] font-bold tracking-[-0.03em] text-[var(--t-g900)] text-balance">
+                포지션 · 신장 설정
               </h1>
               <p className="text-[13px] text-[var(--t-g600)]">
                 {currentArch.title} · 권장 {heightRange.optimalMin}~{heightRange.optimalMax}cm
@@ -401,8 +401,8 @@ export function PlayerCreator() {
       {step === 3 && (
         <section className="t-card space-y-4">
           <div className="space-y-1">
-            <h1 className="text-[22px] font-bold tracking-[-0.03em] text-[var(--t-g900)]">
-              입학할 고교를 선택하세요
+            <h1 className="text-[22px] font-bold tracking-[-0.03em] text-[var(--t-g900)] text-balance">
+              입학 고교 선택
             </h1>
             <p className="text-[13px] text-[var(--t-g600)] tabular-nums">
               {jerseyNumber ? `#${jerseyNumber} ` : ''}

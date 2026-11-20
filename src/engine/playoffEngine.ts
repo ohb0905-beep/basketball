@@ -4,6 +4,9 @@ import {
   CareerState,
   ClutchChoiceId,
   ClutchScenarioType,
+  InternationalMedalType,
+  InternationalTournamentResult,
+  InternationalTournamentType,
   LeagueId,
   LiveCourtPlay,
   LiveGameState,
@@ -15,9 +18,14 @@ import {
   StandingEntry,
   TeamInfo,
 } from '../types/game';
-import { ASIAN_NATIONAL_TEAMS, getTeamsByLeague } from '../data/teams';
+import {
+  ASIAN_NATIONAL_TEAMS,
+  getNationalTeamsForTournament,
+  getTeamsByLeague,
+} from '../data/teams';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import {
+  INTERNATIONAL_TOURNAMENT_CONFIG,
   LEAGUE_BALANCE_META,
   LIVE_GAME_CONFIG,
 } from '../config/balanceConfig';
@@ -36,9 +44,24 @@ export function getPlayoffCutoffByLeague(
   league: LeagueId,
   totalTeams: number
 ): number {
-  // NBA는 동부 8팀 + 서부 8팀 = 총 16팀이 플레이오프 진출 (컨퍼런스별 상위 8위)
-  if (league === 'NBA') return Math.min(16, totalTeams);
-  if (league === 'KBL' || league === 'OVERSEAS' || league === 'GLEAGUE') {
+  // NBA: 동부 10팀(직행 6 + 플레이인 4) + 서부 10팀 = 총 20팀 포스트시즌
+  if (league === 'NBA') return Math.min(20, totalTeams);
+  // NCAA: Sweet 16 (16강 단판 토너먼트)
+  if (league === 'NCAA') return Math.min(16, totalTeams);
+  // G리그: 동부 6팀 + 서부 6팀 = 총 12팀 (1~2시드 부전승)
+  if (league === 'GLEAGUE') return Math.min(12, totalTeams);
+  // 유로리그: 1~6위 직행 + 7~10위 플레이인 = 총 10팀 포스트시즌
+  if (league === 'EUROLEAGUE') return Math.min(10, totalTeams);
+  // B.리그(동부2+서부2+와일드카드4), U-리그(8강), 고교(8강)
+  if (
+    league === 'B_LEAGUE' ||
+    league === 'U_LEAGUE' ||
+    league === 'HIGH_SCHOOL'
+  ) {
+    return Math.min(8, totalTeams);
+  }
+  // KBL(6강 PO) & NBL(1~2위 4강 직행 + 3~6위 2단계 플레이인)
+  if (league === 'KBL' || league === 'NBL') {
     return Math.min(6, totalTeams);
   }
   return Math.min(4, totalTeams);
@@ -46,8 +69,14 @@ export function getPlayoffCutoffByLeague(
 
 /**
  * 리그 전체 구단의 정규시즌 최종 순위표를 동적 생성합니다.
- * - seasonSimulator.ts의 플레이어 소속팀 승률 공식과 100% 동일한 리그 평균 전력 기준선(getLeagueBaselineTeamRating)을 공유합니다.
- * - NBA의 경우 동부(EAST 1~15위) / 서부(WEST 1~15위) 컨퍼런스 순위(conferenceRank)와 PO 진출 여부(각 컨퍼런스 1~8위)를 함께 산출합니다.
+ * - NBA (동15/서15): 각 컨퍼런스 1~6위 PO 직행, 7~10위 플레이인 진출
+ * - G리그 (동16/서15): 각 컨퍼런스 1~6위 PO 진출 (1~2위 1R 부전승)
+ * - B.리그 (동13/서13): 동부 상위 2팀 + 서부 상위 2팀 + 전체 와일드카드 4팀 = 8강 PO 진출
+ * - 유로리그 (20팀): 1~6위 8강 직행, 7~10위 플레이인 쇼다운 진출
+ * - NBL (10팀): 1~2위 4강 직행, 3~6위 2단계 플레이인 진출
+ * - KBL (10팀): 1~6위 6강 PO 진출 (1~2위 4강 직행)
+ * - U-리그 (12팀) / 고교 (30팀): 1~8위 8강 단판 토너먼트 진출
+ * - NCAA (32팀): 1~16위 Sweet 16 단판 토너먼트 진출
  */
 export function generateLeagueStandings(
   career: CareerState,
@@ -86,6 +115,7 @@ export function generateLeagueStandings(
         gb: 0,
         isPlayerTeam: true,
         qualifiedPlayoffs: false,
+        playInQualified: false,
       };
     }
 
@@ -123,6 +153,7 @@ export function generateLeagueStandings(
       gb: 0,
       isPlayerTeam: false,
       qualifiedPlayoffs: false,
+      playInQualified: false,
     };
   });
 
@@ -132,7 +163,11 @@ export function generateLeagueStandings(
     return b.team.rating - a.team.rating;
   });
 
-  if (career.league === 'NBA') {
+  if (
+    career.league === 'NBA' ||
+    career.league === 'GLEAGUE' ||
+    career.league === 'B_LEAGUE'
+  ) {
     const eastList = rawEntries.filter((e) => e.team.conference === 'EAST');
     const westList = rawEntries.filter((e) => e.team.conference !== 'EAST');
 
@@ -142,7 +177,6 @@ export function generateLeagueStandings(
         const cRank = idx + 1;
         entry.conference = conf;
         entry.conferenceRank = cRank;
-        entry.qualifiedPlayoffs = cRank <= 8;
         entry.gb =
           idx === 0 || !leader
             ? 0
@@ -152,11 +186,33 @@ export function generateLeagueStandings(
                   (leader.wins - entry.wins + (entry.losses - leader.losses)) / 2
                 ).toFixed(1)
               );
+
+        if (career.league === 'NBA') {
+          entry.qualifiedPlayoffs = cRank <= 10;
+          entry.playInQualified = cRank >= 7 && cRank <= 10;
+        } else if (career.league === 'GLEAGUE') {
+          entry.qualifiedPlayoffs = cRank <= 6;
+          entry.playInQualified = false;
+        } else {
+          // B.리그: 동부 상위 2팀 + 서부 상위 2팀 우선 확정 (와일드카드 4팀은 아래에서 추가)
+          entry.qualifiedPlayoffs = cRank <= 2;
+          entry.playInQualified = false;
+        }
       });
     };
 
     assignConfRank(eastList, 'EAST');
     assignConfRank(westList, 'WEST');
+
+    if (career.league === 'B_LEAGUE') {
+      // B.리그 와일드카드 4팀: 동·서부 1~2위를 제외한 나머지 구단 중 승률 상위 4팀
+      const wildcards = rawEntries
+        .filter((e) => !e.qualifiedPlayoffs)
+        .slice(0, 4);
+      for (const wc of wildcards) {
+        wc.qualifiedPlayoffs = true;
+      }
+    }
 
     return rawEntries.map((entry, idx) => ({
       ...entry,
@@ -177,12 +233,16 @@ export function generateLeagueStandings(
               (leader.wins - entry.wins + (entry.losses - leader.losses)) / 2
             ).toFixed(1)
           );
+    const isPlayIn =
+      (career.league === 'EUROLEAGUE' && rank >= 7 && rank <= 10) ||
+      (career.league === 'NBL' && rank >= 3 && rank <= 6);
     return {
       ...entry,
       rank,
       conferenceRank: rank,
       gb,
       qualifiedPlayoffs: rank <= cutoff,
+      playInQualified: isPlayIn,
     };
   });
 }
@@ -192,13 +252,30 @@ function getSeriesConfig(
   roundNumber: number,
   totalRounds: number
 ): { bestOf: number; winsNeeded: number; roundLabel: string } {
-  const isAmateur =
-    league === 'HIGH_SCHOOL' || league === 'U_LEAGUE' || league === 'NCAA';
-  if (isAmateur) {
+  if (league === 'NCAA') {
     return {
       bestOf: 1,
       winsNeeded: 1,
-      roundLabel: roundNumber === 1 ? '4강 토너먼트' : '전국 결승전',
+      roundLabel:
+        roundNumber === 1
+          ? '16강 토너먼트 (Sweet 16)'
+          : roundNumber === 2
+          ? '8강 토너먼트 (Elite 8)'
+          : roundNumber === 3
+          ? '4강 토너먼트 (Final Four)'
+          : 'NCAA 전국 결승전',
+    };
+  }
+  if (league === 'HIGH_SCHOOL' || league === 'U_LEAGUE') {
+    return {
+      bestOf: 1,
+      winsNeeded: 1,
+      roundLabel:
+        roundNumber === 1
+          ? '8강 토너먼트'
+          : roundNumber === 2
+          ? '4강 토너먼트'
+          : '전국 결승전',
     };
   }
   if (league === 'NBA') {
@@ -215,6 +292,69 @@ function getSeriesConfig(
           : 'NBA 파이널',
     };
   }
+  if (league === 'GLEAGUE') {
+    const isFinal = roundNumber === totalRounds;
+    return {
+      bestOf: isFinal ? 3 : 1,
+      winsNeeded: isFinal ? 2 : 1,
+      roundLabel:
+        roundNumber === 1
+          ? '컨퍼런스 1라운드 (단판)'
+          : roundNumber === 2
+          ? '컨퍼런스 세미파이널 (단판)'
+          : roundNumber === 3
+          ? '컨퍼런스 파이널 (단판)'
+          : 'G리그 파이널 (3전 2선승)',
+    };
+  }
+  if (league === 'B_LEAGUE') {
+    return {
+      bestOf: 3,
+      winsNeeded: 2,
+      roundLabel:
+        roundNumber === 1
+          ? 'B.리그 8강 플레이오프'
+          : roundNumber === 2
+          ? 'B.리그 4강 플레이오프'
+          : 'B.리그 파이널',
+    };
+  }
+  if (league === 'NBL') {
+    if (roundNumber === 1) {
+      return {
+        bestOf: 3,
+        winsNeeded: 2,
+        roundLabel: 'NBL 세미파이널 (4강)',
+      };
+    }
+    return {
+      bestOf: 5,
+      winsNeeded: 3,
+      roundLabel: 'NBL 챔피언십 시리즈',
+    };
+  }
+  if (league === 'EUROLEAGUE') {
+    if (roundNumber === 1) {
+      return {
+        bestOf: 5,
+        winsNeeded: 3,
+        roundLabel: '유로리그 8강 플레이오프',
+      };
+    }
+    if (roundNumber === 2) {
+      return {
+        bestOf: 1,
+        winsNeeded: 1,
+        roundLabel: '유로리그 파이널 포 (4강 단판)',
+      };
+    }
+    return {
+      bestOf: 1,
+      winsNeeded: 1,
+      roundLabel: '유로리그 파이널 포 결승',
+    };
+  }
+  // KBL: 6강 BO5 -> 4강 BO5 -> 챔피언 결정전 BO7
   const isFinal = roundNumber === totalRounds;
   return {
     bestOf: isFinal ? 7 : 5,
@@ -237,7 +377,11 @@ function createMatchup(
   higher: StandingEntry,
   lower: StandingEntry,
   playerTeamId: string,
-  conference?: 'EAST' | 'WEST' | 'FINALS'
+  conference?: 'EAST' | 'WEST' | 'FINALS',
+  extra?: {
+    isPlayIn?: boolean;
+    playInSlot?: '7v8' | '9v10' | '3v4' | '5v6' | 'DECIDER';
+  }
 ): PlayoffSeriesMatchup {
   const hiRank = higher.conferenceRank ?? higher.rank;
   const loRank = lower.conferenceRank ?? lower.rank;
@@ -274,44 +418,171 @@ function createMatchup(
     winnerId: null,
     involvesPlayer:
       OrderedHi.team.id === playerTeamId || OrderedLo.team.id === playerTeamId,
+    isPlayIn: extra?.isPlayIn,
+    playInSlot: extra?.playInSlot,
     summaryLog: [
       `(${seedTagHi}) ${OrderedHi.team.shortName} vs (${seedTagLo}) ${OrderedLo.team.shortName} 대진 확정`,
     ],
   };
 }
 
+function getWinnerEntry(s: PlayoffSeriesMatchup): StandingEntry {
+  return s.winnerId === s.higherSeed.team.id ? s.higherSeed : s.lowerSeed;
+}
+
+function getLoserEntry(s: PlayoffSeriesMatchup): StandingEntry {
+  return s.winnerId === s.higherSeed.team.id ? s.lowerSeed : s.higherSeed;
+}
+
 /**
- * 정규시즌 순위표를 바탕으로 포스트시즌 사다리 대진표를 생성합니다.
- * - NBA: 동부 1~8시드 4경기 + 서부 1~8시드 4경기 (총 4라운드: 1R -> 컨퍼런스 4강 -> 컨퍼런스 파이널 -> NBA 파이널)
- * - KBL / 해외 / G리그: 6강 PO (3라운드)
- * - 고교 / 대학 / NCAA: 4강 단판 토너먼트 (2라운드)
+ * NBA 본선 1라운드 대진 생성 (동·서부 1~6시드 + 플레이인으로 확정된 7·8시드)
+ */
+function buildNbaMainRound1(
+  eastTop6: StandingEntry[],
+  westTop6: StandingEntry[],
+  east7: StandingEntry,
+  east8: StandingEntry,
+  west7: StandingEntry,
+  west8: StandingEntry,
+  playerTeamId: string
+): PlayoffSeriesMatchup[] {
+  const r1Cfg = getSeriesConfig('NBA', 1, 4);
+  const eastPairs: [StandingEntry, StandingEntry][] = [
+    [eastTop6[0], east8],
+    [eastTop6[3], eastTop6[4]],
+    [eastTop6[1], east7],
+    [eastTop6[2], eastTop6[5]],
+  ];
+  const westPairs: [StandingEntry, StandingEntry][] = [
+    [westTop6[0], west8],
+    [westTop6[3], westTop6[4]],
+    [westTop6[1], west7],
+    [westTop6[2], westTop6[5]],
+  ];
+
+  return [
+    ...eastPairs.map(([hi, lo], i) =>
+      createMatchup(
+        `R1_E${i + 1}`,
+        1,
+        `동부 ${r1Cfg.roundLabel}`,
+        r1Cfg.bestOf,
+        r1Cfg.winsNeeded,
+        hi,
+        lo,
+        playerTeamId,
+        'EAST'
+      )
+    ),
+    ...westPairs.map(([hi, lo], i) =>
+      createMatchup(
+        `R1_W${i + 1}`,
+        1,
+        `서부 ${r1Cfg.roundLabel}`,
+        r1Cfg.bestOf,
+        r1Cfg.winsNeeded,
+        hi,
+        lo,
+        playerTeamId,
+        'WEST'
+      )
+    ),
+  ];
+}
+
+/**
+ * 유로리그 본선 8강 대진 생성 (1~6위 + 플레이인 7·8시드)
+ */
+function buildEuroleagueMainRound1(
+  top6: StandingEntry[],
+  seed7: StandingEntry,
+  seed8: StandingEntry,
+  playerTeamId: string
+): PlayoffSeriesMatchup[] {
+  const r1Cfg = getSeriesConfig('EUROLEAGUE', 1, 3);
+  const pairs: [StandingEntry, StandingEntry][] = [
+    [top6[0], seed8],
+    [top6[3], top6[4]],
+    [top6[1], seed7],
+    [top6[2], top6[5]],
+  ];
+  return pairs.map(([hi, lo], i) =>
+    createMatchup(
+      `R1_S${i + 1}`,
+      1,
+      r1Cfg.roundLabel,
+      r1Cfg.bestOf,
+      r1Cfg.winsNeeded,
+      hi,
+      lo,
+      playerTeamId
+    )
+  );
+}
+
+/**
+ * NBL 본선 세미파이널(4강 BO3) 대진 생성 (1·2위 직행 + 플레이인 3·4시드)
+ */
+function buildNblMainRound1(
+  seed1: StandingEntry,
+  seed2: StandingEntry,
+  seed3: StandingEntry,
+  seed4: StandingEntry,
+  playerTeamId: string
+): PlayoffSeriesMatchup[] {
+  const r1Cfg = getSeriesConfig('NBL', 1, 2);
+  return [
+    createMatchup(
+      'R1_S1',
+      1,
+      r1Cfg.roundLabel,
+      r1Cfg.bestOf,
+      r1Cfg.winsNeeded,
+      seed1,
+      seed4,
+      playerTeamId
+    ),
+    createMatchup(
+      'R1_S2',
+      1,
+      r1Cfg.roundLabel,
+      r1Cfg.bestOf,
+      r1Cfg.winsNeeded,
+      seed2,
+      seed3,
+      playerTeamId
+    ),
+  ];
+}
+
+/**
+ * 정규시즌 순위표를 바탕으로 전 리그 포스트시즌(플레이인 + 본선) 대진표를 생성합니다.
  */
 export function createPlayoffBracket(
   career: CareerState,
-  standings: StandingEntry[]
+  standings: StandingEntry[],
+  rng: () => number = Math.random
 ): PlayoffBracketState {
   const playerStanding =
     standings.find((s) => s.isPlayerTeam) || standings[standings.length - 1];
 
+  // 1) NBA: 동·서부 1~6위 본선 직행, 7~10위 플레이인 토너먼트 (BO1 2단계 -> 16팀 4R BO7)
   if (career.league === 'NBA') {
-    const eastTop8 = standings
+    const eastList = standings
       .filter((s) => s.team.conference === 'EAST')
-      .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
-      .slice(0, 8);
-    const westTop8 = standings
+      .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank));
+    const westList = standings
       .filter((s) => s.team.conference !== 'EAST')
-      .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
-      .slice(0, 8);
+      .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank));
 
-    const totalRounds = 4;
     const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
-
-    if (!playerQualified || eastTop8.length < 8 || westTop8.length < 8) {
+    if (!playerQualified || eastList.length < 10 || westList.length < 10) {
       return {
         league: career.league,
         year: career.seasonYear,
-        totalRounds,
+        totalRounds: 4,
         currentRound: 1,
+        stageType: 'MAIN_PLAYOFF',
         rounds: [],
         playerEliminated: true,
         playerReachedFinals: false,
@@ -320,54 +591,133 @@ export function createPlayoffBracket(
       };
     }
 
-    const r1Cfg = getSeriesConfig('NBA', 1, totalRounds);
-    const eastPairs: [StandingEntry, StandingEntry][] = [
-      [eastTop8[0], eastTop8[7]],
-      [eastTop8[3], eastTop8[4]],
-      [eastTop8[1], eastTop8[6]],
-      [eastTop8[2], eastTop8[5]],
-    ];
-    const westPairs: [StandingEntry, StandingEntry][] = [
-      [westTop8[0], westTop8[7]],
-      [westTop8[3], westTop8[4]],
-      [westTop8[1], westTop8[6]],
-      [westTop8[2], westTop8[5]],
-    ];
+    const piEast78 = createMatchup(
+      'PI1_E78',
+      1,
+      '동부 플레이인 7·8위 결정전',
+      1,
+      1,
+      eastList[6],
+      eastList[7],
+      career.team.id,
+      'EAST',
+      { isPlayIn: true, playInSlot: '7v8' }
+    );
+    const piEast910 = createMatchup(
+      'PI1_E910',
+      1,
+      '동부 플레이인 9·10위 단판전',
+      1,
+      1,
+      eastList[8],
+      eastList[9],
+      career.team.id,
+      'EAST',
+      { isPlayIn: true, playInSlot: '9v10' }
+    );
+    const piWest78 = createMatchup(
+      'PI1_W78',
+      1,
+      '서부 플레이인 7·8위 결정전',
+      1,
+      1,
+      westList[6],
+      westList[7],
+      career.team.id,
+      'WEST',
+      { isPlayIn: true, playInSlot: '7v8' }
+    );
+    const piWest910 = createMatchup(
+      'PI1_W910',
+      1,
+      '서부 플레이인 9·10위 단판전',
+      1,
+      1,
+      westList[8],
+      westList[9],
+      career.team.id,
+      'WEST',
+      { isPlayIn: true, playInSlot: '9v10' }
+    );
 
-    const round1Series: PlayoffSeriesMatchup[] = [
-      ...eastPairs.map(([hi, lo], i) =>
-        createMatchup(
-          `R1_E${i + 1}`,
-          1,
-          `동부 ${r1Cfg.roundLabel}`,
-          r1Cfg.bestOf,
-          r1Cfg.winsNeeded,
-          hi,
-          lo,
-          career.team.id,
-          'EAST'
-        )
+    // 플레이어가 7~10위 플레이인 참가 팀이면 플레이인 1라운드부터 직접 진행
+    if (playerStanding.playInQualified) {
+      return {
+        league: career.league,
+        year: career.seasonYear,
+        totalRounds: 2,
+        currentRound: 1,
+        stageType: 'PLAY_IN_ROUND_1',
+        rounds: [[piEast78, piEast910, piWest78, piWest910]],
+        playerEliminated: false,
+        playerReachedFinals: false,
+        championTeamId: null,
+        playoffResultLabel: '플레이인 토너먼트 진출',
+      };
+    }
+
+    // 1~6위 직행 시에는 7~10위 플레이인을 백그라운드로 시뮬레이션하여 실제 7·8시드를 채운 뒤 본선 1R 시작
+    const resE78 = simulateSingleSeries(piEast78, career, rng, false);
+    const resE910 = simulateSingleSeries(piEast910, career, rng, false);
+    const resEDec = simulateSingleSeries(
+      createMatchup(
+        'PI2_E8',
+        2,
+        '동부 플레이인 8시드 최종전',
+        1,
+        1,
+        getLoserEntry(resE78),
+        getWinnerEntry(resE910),
+        career.team.id,
+        'EAST',
+        { isPlayIn: true, playInSlot: 'DECIDER' }
       ),
-      ...westPairs.map(([hi, lo], i) =>
-        createMatchup(
-          `R1_W${i + 1}`,
-          1,
-          `서부 ${r1Cfg.roundLabel}`,
-          r1Cfg.bestOf,
-          r1Cfg.winsNeeded,
-          hi,
-          lo,
-          career.team.id,
-          'WEST'
-        )
+      career,
+      rng,
+      false
+    );
+    const resW78 = simulateSingleSeries(piWest78, career, rng, false);
+    const resW910 = simulateSingleSeries(piWest910, career, rng, false);
+    const resWDec = simulateSingleSeries(
+      createMatchup(
+        'PI2_W8',
+        2,
+        '서부 플레이인 8시드 최종전',
+        1,
+        1,
+        getLoserEntry(resW78),
+        getWinnerEntry(resW910),
+        career.team.id,
+        'WEST',
+        { isPlayIn: true, playInSlot: 'DECIDER' }
       ),
-    ];
+      career,
+      rng,
+      false
+    );
+
+    const east7 = getWinnerEntry(resE78);
+    const east8 = getWinnerEntry(resEDec);
+    const west7 = getWinnerEntry(resW78);
+    const west8 = getWinnerEntry(resWDec);
+
+    const round1Series = buildNbaMainRound1(
+      eastList.slice(0, 6),
+      westList.slice(0, 6),
+      east7,
+      east8,
+      west7,
+      west8,
+      career.team.id
+    );
 
     return {
       league: career.league,
       year: career.seasonYear,
-      totalRounds,
+      totalRounds: 4,
       currentRound: 1,
+      stageType: 'MAIN_PLAYOFF',
+      playInSeeds: { east7, east8, west7, west8 },
       rounds: [round1Series],
       playerEliminated: false,
       playerReachedFinals: false,
@@ -376,10 +726,369 @@ export function createPlayoffBracket(
     };
   }
 
-  const cutoff = getPlayoffCutoffByLeague(career.league, standings.length);
-  const qualified = standings.slice(0, cutoff);
-  const playerQualified = playerStanding.rank <= cutoff;
-  const totalRounds = cutoff <= 4 ? 2 : 3;
+  // 2) 유로리그 (20팀): 1~6위 8강 직행, 7~10위 플레이인 쇼다운 (BO1 2단계 -> 8강 BO5 -> 파이널 포 4강/결승 BO1)
+  if (career.league === 'EUROLEAGUE') {
+    const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
+    if (!playerQualified || standings.length < 10) {
+      return {
+        league: career.league,
+        year: career.seasonYear,
+        totalRounds: 3,
+        currentRound: 1,
+        stageType: 'MAIN_PLAYOFF',
+        rounds: [],
+        playerEliminated: true,
+        playerReachedFinals: false,
+        championTeamId: null,
+        playoffResultLabel: 'PO 탈락',
+      };
+    }
+
+    const pi78 = createMatchup(
+      'PI1_EL78',
+      1,
+      '유로리그 플레이인 7·8위 결정전',
+      1,
+      1,
+      standings[6],
+      standings[7],
+      career.team.id,
+      undefined,
+      { isPlayIn: true, playInSlot: '7v8' }
+    );
+    const pi910 = createMatchup(
+      'PI1_EL910',
+      1,
+      '유로리그 플레이인 9·10위 단판전',
+      1,
+      1,
+      standings[8],
+      standings[9],
+      career.team.id,
+      undefined,
+      { isPlayIn: true, playInSlot: '9v10' }
+    );
+
+    if (playerStanding.playInQualified) {
+      return {
+        league: career.league,
+        year: career.seasonYear,
+        totalRounds: 2,
+        currentRound: 1,
+        stageType: 'PLAY_IN_ROUND_1',
+        rounds: [[pi78, pi910]],
+        playerEliminated: false,
+        playerReachedFinals: false,
+        championTeamId: null,
+        playoffResultLabel: '유로리그 플레이인 진출',
+      };
+    }
+
+    const res78 = simulateSingleSeries(pi78, career, rng, false);
+    const res910 = simulateSingleSeries(pi910, career, rng, false);
+    const resDec = simulateSingleSeries(
+      createMatchup(
+        'PI2_EL8',
+        2,
+        '유로리그 플레이인 8시드 최종전',
+        1,
+        1,
+        getLoserEntry(res78),
+        getWinnerEntry(res910),
+        career.team.id,
+        undefined,
+        { isPlayIn: true, playInSlot: 'DECIDER' }
+      ),
+      career,
+      rng,
+      false
+    );
+    const seed7 = getWinnerEntry(res78);
+    const seed8 = getWinnerEntry(resDec);
+
+    return {
+      league: career.league,
+      year: career.seasonYear,
+      totalRounds: 3,
+      currentRound: 1,
+      stageType: 'MAIN_PLAYOFF',
+      playInSeeds: { seed7, seed8 },
+      rounds: [
+        buildEuroleagueMainRound1(
+          standings.slice(0, 6),
+          seed7,
+          seed8,
+          career.team.id
+        ),
+      ],
+      playerEliminated: false,
+      playerReachedFinals: false,
+      championTeamId: null,
+      playoffResultLabel: '유로리그 8강 PO 진출',
+    };
+  }
+
+  // 3) 호주 NBL (10팀): 1~2위 4강 직행, 3~6위 정통 2단계 플레이인 (3v4 + 5v6 -> 최종전 -> 4강 BO3 -> 챔피언십 BO5)
+  if (career.league === 'NBL') {
+    const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
+    if (!playerQualified || standings.length < 6) {
+      return {
+        league: career.league,
+        year: career.seasonYear,
+        totalRounds: 2,
+        currentRound: 1,
+        stageType: 'MAIN_PLAYOFF',
+        rounds: [],
+        playerEliminated: true,
+        playerReachedFinals: false,
+        championTeamId: null,
+        playoffResultLabel: 'PO 탈락',
+      };
+    }
+
+    const pi34 = createMatchup(
+      'PI1_NBL34',
+      1,
+      'NBL 시딩 퀄리파이어 (3·4위전)',
+      1,
+      1,
+      standings[2],
+      standings[3],
+      career.team.id,
+      undefined,
+      { isPlayIn: true, playInSlot: '3v4' }
+    );
+    const pi56 = createMatchup(
+      'PI1_NBL56',
+      1,
+      'NBL 플레이인 퀄리파이어 (5·6위전)',
+      1,
+      1,
+      standings[4],
+      standings[5],
+      career.team.id,
+      undefined,
+      { isPlayIn: true, playInSlot: '5v6' }
+    );
+
+    if (playerStanding.playInQualified) {
+      return {
+        league: career.league,
+        year: career.seasonYear,
+        totalRounds: 2,
+        currentRound: 1,
+        stageType: 'PLAY_IN_ROUND_1',
+        rounds: [[pi34, pi56]],
+        playerEliminated: false,
+        playerReachedFinals: false,
+        championTeamId: null,
+        playoffResultLabel: 'NBL 플레이인 진출',
+      };
+    }
+
+    const res34 = simulateSingleSeries(pi34, career, rng, false);
+    const res56 = simulateSingleSeries(pi56, career, rng, false);
+    const resDec = simulateSingleSeries(
+      createMatchup(
+        'PI2_NBL4',
+        2,
+        'NBL 플레이인 4시드 최종전',
+        1,
+        1,
+        getLoserEntry(res34),
+        getWinnerEntry(res56),
+        career.team.id,
+        undefined,
+        { isPlayIn: true, playInSlot: 'DECIDER' }
+      ),
+      career,
+      rng,
+      false
+    );
+    const seed3 = getWinnerEntry(res34);
+    const seed4 = getWinnerEntry(resDec);
+
+    return {
+      league: career.league,
+      year: career.seasonYear,
+      totalRounds: 2,
+      currentRound: 1,
+      stageType: 'MAIN_PLAYOFF',
+      playInSeeds: { seed3, seed4 },
+      rounds: [
+        buildNblMainRound1(
+          standings[0],
+          standings[1],
+          seed3,
+          seed4,
+          career.team.id
+        ),
+      ],
+      playerEliminated: false,
+      playerReachedFinals: false,
+      championTeamId: null,
+      playoffResultLabel: 'NBL 세미파이널 직행',
+    };
+  }
+
+  // 4) G리그 (31팀): 동부 6팀 + 서부 6팀 = 12팀 (1~2시드 1R 부전승, 컨퍼런스 단판 BO1 -> 파이널 BO3)
+  if (career.league === 'GLEAGUE') {
+    const eastTop6 = standings
+      .filter((s) => s.team.conference === 'EAST')
+      .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
+      .slice(0, 6);
+    const westTop6 = standings
+      .filter((s) => s.team.conference !== 'EAST')
+      .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
+      .slice(0, 6);
+
+    const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
+    if (!playerQualified || eastTop6.length < 6 || westTop6.length < 6) {
+      return {
+        league: career.league,
+        year: career.seasonYear,
+        totalRounds: 4,
+        currentRound: 1,
+        stageType: 'MAIN_PLAYOFF',
+        rounds: [],
+        playerEliminated: true,
+        playerReachedFinals: false,
+        championTeamId: null,
+        playoffResultLabel: 'PO 탈락',
+      };
+    }
+
+    const r1Cfg = getSeriesConfig('GLEAGUE', 1, 4);
+    // East 4v5, East 3v6, West 4v5, West 3v6 (1·2시드 부전승)
+    const round1Series: PlayoffSeriesMatchup[] = [
+      createMatchup(
+        'R1_E1',
+        1,
+        `동부 ${r1Cfg.roundLabel}`,
+        r1Cfg.bestOf,
+        r1Cfg.winsNeeded,
+        eastTop6[3],
+        eastTop6[4],
+        career.team.id,
+        'EAST'
+      ),
+      createMatchup(
+        'R1_E2',
+        1,
+        `동부 ${r1Cfg.roundLabel}`,
+        r1Cfg.bestOf,
+        r1Cfg.winsNeeded,
+        eastTop6[2],
+        eastTop6[5],
+        career.team.id,
+        'EAST'
+      ),
+      createMatchup(
+        'R1_W1',
+        1,
+        `서부 ${r1Cfg.roundLabel}`,
+        r1Cfg.bestOf,
+        r1Cfg.winsNeeded,
+        westTop6[3],
+        westTop6[4],
+        career.team.id,
+        'WEST'
+      ),
+      createMatchup(
+        'R1_W2',
+        1,
+        `서부 ${r1Cfg.roundLabel}`,
+        r1Cfg.bestOf,
+        r1Cfg.winsNeeded,
+        westTop6[2],
+        westTop6[5],
+        career.team.id,
+        'WEST'
+      ),
+    ];
+
+    return {
+      league: career.league,
+      year: career.seasonYear,
+      totalRounds: 4,
+      currentRound: 1,
+      stageType: 'MAIN_PLAYOFF',
+      rounds: [round1Series],
+      playerEliminated: false,
+      playerReachedFinals: false,
+      championTeamId: null,
+      playoffResultLabel: 'G리그 플레이오프 진출',
+    };
+  }
+
+  // 5) NCAA (32팀): 16강 단판 토너먼트 (Sweet 16 -> Elite 8 -> Final Four -> Championship, 4라운드)
+  if (career.league === 'NCAA') {
+    const qualified = standings.slice(0, 16);
+    const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
+    if (!playerQualified || qualified.length < 16) {
+      return {
+        league: career.league,
+        year: career.seasonYear,
+        totalRounds: 4,
+        currentRound: 1,
+        stageType: 'MAIN_PLAYOFF',
+        rounds: [],
+        playerEliminated: true,
+        playerReachedFinals: false,
+        championTeamId: null,
+        playoffResultLabel: '토너먼트 탈락',
+      };
+    }
+
+    const r1Cfg = getSeriesConfig('NCAA', 1, 4);
+    const pairs: [StandingEntry, StandingEntry][] = [
+      [qualified[0], qualified[15]],
+      [qualified[7], qualified[8]],
+      [qualified[4], qualified[11]],
+      [qualified[3], qualified[12]],
+      [qualified[1], qualified[14]],
+      [qualified[6], qualified[9]],
+      [qualified[5], qualified[10]],
+      [qualified[2], qualified[13]],
+    ];
+    const round1Series = pairs.map(([hi, lo], i) =>
+      createMatchup(
+        `R1_S${i + 1}`,
+        1,
+        r1Cfg.roundLabel,
+        r1Cfg.bestOf,
+        r1Cfg.winsNeeded,
+        hi,
+        lo,
+        career.team.id,
+        i < 4 ? 'EAST' : 'WEST'
+      )
+    );
+
+    return {
+      league: career.league,
+      year: career.seasonYear,
+      totalRounds: 4,
+      currentRound: 1,
+      stageType: 'MAIN_PLAYOFF',
+      rounds: [round1Series],
+      playerEliminated: false,
+      playerReachedFinals: false,
+      championTeamId: null,
+      playoffResultLabel: 'NCAA 16강 토너먼트 진출',
+    };
+  }
+
+  // 6) B.리그 (동부2+서부2+와일드카드4 = 8강 BO3), U-리그 (8강 BO1), 고교 (8강 BO1), KBL (6강 BO5)
+  const qualified =
+    career.league === 'B_LEAGUE'
+      ? standings.filter((s) => s.qualifiedPlayoffs).slice(0, 8)
+      : standings.slice(
+          0,
+          getPlayoffCutoffByLeague(career.league, standings.length)
+        );
+  const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
+  const totalRounds = qualified.length <= 4 ? 2 : 3;
 
   if (!playerQualified || qualified.length < 2) {
     return {
@@ -387,6 +1096,7 @@ export function createPlayoffBracket(
       year: career.seasonYear,
       totalRounds,
       currentRound: 1,
+      stageType: 'MAIN_PLAYOFF',
       rounds: [],
       playerEliminated: true,
       playerReachedFinals: false,
@@ -398,7 +1108,26 @@ export function createPlayoffBracket(
   const r1Cfg = getSeriesConfig(career.league, 1, totalRounds);
   let round1Series: PlayoffSeriesMatchup[] = [];
 
-  if (cutoff === 6 && qualified.length >= 6) {
+  if (qualified.length >= 8) {
+    const pairs: [StandingEntry, StandingEntry][] = [
+      [qualified[0], qualified[7]],
+      [qualified[3], qualified[4]],
+      [qualified[1], qualified[6]],
+      [qualified[2], qualified[5]],
+    ];
+    round1Series = pairs.map(([hi, lo], i) =>
+      createMatchup(
+        `R1_S${i + 1}`,
+        1,
+        r1Cfg.roundLabel,
+        r1Cfg.bestOf,
+        r1Cfg.winsNeeded,
+        hi,
+        lo,
+        career.team.id
+      )
+    );
+  } else if (qualified.length >= 6) {
     const pairs: [StandingEntry, StandingEntry][] = [
       [qualified[3], qualified[4]],
       [qualified[2], qualified[5]],
@@ -439,6 +1168,7 @@ export function createPlayoffBracket(
     year: career.seasonYear,
     totalRounds,
     currentRound: 1,
+    stageType: 'MAIN_PLAYOFF',
     rounds: [round1Series],
     playerEliminated: false,
     playerReachedFinals: false,
@@ -545,13 +1275,41 @@ function getEliminationLabel(
   roundNumber: number,
   totalRounds: number
 ): string {
+  if (league === 'EUROLEAGUE') {
+    if (roundNumber === totalRounds) return '유로리그 파이널 포 준우승';
+    return roundNumber === 1 ? '유로리그 8강 PO 탈락' : '유로리그 파이널 포 4강 탈락';
+  }
+  if (league === 'B_LEAGUE') {
+    if (roundNumber === totalRounds) return 'B.리그 파이널 준우승';
+    return roundNumber === 1 ? 'B.리그 8강 PO 탈락' : 'B.리그 4강 PO 탈락';
+  }
+  if (league === 'NBL') {
+    if (roundNumber === totalRounds) return 'NBL 챔피언십 준우승';
+    return 'NBL 4강 탈락';
+  }
+  if (league === 'NCAA') {
+    if (roundNumber === totalRounds) return 'NCAA 전국 준우승';
+    if (roundNumber === 1) return 'NCAA 16강 탈락';
+    if (roundNumber === 2) return 'NCAA 8강 탈락';
+    return 'NCAA 4강(Final Four) 탈락';
+  }
+  if (league === 'U_LEAGUE' || league === 'HIGH_SCHOOL') {
+    if (roundNumber === totalRounds) return '전국 결승 준우승';
+    return roundNumber === 1 ? '8강 토너먼트 탈락' : '4강 토너먼트 탈락';
+  }
+  if (league === 'GLEAGUE') {
+    if (roundNumber === totalRounds) return 'G리그 파이널 준우승';
+    if (roundNumber === 1) return 'G리그 컨퍼런스 1R 탈락';
+    if (roundNumber === 2) return 'G리그 컨퍼런스 4강 탈락';
+    return 'G리그 컨퍼런스 파이널 탈락';
+  }
   if (roundNumber === totalRounds) return '파이널 준우승';
   if (league === 'NBA') {
     if (roundNumber === 1) return '컨퍼런스 1R(8강) 탈락';
     if (roundNumber === 2) return '컨퍼런스 4강 탈락';
     return '컨퍼런스 파이널 탈락';
   }
-  if (league === 'KBL' || league === 'OVERSEAS' || league === 'GLEAGUE') {
+  if (league === 'KBL') {
     return roundNumber === 1 ? '6강 PO 탈락' : '4강 PO 탈락';
   }
   return '4강 PO 탈락';
@@ -609,7 +1367,354 @@ export function evaluateRealisticFinalsMvp(
 }
 
 /**
- * 현재 라운드의 플레이오프 시리즈를 진행하고 다음 라운드 대진을 구성합니다.
+ * 플레이인 단계(PLAY_IN_ROUND_1 -> PLAY_IN_DECIDER -> MAIN_PLAYOFF) 전용 진행 처리기
+ */
+function advancePlayInStage(
+  bracket: PlayoffBracketState,
+  career: CareerState,
+  standings: StandingEntry[],
+  rng: () => number
+): PlayoffBracketState {
+  const rIdx = bracket.currentRound - 1;
+  const currentSeriesList = bracket.rounds[rIdx] || [];
+  const resolved = currentSeriesList.map((s) =>
+    simulateSingleSeries(s, career, rng, false)
+  );
+  const updatedRounds = [...bracket.rounds];
+  updatedRounds[rIdx] = resolved;
+
+  const playerMatch = resolved.find((s) => s.involvesPlayer);
+  let playerEliminated = bracket.playerEliminated;
+  let playoffResultLabel = bracket.playoffResultLabel;
+
+  // Stage 1: PLAY_IN_ROUND_1 -> PLAY_IN_DECIDER (또는 7시드/3시드 직행 시 본선 자동 진입)
+  if (bracket.stageType === 'PLAY_IN_ROUND_1') {
+    if (bracket.league === 'NBA') {
+      const e78 = resolved.find((m) => m.id === 'PI1_E78') || resolved[0];
+      const e910 = resolved.find((m) => m.id === 'PI1_E910') || resolved[1];
+      const w78 = resolved.find((m) => m.id === 'PI1_W78') || resolved[2];
+      const w910 = resolved.find((m) => m.id === 'PI1_W910') || resolved[3];
+
+      const east7 = getWinnerEntry(e78);
+      const west7 = getWinnerEntry(w78);
+
+      const eDecider = createMatchup(
+        'PI2_E8',
+        2,
+        '동부 플레이인 8시드 최종전',
+        1,
+        1,
+        getLoserEntry(e78),
+        getWinnerEntry(e910),
+        career.team.id,
+        'EAST',
+        { isPlayIn: true, playInSlot: 'DECIDER' }
+      );
+      const wDecider = createMatchup(
+        'PI2_W8',
+        2,
+        '서부 플레이인 8시드 최종전',
+        1,
+        1,
+        getLoserEntry(w78),
+        getWinnerEntry(w910),
+        career.team.id,
+        'WEST',
+        { isPlayIn: true, playInSlot: 'DECIDER' }
+      );
+
+      if (
+        playerMatch &&
+        playerMatch.playInSlot === '9v10' &&
+        playerMatch.winnerId !== career.team.id
+      ) {
+        playerEliminated = true;
+        playoffResultLabel = '플레이인 1R 탈락';
+      } else if (
+        playerMatch &&
+        playerMatch.playInSlot === '7v8' &&
+        playerMatch.winnerId === career.team.id
+      ) {
+        // 플레이어가 7·8위전 승리로 7시드 직행 확정 -> 최종전 자동 해결 후 본선 1R 즉시 진입
+        const resEDec = simulateSingleSeries(eDecider, career, rng, false);
+        const resWDec = simulateSingleSeries(wDecider, career, rng, false);
+        const east8 = getWinnerEntry(resEDec);
+        const west8 = getWinnerEntry(resWDec);
+        const eastTop6 = standings
+          .filter((s) => s.team.conference === 'EAST')
+          .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
+          .slice(0, 6);
+        const westTop6 = standings
+          .filter((s) => s.team.conference !== 'EAST')
+          .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
+          .slice(0, 6);
+        return {
+          ...bracket,
+          stageType: 'MAIN_PLAYOFF',
+          totalRounds: 4,
+          currentRound: 1,
+          playInSeeds: { east7, east8, west7, west8 },
+          rounds: [
+            buildNbaMainRound1(
+              eastTop6,
+              westTop6,
+              east7,
+              east8,
+              west7,
+              west8,
+              career.team.id
+            ),
+          ],
+          playerEliminated: false,
+          playoffResultLabel: '플레이인 돌파 · 7시드 PO 진출',
+        };
+      }
+
+      updatedRounds.push([eDecider, wDecider]);
+      return {
+        ...bracket,
+        stageType: 'PLAY_IN_DECIDER',
+        currentRound: 2,
+        playInSeeds: { east7, west7 },
+        rounds: updatedRounds,
+        playerEliminated,
+        playoffResultLabel: playerEliminated
+          ? playoffResultLabel
+          : '플레이인 8시드 최종전 진출',
+      };
+    }
+
+    if (bracket.league === 'EUROLEAGUE') {
+      const m78 = resolved.find((m) => m.playInSlot === '7v8') || resolved[0];
+      const m910 = resolved.find((m) => m.playInSlot === '9v10') || resolved[1];
+      const seed7 = getWinnerEntry(m78);
+      const decider = createMatchup(
+        'PI2_EL8',
+        2,
+        '유로리그 플레이인 8시드 최종전',
+        1,
+        1,
+        getLoserEntry(m78),
+        getWinnerEntry(m910),
+        career.team.id,
+        undefined,
+        { isPlayIn: true, playInSlot: 'DECIDER' }
+      );
+
+      if (
+        playerMatch &&
+        playerMatch.playInSlot === '9v10' &&
+        playerMatch.winnerId !== career.team.id
+      ) {
+        playerEliminated = true;
+        playoffResultLabel = '유로리그 플레이인 1R 탈락';
+      } else if (
+        playerMatch &&
+        playerMatch.playInSlot === '7v8' &&
+        playerMatch.winnerId === career.team.id
+      ) {
+        const resDec = simulateSingleSeries(decider, career, rng, false);
+        const seed8 = getWinnerEntry(resDec);
+        return {
+          ...bracket,
+          stageType: 'MAIN_PLAYOFF',
+          totalRounds: 3,
+          currentRound: 1,
+          playInSeeds: { seed7, seed8 },
+          rounds: [
+            buildEuroleagueMainRound1(
+              standings.slice(0, 6),
+              seed7,
+              seed8,
+              career.team.id
+            ),
+          ],
+          playerEliminated: false,
+          playoffResultLabel: '유로리그 7시드 8강 진출',
+        };
+      }
+
+      updatedRounds.push([decider]);
+      return {
+        ...bracket,
+        stageType: 'PLAY_IN_DECIDER',
+        currentRound: 2,
+        playInSeeds: { seed7 },
+        rounds: updatedRounds,
+        playerEliminated,
+        playoffResultLabel: playerEliminated
+          ? playoffResultLabel
+          : '유로리그 플레이인 최종전',
+      };
+    }
+
+    // NBL PLAY_IN_ROUND_1
+    const m34 = resolved.find((m) => m.playInSlot === '3v4') || resolved[0];
+    const m56 = resolved.find((m) => m.playInSlot === '5v6') || resolved[1];
+    const seed3 = getWinnerEntry(m34);
+    const decider = createMatchup(
+      'PI2_NBL4',
+      2,
+      'NBL 플레이인 4시드 최종전',
+      1,
+      1,
+      getLoserEntry(m34),
+      getWinnerEntry(m56),
+      career.team.id,
+      undefined,
+      { isPlayIn: true, playInSlot: 'DECIDER' }
+    );
+
+    if (
+      playerMatch &&
+      playerMatch.playInSlot === '5v6' &&
+      playerMatch.winnerId !== career.team.id
+    ) {
+      playerEliminated = true;
+      playoffResultLabel = 'NBL 플레이인 1R 탈락';
+    } else if (
+      playerMatch &&
+      playerMatch.playInSlot === '3v4' &&
+      playerMatch.winnerId === career.team.id
+    ) {
+      const resDec = simulateSingleSeries(decider, career, rng, false);
+      const seed4 = getWinnerEntry(resDec);
+      return {
+        ...bracket,
+        stageType: 'MAIN_PLAYOFF',
+        totalRounds: 2,
+        currentRound: 1,
+        playInSeeds: { seed3, seed4 },
+        rounds: [
+          buildNblMainRound1(
+            standings[0],
+            standings[1],
+            seed3,
+            seed4,
+            career.team.id
+          ),
+        ],
+        playerEliminated: false,
+        playoffResultLabel: 'NBL 3시드 4강 진출',
+      };
+    }
+
+    updatedRounds.push([decider]);
+    return {
+      ...bracket,
+      stageType: 'PLAY_IN_DECIDER',
+      currentRound: 2,
+      playInSeeds: { seed3 },
+      rounds: updatedRounds,
+      playerEliminated,
+      playoffResultLabel: playerEliminated
+        ? playoffResultLabel
+        : 'NBL 플레이인 최종전',
+    };
+  }
+
+  // Stage 2: PLAY_IN_DECIDER -> MAIN_PLAYOFF
+  if (playerMatch && playerMatch.winnerId !== career.team.id) {
+    playerEliminated = true;
+    playoffResultLabel =
+      bracket.league === 'EUROLEAGUE'
+        ? '유로리그 플레이인 최종전 탈락'
+        : bracket.league === 'NBL'
+        ? 'NBL 플레이인 최종전 탈락'
+        : '플레이인 최종전 탈락';
+  }
+
+  if (bracket.league === 'NBA') {
+    const eastTop6 = standings
+      .filter((s) => s.team.conference === 'EAST')
+      .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
+      .slice(0, 6);
+    const westTop6 = standings
+      .filter((s) => s.team.conference !== 'EAST')
+      .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
+      .slice(0, 6);
+    const eDec = resolved.find((m) => m.conference === 'EAST') || resolved[0];
+    const wDec = resolved.find((m) => m.conference === 'WEST') || resolved[1];
+    const east7 = bracket.playInSeeds?.east7 || eastTop6[5];
+    const west7 = bracket.playInSeeds?.west7 || westTop6[5];
+    const east8 = getWinnerEntry(eDec);
+    const west8 = getWinnerEntry(wDec);
+
+    return {
+      ...bracket,
+      stageType: 'MAIN_PLAYOFF',
+      totalRounds: 4,
+      currentRound: 1,
+      playInSeeds: { east7, east8, west7, west8 },
+      rounds: [
+        buildNbaMainRound1(
+          eastTop6,
+          westTop6,
+          east7,
+          east8,
+          west7,
+          west8,
+          career.team.id
+        ),
+      ],
+      playerEliminated,
+      playoffResultLabel: playerEliminated
+        ? playoffResultLabel
+        : '플레이인 돌파 · 8시드 PO 진출',
+    };
+  }
+
+  if (bracket.league === 'EUROLEAGUE') {
+    const seed7 = bracket.playInSeeds?.seed7 || standings[6];
+    const seed8 = getWinnerEntry(resolved[0]);
+    return {
+      ...bracket,
+      stageType: 'MAIN_PLAYOFF',
+      totalRounds: 3,
+      currentRound: 1,
+      playInSeeds: { seed7, seed8 },
+      rounds: [
+        buildEuroleagueMainRound1(
+          standings.slice(0, 6),
+          seed7,
+          seed8,
+          career.team.id
+        ),
+      ],
+      playerEliminated,
+      playoffResultLabel: playerEliminated
+        ? playoffResultLabel
+        : '유로리그 8시드 8강 진출',
+    };
+  }
+
+  // NBL PLAY_IN_DECIDER -> MAIN_PLAYOFF (SF BO3)
+  const seed3 = bracket.playInSeeds?.seed3 || standings[2];
+  const seed4 = getWinnerEntry(resolved[0]);
+  return {
+    ...bracket,
+    stageType: 'MAIN_PLAYOFF',
+    totalRounds: 2,
+    currentRound: 1,
+    playInSeeds: { seed3, seed4 },
+    rounds: [
+      buildNblMainRound1(
+        standings[0],
+        standings[1],
+        seed3,
+        seed4,
+        career.team.id
+      ),
+    ],
+    playerEliminated,
+    playoffResultLabel: playerEliminated
+      ? playoffResultLabel
+      : 'NBL 4시드 4강 진출',
+  };
+}
+
+/**
+ * 현재 라운드의 플레이오프(또는 플레이인) 시리즈를 진행하고 다음 라운드 대진을 구성합니다.
  */
 export function advancePlayoffRound(
   bracket: PlayoffBracketState,
@@ -620,6 +1725,14 @@ export function advancePlayoffRound(
 ): PlayoffBracketState {
   if (bracket.championTeamId || bracket.rounds.length === 0) {
     return bracket;
+  }
+
+  // 플레이인 단계(NBA / 유로리그 / NBL) 전용 처리
+  if (
+    bracket.stageType === 'PLAY_IN_ROUND_1' ||
+    bracket.stageType === 'PLAY_IN_DECIDER'
+  ) {
+    return advancePlayInStage(bracket, career, standings, rng);
   }
 
   const currentRoundIdx = bracket.currentRound;
@@ -686,10 +1799,7 @@ export function advancePlayoffRound(
 
   if (currentRoundIdx >= bracket.totalRounds) {
     const finalMatch = resolvedSeries[0];
-    const champEntry =
-      finalMatch.winnerId === finalMatch.higherSeed.team.id
-        ? finalMatch.higherSeed
-        : finalMatch.lowerSeed;
+    const champEntry = getWinnerEntry(finalMatch);
 
     if (champEntry.team.id === career.team.id) {
       playoffResultLabel = '리그 우승';
@@ -716,25 +1826,31 @@ export function advancePlayoffRound(
     bracket.totalRounds
   );
 
-  const winners = resolvedSeries.map((s) =>
-    s.winnerId === s.higherSeed.team.id ? s.higherSeed : s.lowerSeed
-  );
-
+  const winners = resolvedSeries.map((s) => getWinnerEntry(s));
   let nextSeriesList: PlayoffSeriesMatchup[] = [];
-  const cutoff = getPlayoffCutoffByLeague(bracket.league, standings.length);
 
-  if (bracket.league === 'NBA') {
+  if (bracket.league === 'NBA' || bracket.league === 'NCAA') {
     const isFinalsNext = nextRoundIdx === bracket.totalRounds;
     for (let i = 0; i < winners.length; i += 2) {
       const a = winners[i];
       const b = winners[i + 1] || winners[i];
       const conf: 'EAST' | 'WEST' | 'FINALS' = isFinalsNext
         ? 'FINALS'
-        : a.team.conference === 'EAST'
+        : bracket.league === 'NBA'
+        ? a.team.conference === 'EAST'
+          ? 'EAST'
+          : 'WEST'
+        : i < winners.length / 2
         ? 'EAST'
         : 'WEST';
       const labelPrefix =
-        conf === 'EAST' ? '동부 ' : conf === 'WEST' ? '서부 ' : '';
+        bracket.league === 'NBA'
+          ? conf === 'EAST'
+            ? '동부 '
+            : conf === 'WEST'
+            ? '서부 '
+            : ''
+          : '';
       nextSeriesList.push(
         createMatchup(
           `R${nextRoundIdx}_S${Math.floor(i / 2) + 1}`,
@@ -749,7 +1865,96 @@ export function advancePlayoffRound(
         )
       );
     }
-  } else if (cutoff === 6 && currentRoundIdx === 1 && standings.length >= 2) {
+  } else if (bracket.league === 'GLEAGUE') {
+    if (currentRoundIdx === 1) {
+      // 동·서부 1~2시드 부전승 합류 (E1 vs E(4v5), E2 vs E(3v6), W1 vs W(4v5), W2 vs W(3v6))
+      const eastTop2 = standings
+        .filter((s) => s.team.conference === 'EAST')
+        .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
+        .slice(0, 2);
+      const westTop2 = standings
+        .filter((s) => s.team.conference !== 'EAST')
+        .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank))
+        .slice(0, 2);
+
+      nextSeriesList = [
+        createMatchup(
+          'R2_E1',
+          2,
+          `동부 ${nextCfg.roundLabel}`,
+          nextCfg.bestOf,
+          nextCfg.winsNeeded,
+          eastTop2[0],
+          winners[0],
+          career.team.id,
+          'EAST'
+        ),
+        createMatchup(
+          'R2_E2',
+          2,
+          `동부 ${nextCfg.roundLabel}`,
+          nextCfg.bestOf,
+          nextCfg.winsNeeded,
+          eastTop2[1],
+          winners[1],
+          career.team.id,
+          'EAST'
+        ),
+        createMatchup(
+          'R2_W1',
+          2,
+          `서부 ${nextCfg.roundLabel}`,
+          nextCfg.bestOf,
+          nextCfg.winsNeeded,
+          westTop2[0],
+          winners[2],
+          career.team.id,
+          'WEST'
+        ),
+        createMatchup(
+          'R2_W2',
+          2,
+          `서부 ${nextCfg.roundLabel}`,
+          nextCfg.bestOf,
+          nextCfg.winsNeeded,
+          westTop2[1],
+          winners[3],
+          career.team.id,
+          'WEST'
+        ),
+      ];
+    } else {
+      const isFinalsNext = nextRoundIdx === bracket.totalRounds;
+      for (let i = 0; i < winners.length; i += 2) {
+        const a = winners[i];
+        const b = winners[i + 1] || winners[i];
+        const conf: 'EAST' | 'WEST' | 'FINALS' = isFinalsNext
+          ? 'FINALS'
+          : a.team.conference === 'EAST'
+          ? 'EAST'
+          : 'WEST';
+        const labelPrefix =
+          conf === 'EAST' ? '동부 ' : conf === 'WEST' ? '서부 ' : '';
+        nextSeriesList.push(
+          createMatchup(
+            `R${nextRoundIdx}_S${Math.floor(i / 2) + 1}`,
+            nextRoundIdx,
+            `${labelPrefix}${nextCfg.roundLabel}`,
+            nextCfg.bestOf,
+            nextCfg.winsNeeded,
+            a,
+            b,
+            career.team.id,
+            conf
+          )
+        );
+      }
+    }
+  } else if (
+    bracket.league === 'KBL' &&
+    currentRoundIdx === 1 &&
+    standings.length >= 2
+  ) {
     const seed1 = standings[0];
     const seed2 = standings[1];
     const w1 = winners[0];
@@ -865,9 +2070,7 @@ export function resolveConfFinalsGame7InBracket(
   const updatedRounds = [...bracket.rounds];
   updatedRounds[rIdx] = updatedSeriesList;
 
-  const winners = updatedSeriesList.map((s) =>
-    s.winnerId === s.higherSeed.team.id ? s.higherSeed : s.lowerSeed
-  );
+  const winners = updatedSeriesList.map((s) => getWinnerEntry(s));
   const nextRoundIdx = bracket.currentRound + 1;
   const nextCfg = getSeriesConfig(
     bracket.league,
@@ -905,7 +2108,7 @@ export function resolveConfFinalsGame7InBracket(
 }
 
 /**
- * 플레이오프 1~2라운드(초반 라운드)를 원클릭으로 일괄 시뮬레이션하여 피로도를 줄이고,
+ * 플레이오프 초반 라운드를 원클릭으로 일괄 시뮬레이션하여 피로도를 줄이고,
  * 탈락하거나 결승(또는 컨퍼런스 파이널)에 도달하면 멈춥니다.
  */
 export function batchAdvanceEarlyPlayoffRounds(
@@ -923,12 +2126,13 @@ export function batchAdvanceEarlyPlayoffRounds(
     !current.playerReachedFinals &&
     !current.pendingConfFinalsGame7 &&
     current.rounds.length > 0 &&
-    guard < 4
+    guard < 6
   ) {
     current = advancePlayoffRound(current, career, standings, rng, false);
     guard++;
     if (
       current.league === 'NBA' &&
+      current.stageType === 'MAIN_PLAYOFF' &&
       current.currentRound === 3 &&
       !current.playerEliminated
     ) {
@@ -939,7 +2143,7 @@ export function batchAdvanceEarlyPlayoffRounds(
 }
 
 /**
- * 플레이오프 전체를 끝까지 즉시 시뮬레이션합니다.
+ * 플레이오프(플레이인 포함) 전체를 끝까지 즉시 시뮬레이션합니다.
  */
 export function skipEntirePlayoffs(
   bracket: PlayoffBracketState,
@@ -949,40 +2153,130 @@ export function skipEntirePlayoffs(
 ): PlayoffBracketState {
   let current = { ...bracket };
   let guard = 0;
-  while (!current.championTeamId && current.rounds.length > 0 && guard < 8) {
+  while (!current.championTeamId && current.rounds.length > 0 && guard < 12) {
     current = advancePlayoffRound(current, career, standings, rng, true);
     guard++;
   }
   return current;
 }
 
+export function isInternationalLiveGame(
+  gameType: LiveGameState['gameType']
+): boolean {
+  return (
+    gameType === 'ASIAN_GAMES_FINAL' ||
+    gameType === 'INTERNATIONAL_FINAL' ||
+    gameType === 'INTERNATIONAL_BRONZE'
+  );
+}
+
+export function getLiveGameTournamentType(
+  liveGame: Pick<LiveGameState, 'gameType' | 'internationalTournamentType'>
+): InternationalTournamentType | null {
+  if (liveGame.internationalTournamentType) {
+    return liveGame.internationalTournamentType;
+  }
+  if (liveGame.gameType === 'ASIAN_GAMES_FINAL') {
+    return 'ASIAN_GAMES';
+  }
+  return null;
+}
+
 /**
- * 🏅 아시안게임 남자농구 국가대표 풀 토너먼트 백그라운드 시뮬레이션
- * - 조별리그(3경기) -> 8강 토너먼트 -> 4강 토너먼트 진행
- * - 8강이나 4강에서 패배할 경우 결승에 진출하지 못하고 즉시 탈락 (병역특례 실패)
- * - 4강까지 모두 승리한 경우에만 결승 상대 국가(finalOpponent)와 함께 reachedFinals: true 반환 -> 실시간 쿼터 결승 중계 진입!
+ * 대한민국 국가대표팀 실전 전력 산출 (선수 OVR·클러치 특성·신체 적합도 동적 반영)
+ * - 아시안게임은 KBL 에이스(OVR 76+)가 팀을 견인해 결승 진출 및 우승을 충분히 노릴 수 있는 수준으로 조정
  */
-export function simulateAsianGamesTournament(
+export function calculateKoreaTeamEffectiveRating(
   career: CareerState,
-  rng: () => number = Math.random
-): AsianGamesTournamentResult {
+  tournamentType: InternationalTournamentType = 'ASIAN_GAMES'
+): number {
+  const cfg = INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType];
   const ovr = calculateOvr(career.stats, career.primaryPos, career.heightCm);
   const bio = calculateBiomechanicalProfile(career.heightCm, career.primaryPos);
-  const clutchBonus = (career.traits || []).includes('CLUTCH_PERFORMER') ? 3.0 : 0;
+  const clutchBonus = (career.traits || []).includes('CLUTCH_PERFORMER') ? 2.5 : 0;
+  const aceContribution = clamp(
+    (ovr - 71) * cfg.aceRatingWeight + clutchBonus,
+    -3.5,
+    cfg.aceRatingMaxBonus
+  );
+  const rating =
+    cfg.baseKorRating + aceContribution - bio.positionalPhysicsStrain * 3.8;
+  return Number(clamp(rating, 69, 95).toFixed(1));
+}
 
-  // 대한민국 대표팀 기본 전력 74 + 국가대표 에이스(플레이어)의 실전 가중치
-  const korEffectiveRating =
-    74.0 +
-    clamp((ovr - 72) * 0.42 + clutchBonus, -4.0, 10.5) -
-    bio.positionalPhysicsStrain * 5.0;
+/**
+ * 4년 주기 국제대회(FIBA 아시아컵·아시안게임·FIBA 월드컵·올림픽) 조별리그~4강 시뮬레이션
+ * - 시드 기반 대진(8강 중하위 시드 -> 4강 중상위 시드 -> 결승 최상위 강호)으로 현실적인 토너먼트 곡선 구현
+ * - 4강 승리 시 결승전(금/은메달 결정전), 4강 패배 시 3·4위전(동메달 결정전) 실시간 중계로 연결
+ */
+export function simulateInternationalTournament(
+  career: CareerState,
+  tournamentType: InternationalTournamentType,
+  rng: () => number = Math.random
+): InternationalTournamentResult {
+  const cfg = INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType];
+  const ovr = calculateOvr(career.stats, career.primaryPos, career.heightCm);
+  const bio = calculateBiomechanicalProfile(career.heightCm, career.primaryPos);
+  const korEffectiveRating = calculateKoreaTeamEffectiveRating(
+    career,
+    tournamentType
+  );
 
-  const shuffledPool = [...ASIAN_NATIONAL_TEAMS].sort(() => rng() - 0.5);
-  const groupOpponents = shuffledPool.slice(0, 3);
-  const qfOpponent = shuffledPool[3] || ASIAN_NATIONAL_TEAMS[4];
-  const sfOpponent = shuffledPool[4] || ASIAN_NATIONAL_TEAMS[1];
-  const finalOpponent = shuffledPool[5] || ASIAN_NATIONAL_TEAMS[0];
+  const pool = [...getNationalTeamsForTournament(tournamentType)].sort(
+    (a, b) => b.rating - a.rating
+  );
+  const topTier = pool.slice(0, Math.min(3, pool.length));
+  const midTier = pool.slice(
+    Math.min(3, pool.length),
+    Math.min(6, pool.length)
+  );
+  const lowerTier = pool.slice(Math.min(6, pool.length));
+
+  const shuffle = <T,>(arr: T[]): T[] =>
+    [...arr].sort(() => rng() - 0.5);
+
+  const shuffledTop = shuffle(topTier);
+  const shuffledMid = shuffle(midTier.length > 0 ? midTier : topTier);
+  const shuffledLower = shuffle(lowerTier.length > 0 ? lowerTier : shuffledMid);
+
+  // 시드 배정: 8강(중하위), 4강(중상위), 결승(최상위 강호), 3·4위전(상위/중상위)
+  const qfOpponent =
+    shuffledLower[0] || shuffledMid[0] || pool[pool.length - 1];
+  const sfOpponent =
+    shuffledMid.find((t) => t.id !== qfOpponent.id) ||
+    shuffledTop[1] ||
+    pool[1];
+  const finalOpponent =
+    shuffledTop.find((t) => t.id !== sfOpponent.id && t.id !== qfOpponent.id) ||
+    shuffledTop[0] ||
+    pool[0];
+  const bronzeOpponent =
+    shuffledTop.find(
+      (t) =>
+        t.id !== finalOpponent.id &&
+        t.id !== sfOpponent.id &&
+        t.id !== qfOpponent.id
+    ) ||
+    shuffledMid.find((t) => t.id !== sfOpponent.id && t.id !== qfOpponent.id) ||
+    finalOpponent;
+
+  // 조별리그 3경기: 하위 1 + 중위 1 + 상위/중위 1 혼합
+  const groupCandidates = shuffle(
+    pool.filter((t) => t.id !== finalOpponent.id)
+  );
+  const groupOpponents = [
+    shuffledLower[1] || shuffledLower[0] || groupCandidates[0],
+    shuffledMid[1] || shuffledMid[0] || groupCandidates[1],
+    groupCandidates.find(
+      (t) =>
+        t.id !== (shuffledLower[1] || shuffledLower[0])?.id &&
+        t.id !== (shuffledMid[1] || shuffledMid[0])?.id
+    ) || groupCandidates[2] || pool[0],
+  ].filter(Boolean) as TeamInfo[];
 
   const matches: AsianGamesMatchLog[] = [];
+  const winSlope = tournamentType === 'ASIAN_GAMES' ? 0.048 : 0.042;
+  const baseWinBias = tournamentType === 'ASIAN_GAMES' ? 0.56 : 0.52;
 
   const playMatch = (
     stage: 'GROUP' | 'QUARTERFINAL' | 'SEMIFINAL',
@@ -990,31 +2284,31 @@ export function simulateAsianGamesTournament(
     opp: TeamInfo
   ): AsianGamesMatchLog => {
     const winProb = clamp(
-      0.52 + (korEffectiveRating - opp.rating) * 0.038,
-      0.18,
-      0.86
+      baseWinBias + (korEffectiveRating - opp.rating) * winSlope,
+      0.14,
+      cfg.winProbCap
     );
     const won = rng() < winProb;
     const playerPts = Math.max(
-      4,
+      5,
       Math.round(
         14 +
-          (ovr - 70) * 0.55 -
-          bio.positionalPhysicsStrain * 6 +
+          (ovr - cfg.ldr) * 0.58 -
+          bio.positionalPhysicsStrain * 5.2 +
           (rng() * 8 - 4)
       )
     );
     const playerReb = Math.max(
       1,
-      Math.round((4 + (career.stats.reb / 20)) * bio.rebMultiplier)
+      Math.round((4 + career.stats.reb / 20) * bio.rebMultiplier)
     );
     const playerAst = Math.max(
       1,
-      Math.round(3 + (career.stats.ply / 22) - bio.tovRatePenalty * 0.6)
+      Math.round(3 + career.stats.ply / 22 - bio.tovRatePenalty * 0.55)
     );
 
-    const baseScore = 76 + Math.round(rng() * 14);
-    const margin = Math.max(2, Math.round(2 + rng() * 11));
+    const baseScore = 74 + Math.round(rng() * 14);
+    const margin = Math.max(2, Math.round(2 + rng() * 12));
     const korScore = won ? baseScore + margin : baseScore - margin;
     const oppScore = baseScore;
 
@@ -1032,7 +2326,7 @@ export function simulateAsianGamesTournament(
   };
 
   // 1. 조별리그 3경기
-  groupOpponents.forEach((opp, idx) => {
+  groupOpponents.slice(0, 3).forEach((opp, idx) => {
     matches.push(playMatch('GROUP', `조별리그 ${idx + 1}차전`, opp));
   });
 
@@ -1041,73 +2335,139 @@ export function simulateAsianGamesTournament(
   matches.push(qfMatch);
   if (!qfMatch.won) {
     return {
+      tournamentType,
+      tournamentName: cfg.name,
       reachedFinals: false,
+      reachedBronzeMatch: false,
       eliminatedStage: 'QUARTERFINAL',
       finalOpponent,
+      bronzeOpponent: null,
+      korEffectiveRating,
       matches,
-      summaryHeadline: `아시안게임 8강 탈락 — 대한민국, ${qfOpponent.shortName}에 ${qfMatch.korScore}-${qfMatch.oppScore} 패배`,
+      summaryHeadline: `${cfg.shortName} 8강 탈락 — 대한민국, ${qfOpponent.shortName}에 ${qfMatch.korScore}-${qfMatch.oppScore} 패배`,
     };
   }
 
-  // 3. 4강 준결승 토너먼트
+  // 3. 4강 준결승 토너먼트 (패배 시 3·4위전 동메달 결정전으로 이어짐)
   const sfMatch = playMatch('SEMIFINAL', '4강 준결승전', sfOpponent);
   matches.push(sfMatch);
   if (!sfMatch.won) {
     return {
+      tournamentType,
+      tournamentName: cfg.name,
       reachedFinals: false,
+      reachedBronzeMatch: true,
       eliminatedStage: 'SEMIFINAL',
       finalOpponent,
+      bronzeOpponent,
+      korEffectiveRating,
       matches,
-      summaryHeadline: `아시안게임 4강 탈락 — 대한민국, ${sfOpponent.shortName}에 ${sfMatch.korScore}-${sfMatch.oppScore} 석패`,
+      summaryHeadline: `${cfg.shortName} 4강 석패 — ${sfOpponent.shortName}에 ${sfMatch.korScore}-${sfMatch.oppScore} 패배, ${bronzeOpponent.shortName}와 동메달 결정전`,
     };
   }
 
   return {
+    tournamentType,
+    tournamentName: cfg.name,
     reachedFinals: true,
+    reachedBronzeMatch: false,
     eliminatedStage: null,
     finalOpponent,
+    bronzeOpponent: null,
+    korEffectiveRating,
     matches,
-    summaryHeadline: `아시안게임 결승 진출 — ${qfOpponent.shortName}·${sfOpponent.shortName} 연파, ${finalOpponent.name}와 금메달 결정전`,
+    summaryHeadline: `${cfg.shortName} 결승 진출 — ${qfOpponent.shortName}·${sfOpponent.shortName} 연파, ${finalOpponent.shortName}와 금메달 결정전`,
   };
 }
 
 /**
- * 결승전(리그 파이널, 컨퍼런스 파이널 7차전, 또는 아시안게임 결승) 실시간 쿼터별 중계 상태를 생성합니다.
+ * 아시안게임 남자농구 국가대표 토너먼트 시뮬레이션 (하위 호환 래퍼)
+ */
+export function simulateAsianGamesTournament(
+  career: CareerState,
+  rng: () => number = Math.random
+): AsianGamesTournamentResult {
+  const res = simulateInternationalTournament(career, 'ASIAN_GAMES', rng);
+  return {
+    reachedFinals: res.reachedFinals,
+    eliminatedStage: res.eliminatedStage,
+    finalOpponent: res.finalOpponent || ASIAN_NATIONAL_TEAMS[0],
+    matches: res.matches,
+    summaryHeadline: res.summaryHeadline,
+  };
+}
+
+/**
+ * 결승전(리그 파이널, 컨퍼런스 파이널 7차전, 국제대회 결승전/3·4위전) 실시간 쿼터별 중계 상태를 생성합니다.
  */
 export function createLiveFinalGame(
   career: CareerState,
   opponentTeam: TeamInfo,
-  gameType: 'LEAGUE_FINALS' | 'CONF_FINALS_GAME7' | 'ASIAN_GAMES_FINAL'
+  gameType: LiveGameState['gameType'],
+  options?: {
+    tournamentType?: InternationalTournamentType;
+    preMatches?: AsianGamesMatchLog[];
+  }
 ): LiveGameState {
-  const isAsianGames = gameType === 'ASIAN_GAMES_FINAL';
-  const playerTeam: TeamInfo = isAsianGames
+  const isInternational = isInternationalLiveGame(gameType);
+  const tournamentType: InternationalTournamentType | undefined = isInternational
+    ? options?.tournamentType ||
+      (gameType === 'ASIAN_GAMES_FINAL' ? 'ASIAN_GAMES' : 'ASIA_CUP')
+    : undefined;
+  const tourneyCfg = tournamentType
+    ? INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType]
+    : null;
+
+  const korRating = tournamentType
+    ? Math.round(calculateKoreaTeamEffectiveRating(career, tournamentType))
+    : 78;
+
+  const playerTeam: TeamInfo = isInternational
     ? {
         id: 'KOR_NAT_TEAM',
         name: '대한민국 남자농구 국가대표팀',
         shortName: '대한민국',
         city: '서울',
         league: career.league,
-        rating: 75,
-        primaryColor: '#1D4ED8',
-        secondaryColor: '#EF4444',
-        prestigeDesc:
-          '태극마크를 달고 아시안게임 금메달과 병역특례에 도전하는 국가대표팀이에요.',
+        rating: korRating,
+        primaryColor: '#0047A0',
+        secondaryColor: '#CD2E3A',
+        espnAbbr: 'KOR',
+        logoUrl: '/logos/NAT_KOR.svg',
+        prestigeDesc: `${
+          tourneyCfg?.name || '국제대회'
+        } 본선 무대에 출전한 대한민국 남자농구 국가대표팀입니다.`,
         direction: 'CONTENDER',
       }
     : career.team;
 
-  const title = isAsianGames
-    ? `${career.seasonYear} 아시안게임 남자농구 결승전 (병역특례 결정전)`
+  const isBronzeMatch = gameType === 'INTERNATIONAL_BRONZE';
+  const title = isInternational
+    ? isBronzeMatch
+      ? `${career.seasonYear} ${tourneyCfg?.name || '국제대회'} 3·4위전 (동메달 결정전)`
+      : `${career.seasonYear} ${tourneyCfg?.name || '국제대회'} 결승전${
+          tournamentType === 'ASIAN_GAMES' && !career.militaryExempt
+            ? ' (병역특례 결정전)'
+            : ''
+        }`
     : gameType === 'CONF_FINALS_GAME7'
-    ? `${LEAGUE_CONFIG[career.league].shortName} 컨퍼런스 파이널 운명의 7차전`
+    ? `${LEAGUE_CONFIG[career.league].shortName} 컨퍼런스 파이널 7차전`
     : `${LEAGUE_CONFIG[career.league].shortName} 챔피언십 파이널 최종전`;
 
-  const foulLimit = isAsianGames
+  const foulLimit = isInternational
     ? LIVE_GAME_CONFIG.asianGamesFoulLimit
     : LEAGUE_BALANCE_META[career.league].foulLimit;
+  const initialStamina = clamp(
+    Math.round(84 + ((career.stats?.phy ?? 65) - 65) * 0.45),
+    78,
+    100
+  );
 
   return {
     gameType,
+    internationalTournamentType: tournamentType,
+    internationalTournamentName: tourneyCfg?.name,
+    internationalPreMatches: options?.preMatches,
     title,
     subtitle: `${playerTeam.name} vs ${opponentTeam.name}`,
     playerTeam,
@@ -1123,6 +2483,7 @@ export function createLiveFinalGame(
     overtimeCount: 0,
     pendingClutchPossession: false,
     clutchPossessionResolved: false,
+    clutchConvertedInGame: false,
     playerStats: {
       pts: 0,
       reb: 0,
@@ -1134,7 +2495,7 @@ export function createLiveFinalGame(
       tpm: 0,
       tpa: 0,
       fouls: 0,
-      stamina: 100,
+      stamina: initialStamina,
     },
     quarterLogs: [],
   };
@@ -1157,28 +2518,67 @@ function buildFinalOutcome(
   const wonFinalsMvp =
     liveGame.gameType === 'LEAGUE_FINALS' &&
     evaluateRealisticFinalsMvp(career, won, gameScore);
-  const grantedMilitaryExemption =
-    won && liveGame.gameType === 'ASIAN_GAMES_FINAL';
 
-  const baseHeadline =
-    liveGame.gameType === 'ASIAN_GAMES_FINAL'
-      ? won
-        ? `아시안게임 금메달 확정 — ${career.name} ${playerStats.pts}점 ${playerStats.reb}리바운드 ${playerStats.ast}도움 · 병역특례 획득`
-        : `아시안게임 은메달 — 대한민국, ${liveGame.opponentTeam.name}에 ${teamScore}-${oppScore} 석패`
-      : liveGame.gameType === 'CONF_FINALS_GAME7'
-      ? won
-        ? `컨퍼런스 파이널 7차전 승리 — ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name}에 ${teamScore}-${oppScore} 승리로 파이널 진출`
-        : `컨퍼런스 파이널 7차전 패배 — ${liveGame.playerTeam.name}, ${teamScore}-${oppScore} 석패로 시즌 마감`
-      : won
+  const isInternational = isInternationalLiveGame(liveGame.gameType);
+  const tournamentType = getLiveGameTournamentType(liveGame);
+  const tourneyCfg = tournamentType
+    ? INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType]
+    : null;
+  const isBronzeMatch = liveGame.gameType === 'INTERNATIONAL_BRONZE';
+
+  let medal: InternationalMedalType | undefined;
+  if (isInternational) {
+    if (isBronzeMatch) {
+      medal = won ? 'BRONZE' : 'FOURTH';
+    } else {
+      medal = won ? 'GOLD' : 'SILVER';
+    }
+  }
+
+  const wonTournamentMvp =
+    isInternational && !isBronzeMatch && won && gameScore >= 24;
+
+  const grantedMilitaryExemption = Boolean(
+    isInternational &&
+      tourneyCfg &&
+      ((tourneyCfg.militaryExemptionMinMedal === 'GOLD' && medal === 'GOLD') ||
+        (tourneyCfg.militaryExemptionMinMedal === 'BRONZE' &&
+          (medal === 'GOLD' || medal === 'SILVER' || medal === 'BRONZE')))
+  );
+
+  let baseHeadline = '';
+  if (isInternational && tourneyCfg) {
+    const exemptionSuffix =
+      grantedMilitaryExemption && !career.militaryExempt ? ' · 병역특례 획득' : '';
+    const mvpSuffix = wonTournamentMvp ? ' · 대회 MVP' : '';
+    if (isBronzeMatch) {
+      baseHeadline = won
+        ? `${tourneyCfg.shortName} 동메달 획득 — 대한민국, ${liveGame.opponentTeam.shortName}에 ${teamScore}-${oppScore} 승리 (${career.name} ${playerStats.pts}점${exemptionSuffix})`
+        : `${tourneyCfg.shortName} 4위 마감 — 대한민국, ${liveGame.opponentTeam.shortName}에 ${teamScore}-${oppScore} 석패`;
+    } else {
+      baseHeadline = won
+        ? `${tourneyCfg.shortName} 금메달 확정 — ${career.name} ${playerStats.pts}점 ${playerStats.reb}리바운드 ${playerStats.ast}도움${mvpSuffix}${exemptionSuffix}`
+        : `${tourneyCfg.shortName} 은메달 — 대한민국, ${liveGame.opponentTeam.shortName}에 ${teamScore}-${oppScore} 석패${exemptionSuffix}`;
+    }
+  } else if (liveGame.gameType === 'CONF_FINALS_GAME7') {
+    baseHeadline = won
+      ? `컨퍼런스 파이널 7차전 승리 — ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name}에 ${teamScore}-${oppScore} 승리로 파이널 진출`
+      : `컨퍼런스 파이널 7차전 패배 — ${liveGame.playerTeam.name}, ${teamScore}-${oppScore} 석패로 시즌 마감`;
+  } else {
+    baseHeadline = won
       ? `챔피언십 우승 — ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name} 제압 (${career.name} ${playerStats.pts}점${
           wonFinalsMvp ? ' · 파이널 MVP' : ''
         })`
       : `파이널 준우승 — ${liveGame.playerTeam.name}, 최종전 ${teamScore}-${oppScore} 석패`;
+  }
 
   return {
     won,
     wonFinalsMvp,
+    wonTournamentMvp,
+    medal,
     grantedMilitaryExemption,
+    clutchHeroSuccess: Boolean(liveGame.clutchConvertedInGame),
     headline: customClutchNote ? `${baseHeadline} · ${customClutchNote}` : baseHeadline,
   };
 }
@@ -1735,14 +3135,16 @@ export function simulateLiveQuarter(
   const stats = career.stats;
   const ovr = calculateOvr(stats, career.primaryPos, career.heightCm);
   const leagueMeta = LEAGUE_BALANCE_META[career.league];
+  const isInternational = isInternationalLiveGame(liveGame.gameType);
+  const tournamentType = getLiveGameTournamentType(liveGame);
   const foulLimit =
     liveGame.foulLimit ??
-    (liveGame.gameType === 'ASIAN_GAMES_FINAL'
+    (isInternational
       ? LIVE_GAME_CONFIG.asianGamesFoulLimit
       : leagueMeta.foulLimit);
   const ldr =
-    liveGame.gameType === 'ASIAN_GAMES_FINAL'
-      ? LIVE_GAME_CONFIG.asianGamesLdr
+    tournamentType
+      ? INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType].ldr
       : LEAGUE_CONFIG[career.league].ldr;
   const mismatch = calculateHeightMismatchPenalty(
     career.heightCm,
@@ -2212,9 +3614,10 @@ export function resolveClutchPossession(
   }
 
   const stats = career.stats;
+  const tournamentType = getLiveGameTournamentType(liveGame);
   const ldr =
-    liveGame.gameType === 'ASIAN_GAMES_FINAL'
-      ? LIVE_GAME_CONFIG.asianGamesLdr
+    tournamentType
+      ? INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType].ldr
       : LEAGUE_CONFIG[career.league].ldr;
   const traits = career.traits || [];
   const hasClutchTrait = traits.includes('CLUTCH_PERFORMER');
@@ -2234,6 +3637,7 @@ export function resolveClutchPossession(
   const deficit = nextOppScore - nextTeamScore; // >0이면 열세, <0이면 리드, 0이면 동점
   let clutchPlayLine = '';
   let customClutchNote = '';
+  let clutchConverted = false;
 
   if (choice === 'ISO_WINNER') {
     // 3~4점 열세면 3점슛 시도, 1~2점 열세 또는 동점이면 선수 성향(OUT vs INS)에 따라 3점 또는 2점 돌파 선택
@@ -2258,6 +3662,7 @@ export function resolveClutchPossession(
     if (isThreeShot) nextStats.tpa += 1;
 
     if (succeeded) {
+      clutchConverted = true;
       nextStats.fgm += 1;
       if (isThreeShot) nextStats.tpm += 1;
       nextStats.pts += shotPoints;
@@ -2293,6 +3698,7 @@ export function resolveClutchPossession(
     );
     const succeeded = rng() < successProb;
     if (succeeded) {
+      clutchConverted = true;
       nextStats.ast += 1;
       nextTeamScore += 3;
       if (nextTeamScore > nextOppScore) {
@@ -2322,10 +3728,11 @@ export function resolveClutchPossession(
         staminaMod -
         bio.perimeterDefPenalty * 0.04,
       0.28,
-      0.86
+      0.88
     );
     const stopped = rng() < stopProb;
     if (stopped) {
+      clutchConverted = true;
       const gotHighlight = rng() < 0.55;
       if (gotHighlight) {
         if (career.primaryPos === 'C' || career.primaryPos === 'PF') {
@@ -2354,9 +3761,12 @@ export function resolveClutchPossession(
   } else {
     // CLUTCH_FREE_THROWS (리드 상황): 시간 소진 후 상대 파울 작전 유도 → 클러치 자유투 2구
     const ftProb = clamp(
-      0.7 + (stats.out - 60) * 0.006 + (hasClutchTrait ? 0.08 : 0) + staminaMod * 0.6,
+      0.7 +
+        (stats.out - 60) * 0.006 +
+        (hasClutchTrait ? 0.08 : 0) +
+        staminaMod * 0.6,
       0.55,
-      0.96
+      0.97
     );
     const ft1 = rng() < ftProb ? 1 : 0;
     const ft2 = rng() < ftProb ? 1 : 0;
@@ -2373,6 +3783,7 @@ export function resolveClutchPossession(
     }
 
     if (nextTeamScore > nextOppScore) {
+      if (ftMade === 2) clutchConverted = true;
       clutchPlayLine = `4Q 0:01.8 · ${career.name}, 클러치 자유투 ${ftMade}/2 성공으로 승리 확정 (${nextTeamScore}:${nextOppScore})`;
       customClutchNote = `클러치 자유투 ${ftMade}/2 성공`;
     } else if (nextTeamScore === nextOppScore) {
@@ -2457,9 +3868,14 @@ export function resolveClutchPossession(
   }
 
   // 동점이 되었다면 경기를 끝내지 않고 연장전(OT) 진행 대기 상태로 전환!
+  const updatedLiveForOutcome: LiveGameState = {
+    ...liveGame,
+    clutchConvertedInGame: Boolean(liveGame.clutchConvertedInGame || clutchConverted),
+  };
+
   if (nextTeamScore === nextOppScore) {
     return {
-      ...liveGame,
+      ...updatedLiveForOutcome,
       teamScore: nextTeamScore,
       oppScore: nextOppScore,
       isFinished: false,
@@ -2472,7 +3888,7 @@ export function resolveClutchPossession(
   }
 
   const finalOutcome = buildFinalOutcome(
-    liveGame,
+    updatedLiveForOutcome,
     career,
     nextTeamScore,
     nextOppScore,
@@ -2481,7 +3897,7 @@ export function resolveClutchPossession(
   );
 
   return {
-    ...liveGame,
+    ...updatedLiveForOutcome,
     teamScore: nextTeamScore,
     oppScore: nextOppScore,
     isFinished: true,

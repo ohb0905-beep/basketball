@@ -17,7 +17,7 @@ export function RetirementCeremony() {
     return (
       <div className="max-w-[560px] mx-auto px-4 py-12 text-center space-y-4">
         <p className="text-[18px] font-bold text-[var(--t-g900)]">
-          은퇴 리포트를 불러올 수 없어요
+          은퇴 리포트를 불러올 수 없습니다.
         </p>
         <button
           type="button"
@@ -40,7 +40,7 @@ export function RetirementCeremony() {
           <span className="text-[12px] font-bold text-[var(--t-gold)]">
             공식 은퇴 리포트
           </span>
-          <h1 className="text-[28px] font-bold tracking-[-0.03em] text-[var(--t-g900)]">
+          <h1 className="text-[28px] font-bold tracking-[-0.03em] text-[var(--t-g900)] text-balance">
             #{career.jerseyNumber} {career.name}
           </h1>
           <p className="text-[16px] font-bold text-[var(--t-accent)]">

@@ -26,36 +26,36 @@ export interface HeadlineContext {
 
 const HEADLINE_TEMPLATES = {
   CHAMPION_MVP: [
-    '[{league}] "완벽한 대관식" {team} {name}, 평균 {ppg}점·{rpg}리바운드·{apg}어시스트로 통합 우승·MVP 석권!',
-    '[{league}] 코트를 지배한 {team} {name}, 압도적 퍼포먼스로 챔피언십과 MVP 동시 제패!',
+    '{league} {team} {name}, 평균 {ppg}점·{rpg}리바운드·{apg}도움으로 통합 우승과 MVP 석권',
+    '{team} {name}, 시즌 MVP에 이어 {league} 챔피언 결정전 우승까지 달성',
   ],
   MVP_ONLY: [
-    '[{league}] 리그 최고의 별은 {name}! 평균 {ppg}점·{apg}어시스트 맹활약으로 정규시즌 MVP 등극!',
-    '[{league}] "누구도 막을 수 없었다" {team} 에이스 {name}, 생애 최고의 활약으로 정규시즌 MVP 수상!',
+    '{league} 정규시즌 MVP는 {team} {name}… 평균 {ppg}점·{apg}어시스트로 팀 견인',
+    '{team} {name}, 공수 핵심 활약 속에 생애 첫 {league} 정규시즌 MVP 수상',
   ],
   ROOKIE_STAR: [
-    '[{league}] "괴물 신인의 등장" {team} 루키 {name}, 데뷔 시즌 평균 {ppg}점·{rpg}리바운드로 돌풍!',
-    '[{league}] 겁 없는 신예 {name}, 첫 시즌부터 {team} 핵심 전력으로 도약하며 평균 {ppg}점 기록!',
+    '{team} 루키 {name}, 데뷔 시즌 평균 {ppg}점·{rpg}리바운드로 주전 도약',
+    '신인 {name}, {league} 첫 시즌부터 평균 {ppg}점 기록하며 로테이션 안착',
   ],
   SUPERSTAR: [
-    '[{league}] 더블팀도 무용지물! {team} 1옵션 에이스 {name}, 평균 {ppg}점·{apg}도움으로 리그 폭격!',
-    '[{league}] 매 경기가 하이라이트! {team} {name}, 순도 높은 결정력으로 평균 {ppg}점 맹활약!',
+    '{team} 주득점원 {name}, 평균 {ppg}점·{apg}어시스트로 {league} 득점 선두권 활약',
+    '{name}, 높은 슈팅 효율 앞세워 {team} 공격 주도… 시즌 평균 {ppg}점 기록',
   ],
   PLAYMAKER: [
-    '[{league}] 코트 위의 야전사령관 {team} {name}, 평균 {apg}어시스트·{ppg}점으로 앞선 완전 장악!',
-    '[{league}] 날카로운 패스와 리딩 선보인 {name}, {team} 공격의 엔진 역할 톡톡히 수행!',
+    '{team} {name}, 평균 {apg}어시스트·{ppg}점으로 앞선 경기 조율 주도',
+    '{name}, 안정적인 볼핸들링과 패스 전개로 {team} 공격 흐름 이끌어',
   ],
   REBOUNDER: [
-    '[{league}] "페인트존 장악!" {team} 골밑 수호신 {name}, 평균 {rpg}리바운드·{ppg}점 더블더블급 위력!',
-    '[{league}] 보드를 지배하는 {team} {name}, 탄탄한 골밑 존재감으로 평균 {rpg}리바운드 수확!',
+    '{team} {name}, 평균 {rpg}리바운드·{ppg}점으로 골밑 보드 장악',
+    '{league} 페인트존 지킨 {team} {name}, 시즌 평균 {rpg}리바운드 수확',
   ],
   SOLID_ROTATION: [
-    '[{league}] {team} 주축으로 자리 잡은 {name}, 평균 {ppg}점·{rpg}리바운드·{apg}도움으로 알토란 활약!',
-    '[{league}] 흔들림 없는 공수 밸런스! {team} {name}, 꾸준한 출전 속에 커리어 상승세 지속!',
+    '{team} 로테이션 핵심 {name}, 평균 {ppg}점·{rpg}리바운드·{apg}도움으로 안정적 기여',
+    '{name}, 공수 균형 잡힌 활약으로 {team} 주축 입지 다져',
   ],
   BENCH_GRIND: [
-    '[{league}] 식지 않는 땀방울… {team} {name}, 제한된 출전 시간 속 평균 {ppg}점 기록하며 다음 시즌 도약 준비!',
-    '[{league}] 치열한 주전 경쟁 치른 {team} {name}, 체육관 불 밝히며 절치부심 기량 담금질!',
+    '{team} {name}, 제한된 출전 속 평균 {ppg}점 기록하며 다음 시즌 도약 노려',
+    '로테이션 경쟁 치른 {team} {name}, 비시즌 기량 보완으로 반등 준비',
   ],
 };
 

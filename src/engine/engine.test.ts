@@ -1,18 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { generateLeagueFallbackSvgDataUri } from '../data/logoFallbacks';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import {
   NBA_TEAMS,
   KBL_TEAMS,
+  B_LEAGUE_TEAMS,
+  NBL_TEAMS,
+  EUROLEAGUE_TEAMS,
   NCAA_TEAMS,
   HIGH_SCHOOL_TEAMS,
   U_LEAGUE_TEAMS,
   GLEAGUE_TEAMS,
   ASIAN_NATIONAL_TEAMS,
+  ALL_INTERNATIONAL_TEAMS,
+  getNationalTeamsForTournament,
   SANGMU_TEAM,
   ALL_TEAMS,
 } from '../data/teams';
 import {
+  PLAYER_TRAIT_META,
+  analyzePositionFit,
   applySpecialCampProgram,
   calculateBiomechanicalProfile,
   calculateHeightMismatchPenalty,
@@ -21,9 +31,15 @@ import {
   createInitialStats,
   enforceBiomechanicalCaps,
   evaluateAcquiredTraits,
+  evaluatePlayerBadges,
   getBiomechanicalGrowthElasticity,
   getBiomechanicalStatCaps,
+  getGrowthDnaInfo,
+  getPlaystyleInfo,
   getPreviewStatsAndOvrRange,
+  getSpecialCampOptions,
+  isPlaystyleAllowedForPosition,
+  reconcilePlaystyleForPosition,
   rollInitialPotential,
   rollInnateTrait,
   rollPlayerDnaAndPlaystyle,
@@ -35,15 +51,20 @@ import {
   calculateSeasonStatGrowth,
   calculateOrganicTrustDelta,
   calculateRecentEfficiencyMomentum,
+  calculateTeamContractOfferSalary,
   checkPotentialBreakthrough,
   generateDraftRivals,
   getAwardsByLeague,
   getLeagueBaselineTeamRating,
+  getSangmuDischargeContractType,
+  isEligibleForLeagueRookieAward,
   simulateRivalsSeason,
   simulateSeason,
 } from './seasonSimulator';
 import {
+  calculateOffseasonTradeAcceptProb,
   calculateProjectedNbaPick,
+  determineTeamRolePromise,
   evaluateHighSchoolProspect,
   evaluateTeamScouting,
   evaluateTwoWaySurvival,
@@ -51,25 +72,50 @@ import {
   generateOffseasonOptions,
 } from './draftEngine';
 import {
+  formatHeaderContractSummary,
+  formatSalaryOffer,
+} from '../utils/formatters';
+import {
   applyAgingCurve,
+  buildHallOfFameEntry,
   checkRetirementEligibility,
   evaluateCareerLegacy,
 } from './retirementEngine';
 import {
+  buildStoryArcEventById,
+  checkEncounterChoiceUnlock,
+  rollStoryArcEvent,
+} from './storyArcEngine';
+import {
+  LEGACY_TIER_CATALOG,
+  buildHofCompendium,
+  checkAndApplyRecordBreaks,
+  createInitialRecordBook,
+  getLeagueRecordChases,
+  syncRecordBookWithHof,
+} from './recordBookEngine';
+import {
   advancePlayoffRound,
   batchAdvanceEarlyPlayoffRounds,
+  calculateKoreaTeamEffectiveRating,
   createLiveFinalGame,
   createPlayoffBracket,
   evaluateRealisticFinalsMvp,
   generateLeagueStandings,
+  isInternationalLiveGame,
   resolveClutchPossession,
   resolveConfFinalsGame7InBracket,
   simulateAsianGamesTournament,
+  simulateInternationalTournament,
   simulateLiveQuarter,
   skipEntirePlayoffs,
   skipLiveGameToEnd,
 } from './playoffEngine';
-import { isPersonalCareAllowedInLeague } from '../config/balanceConfig';
+import {
+  INTERNATIONAL_TOURNAMENT_CONFIG,
+  getInternationalTournamentByYear,
+  isPersonalCareAllowedInLeague,
+} from '../config/balanceConfig';
 import {
   ENCOUNTER_SCENARIO_POOL,
   calculateEncounterSuccessChance,
@@ -79,11 +125,19 @@ import {
 } from './encounterEngine';
 import {
   createAgentRetirementAdviceEvent,
+  createInternationalCallupEvent,
   createVeteranReinventionEvent,
   rollMidSeasonCrossroadsEvent,
   rollSeasonEvent,
 } from '../data/events';
-import { CareerState, SeasonBoxScore } from '../types/game';
+import { migratePersistedPayload } from '../store/saveMigration';
+import {
+  CareerState,
+  GrowthDna,
+  PlaystyleArchetype,
+  SeasonBoxScore,
+} from '../types/game';
+import { hasSeasonBottomDock } from '../utils/formatters';
 
 function buildInitialTeamRatingsMap(): Record<string, number> {
   const map: Record<string, number> = {};
@@ -368,7 +422,13 @@ test('3. High School prospect rating (1~5 stars) restricts graduation path offer
   const hsOptions1 = generateOffseasonOptions(oneStarCareer, () => 0.5);
   assert.ok(hsOptions1.length >= 1 && hsOptions1.length <= 2);
   assert.equal(
-    hsOptions1.some((o) => o.targetLeague === 'NCAA' || o.targetLeague === 'OVERSEAS'),
+    hsOptions1.some(
+      (o) =>
+        o.targetLeague === 'NCAA' ||
+        o.targetLeague === 'B_LEAGUE' ||
+        o.targetLeague === 'NBL' ||
+        o.targetLeague === 'EUROLEAGUE'
+    ),
     false
   );
 
@@ -438,10 +498,12 @@ test('4. League-Translated Per-36 Scouting prevents 20s prime forced retirement 
     options.some(
       (o) =>
         o.targetLeague === 'KBL' ||
-        o.targetLeague === 'OVERSEAS' ||
+        o.targetLeague === 'B_LEAGUE' ||
+        o.targetLeague === 'NBL' ||
+        o.targetLeague === 'EUROLEAGUE' ||
         o.targetLeague === 'GLEAGUE'
     ),
-    '25yo NBA bench player must receive KBL/Overseas/G-League step-down offers'
+    '25yo NBA bench player must receive KBL/B.League/NBL/EuroLeague/G-League step-down offers'
   );
   assert.ok(
     options.some((o) => Boolean(o.promisedRole && o.promisedRoleLabel)),
@@ -1093,7 +1155,7 @@ test('15. Zero Regular-Season Spoilers, Realistic Finals MVP, and Unified Conten
   );
 });
 
-test('16. NBA East/West Conference Standings (1~15 per Conference) & 4-Round Conference Playoff Bracket', () => {
+test('16. NBA East/West Conference Standings (1~15 per Conference), 7-10 Play-In & 4-Round Conference Playoff Bracket', () => {
   const nbaCareer = createBaseCareer({
     league: 'NBA',
     team: NBA_TEAMS[0],
@@ -1106,24 +1168,37 @@ test('16. NBA East/West Conference Standings (1~15 per Conference) & 4-Round Con
   const westStandings = standings.filter((s) => s.conference === 'WEST');
   assert.equal(eastStandings.length, 15);
   assert.equal(westStandings.length, 15);
-  assert.equal(eastStandings.filter((s) => s.qualifiedPlayoffs).length, 8);
-  assert.equal(westStandings.filter((s) => s.qualifiedPlayoffs).length, 8);
+  assert.equal(eastStandings.filter((s) => s.qualifiedPlayoffs).length, 10, 'NBA East postseason = 6 direct + 4 Play-In');
+  assert.equal(westStandings.filter((s) => s.qualifiedPlayoffs).length, 10, 'NBA West postseason = 6 direct + 4 Play-In');
+  assert.equal(eastStandings.filter((s) => s.playInQualified).length, 4, 'NBA East Play-In = seeds 7-10');
+  assert.equal(westStandings.filter((s) => s.playInQualified).length, 4, 'NBA West Play-In = seeds 7-10');
 
-  const bracket = createPlayoffBracket(nbaCareer, standings);
-  assert.equal(bracket.rounds[0].length, 8, 'NBA Round 1 must have 8 series (4 East + 4 West)');
-  assert.equal(
-    bracket.rounds[0].filter((m) => m.conference === 'EAST').length,
-    4
-  );
-  assert.equal(
-    bracket.rounds[0].filter((m) => m.conference === 'WEST').length,
-    4
-  );
+  // 1) Top-6 direct seed auto-resolves Play-In into playInSeeds and opens Main Playoff R1
+  const bracket = createPlayoffBracket(nbaCareer, standings, () => 0.45);
+  assert.equal(bracket.stageType, 'MAIN_PLAYOFF');
+  assert.ok(bracket.playInSeeds?.east7 && bracket.playInSeeds?.east8);
+  assert.equal(bracket.rounds[0].length, 8, 'NBA Main Playoff R1 must have 8 series (4 East + 4 West)');
 
   const finished = skipEntirePlayoffs(bracket, nbaCareer, standings, () => 0.3);
-  assert.equal(finished.rounds.length, 4, 'Completed NBA Playoffs must have 4 rounds (R1, Conf Semis, Conf Finals, NBA Finals)');
+  assert.equal(finished.stageType, 'MAIN_PLAYOFF');
+  assert.equal(finished.rounds.length, 4, 'Completed NBA Main Playoffs must have 4 rounds (R1, Conf Semis, Conf Finals, NBA Finals)');
   assert.equal(finished.rounds[3].length, 1, 'NBA Finals must be a single East Champion vs West Champion series');
   assert.ok(finished.championTeamId !== null);
+
+  // 2) Seed 7-10 player opens in PLAY_IN_ROUND_1 (4 BO1 games) and transitions to MAIN_PLAYOFF
+  const piStandings = standings.map((s) => ({
+    ...s,
+    isPlayerTeam: s.conference === 'EAST' && s.conferenceRank === 8,
+  }));
+  const piTeam = piStandings.find((s) => s.isPlayerTeam)!.team;
+  const piCareer = createBaseCareer({ league: 'NBA', team: piTeam, ovr: 82 });
+  const piBracket = createPlayoffBracket(piCareer, piStandings, () => 0.45);
+  assert.equal(piBracket.stageType, 'PLAY_IN_ROUND_1', 'NBA 7-10 seed player must enter Play-In Round 1');
+  assert.equal(piBracket.rounds[0].length, 4);
+  assert.equal(piBracket.rounds[0][0].bestOf, 1);
+  const piFinished = skipEntirePlayoffs(piBracket, piCareer, piStandings, () => 0.3);
+  assert.equal(piFinished.stageType, 'MAIN_PLAYOFF');
+  assert.ok(piFinished.championTeamId !== null);
 });
 
 test('17. Asian Games 4-Year Cycle & Full Tournament (Group -> QF -> SF -> Finals) + Multi-Year Trade Request', () => {
@@ -1169,7 +1244,7 @@ test('17. Asian Games 4-Year Cycle & Full Tournament (Group -> QF -> SF -> Final
       loseTourney.eliminatedStage === 'SEMIFINAL'
   );
 
-  // Multi-year contract offseason options must include REQUEST_TRADE + NBA Draft entry for <=24yo KBL pro
+  // Multi-year contract offseason options must include REQUEST_TRADE (and block cross-league/draft offers until FA)
   const contractedKblYoung = createBaseCareer({
     age: 22,
     ovr: 70,
@@ -1188,18 +1263,24 @@ test('17. Asian Games 4-Year Cycle & Full Tournament (Group -> QF -> SF -> Final
     'Multi-year contracted pro player must have REQUEST_TRADE option in offseason'
   );
   assert.ok(
-    multiYearOpts.some((o) => o.actionType === 'ENTER_NBA_DRAFT'),
-    '22yo KBL pro with 0 NBA GP must be able to challenge NBA Draft'
+    !multiYearOpts.some((o) => o.actionType === 'ENTER_NBA_DRAFT'),
+    'Multi-year contracted pro player must not enter NBA draft while contract years remain'
+  );
+  const faKblYoung = { ...contractedKblYoung, contractYearsLeft: 0 };
+  const faYoungOpts = generateOffseasonOptions(faKblYoung, () => 0.5);
+  assert.ok(
+    faYoungOpts.some((o) => o.actionType === 'ENTER_NBA_DRAFT'),
+    '22yo KBL FA with 0 NBA GP must be able to challenge NBA Draft'
   );
 });
 
-test('18. All 135 Teams Have Official Crawled Logo Assets & League-Specific SVG Fallback Generator', async () => {
+test('18. All 210 Teams Have Official Logo Assets & League-Specific SVG Fallback Generator', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
   const { generateLeagueFallbackSvgDataUri } = await import('../data/logoFallbacks');
 
   const combined = [...ALL_TEAMS, ...ASIAN_NATIONAL_TEAMS];
-  assert.equal(combined.length, 135, 'Total teams across all leagues + Asian National Teams must be 135');
+  assert.equal(combined.length, 210, 'Total teams across all 9 leagues (201) + Asian National Teams (9) must be 210');
 
   const seenLogos = new Set<string>();
   for (const team of combined) {
@@ -1212,9 +1293,9 @@ test('18. All 135 Teams Have Official Crawled Logo Assets & League-Specific SVG 
 
     if (team.logoUrl.startsWith('/logos/')) {
       const fullPath = path.join(process.cwd(), 'public', team.logoUrl);
-      assert.ok(fs.existsSync(fullPath), `Local crawled logo file must exist for ${team.id}: ${team.logoUrl}`);
+      assert.ok(fs.existsSync(fullPath), `Local logo file must exist for ${team.id}: ${team.logoUrl}`);
       const stat = fs.statSync(fullPath);
-      assert.ok(stat.size > 100, `Local crawled logo file for ${team.id} must be non-empty`);
+      assert.ok(stat.size > 100, `Local logo file for ${team.id} must be non-empty`);
     }
 
     // Verify league-specific fallback SVG generator produces valid SVG data URI
@@ -1227,7 +1308,7 @@ test('18. All 135 Teams Have Official Crawled Logo Assets & League-Specific SVG 
     assert.ok(decoded.includes('<svg') && decoded.includes('</svg>'), `Decoded SVG for ${team.id} must be valid SVG`);
   }
 
-  assert.equal(seenLogos.size, 135, 'Every single one of the 135 teams must have its own distinct official logoUrl');
+  assert.equal(seenLogos.size, 210, 'Every single one of the 210 teams must have its own distinct logoUrl');
 
   for (const gl of GLEAGUE_TEAMS) {
     assert.ok(
@@ -2114,7 +2195,9 @@ test('30. Realistic 1-Possession Shooting Map (<=3pts), Zero Quarter-Start Score
     (o) =>
       o.id.startsWith('OPT_ROUTE_D_') ||
       o.targetLeague === 'GLEAGUE' ||
-      o.targetLeague === 'OVERSEAS'
+      o.targetLeague === 'NBL' ||
+      o.targetLeague === 'B_LEAGUE' ||
+      o.targetLeague === 'EUROLEAGUE'
   );
   assert.ok(directProOffer, '5-star high school graduate must still receive direct overseas/G-League pro offer');
   for (const opt of hsOptions) {
@@ -2129,6 +2212,1605 @@ test('30. Realistic 1-Possession Shooting Map (<=3pts), Zero Quarter-Start Score
   }
 });
 
+test('31. 역대 리그 기록실 경신·추격, 명예의 전당 도감, 세이브 마이그레이션 및 하단 도크 상태 검증', () => {
+  const initialBook = createInitialRecordBook();
+  const totalSlots = Object.values(initialBook).reduce((acc, arr) => acc + arr.length, 0);
+  assert.equal(totalSlots, 66, '6 leagues x 7 categories + NBA/KBL/EuroLeague x 8 categories = 66 baseline records');
+
+  const log2032 = createSeasonLog({
+    year: 2032,
+    league: 'KBL',
+    teamName: KBL_TEAMS[0].name,
+    gp: 54,
+    ppg: 36.2,
+    rpg: 14.5,
+    apg: 12.1,
+    singleGameHighPts: 58,
+    wonChampionship: true,
+    wonMvp: true,
+  });
+
+  const kblSuperstar = createBaseCareer({
+    name: '김전설',
+    league: 'KBL',
+    seasonYear: 2032,
+    team: KBL_TEAMS[0],
+    seasonLogs: [
+      createSeasonLog({
+        year: 2030,
+        league: 'KBL',
+        teamName: KBL_TEAMS[0].name,
+        gp: 54,
+        ppg: 25.4,
+        rpg: 6.2,
+        apg: 7.4,
+        wonChampionship: true,
+        wonMvp: true,
+      }),
+      createSeasonLog({
+        year: 2031,
+        league: 'KBL',
+        teamName: KBL_TEAMS[0].name,
+        gp: 54,
+        ppg: 29.8,
+        rpg: 6.8,
+        apg: 9.2,
+        wonChampionship: true,
+        wonMvp: true,
+      }),
+      log2032,
+    ],
+  });
+
+  const { nextBook, brokenRecords, milestones } = checkAndApplyRecordBreaks(
+    initialBook,
+    kblSuperstar,
+    log2032
+  );
+  assert.ok(
+    brokenRecords.some((b) => b.league === 'KBL' && b.category === 'SEASON_PPG'),
+    '36.2 PPG in KBL must break the KBL single-season PPG record'
+  );
+  assert.ok(
+    brokenRecords.some((b) => b.league === 'KBL' && b.category === 'SEASON_APG'),
+    '12.1 APG in KBL must break the KBL single-season APG record'
+  );
+  assert.ok(
+    brokenRecords.some((b) => b.league === 'KBL' && b.category === 'SINGLE_GAME_POINTS'),
+    '58 PTS single game in KBL must break the KBL single-game points record'
+  );
+  assert.equal(milestones.length, brokenRecords.length);
+
+  const kblPpgRecord = nextBook.KBL.find((e) => e.category === 'SEASON_PPG');
+  assert.equal(kblPpgRecord?.holderName, '김전설');
+  assert.equal(kblPpgRecord?.isUserRecord, true);
+
+  // Chase tracker must return records for current league with progress metrics
+  const chases = getLeagueRecordChases(nextBook, kblSuperstar, 'KBL');
+  assert.equal(chases.length, 8, 'KBL chase tracker returns all 8 league record categories incl. FINALS_MVPS');
+  assert.ok(
+    chases.every((c) => c.entry.league === 'KBL'),
+    'Chase targets must belong to current league'
+  );
+
+  // HOF compendium builds unlocked tiers, retired jerseys, and user-broken records
+  const legacyReport = evaluateCareerLegacy(kblSuperstar);
+  const hofEntry = buildHallOfFameEntry(kblSuperstar, 'VOLUNTARY', legacyReport);
+  const compendium = buildHofCompendium([hofEntry], nextBook);
+  assert.equal(compendium.totalInductees, 1);
+  assert.equal(compendium.totalTiers, LEGACY_TIER_CATALOG.length);
+  assert.ok(compendium.tiersUnlocked[hofEntry.legacyTierId] >= 1);
+  assert.ok(compendium.userBrokenRecordsCount >= 3);
+
+  // Save migration restores canonical team name and strips legacy mascot suffixes
+  const migrated = migratePersistedPayload({
+    career: {
+      ...kblSuperstar,
+      team: {
+        ...HIGH_SCHOOL_TEAMS[0],
+        name: `${HIGH_SCHOOL_TEAMS[0].name} 백마`,
+      },
+    },
+    hofList: [
+      {
+        ...hofEntry,
+        legacyTitle: '🏆 GOAT (역대 최고 농구 황제)',
+        legacyEmoji: '👑',
+        iconicTeam: {
+          ...U_LEAGUE_TEAMS[0],
+          name: `${U_LEAGUE_TEAMS[0].name} (독수리)`,
+        },
+      },
+    ],
+  });
+  assert.equal(migrated.career?.team.name, HIGH_SCHOOL_TEAMS[0].name);
+  assert.equal(migrated.hofList[0].iconicTeam.name, U_LEAGUE_TEAMS[0].name);
+  assert.equal(migrated.hofList[0].legacyTitle, '역대 최고 선수 (GOAT)');
+  assert.equal(migrated.hofList[0].legacyEmoji, '');
+  const migratedSlots = Object.values(migrated.recordBook).reduce((acc, arr) => acc + arr.length, 0);
+  assert.equal(migratedSlots, 66);
+
+  // Bottom dock visibility helper stays true during finished playoff bracket
+  const finishedPlayoffCareer = createBaseCareer({
+    seasonPhase: 'POSTSEASON_BRACKET',
+    playoffBracket: {
+      league: 'KBL',
+      leagueName: 'KBL',
+      year: 2032,
+      rounds: [],
+      currentRoundIdx: 0,
+      userTeamId: KBL_TEAMS[0].id,
+      userEliminated: true,
+      championTeamId: KBL_TEAMS[1].id,
+      championTeamName: KBL_TEAMS[1].name,
+      userWonChampionship: false,
+      userWonFinalsMvp: false,
+    },
+  });
+  assert.equal(
+    hasSeasonBottomDock(finishedPlayoffCareer),
+    true,
+    'POSTSEASON_BRACKET with championTeamId still renders offseason transition dock'
+  );
+});
+
+test('32. 런타임 UI 메타데이터·배지·코치 조언·은퇴 등급 전면 이모지 제거 검증', () => {
+  const emojiRegex = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
+
+  for (const meta of Object.values(PLAYER_TRAIT_META)) {
+    assert.ok(!emojiRegex.test(meta.label), `Trait label contains emoji: ${meta.label}`);
+    assert.ok(!emojiRegex.test(meta.badge), `Trait badge contains emoji: ${meta.badge}`);
+    assert.ok(!emojiRegex.test(meta.description), `Trait desc contains emoji: ${meta.description}`);
+  }
+
+  const dnas: GrowthDna[] = ['EARLY_BLOOMER', 'STANDARD', 'LATE_BLOOMER', 'IRONMAN'];
+  for (const dna of dnas) {
+    const info = getGrowthDnaInfo(dna);
+    assert.ok(!emojiRegex.test(info.label), `DNA label contains emoji: ${info.label}`);
+    assert.ok(!emojiRegex.test(info.badge), `DNA badge contains emoji: ${info.badge}`);
+    assert.ok(!emojiRegex.test(info.description), `DNA desc contains emoji: ${info.description}`);
+  }
+
+  const styles: PlaystyleArchetype[] = [
+    'ALL_ROUNDER',
+    'SCORER',
+    'PLAYMAKER',
+    'THREE_AND_D',
+    'RIM_PROTECTOR',
+  ];
+  for (const style of styles) {
+    const info = getPlaystyleInfo(style);
+    assert.ok(!emojiRegex.test(info.label), `Playstyle label contains emoji: ${info.label}`);
+    assert.ok(!emojiRegex.test(info.badge), `Playstyle badge contains emoji: ${info.badge}`);
+    assert.ok(!emojiRegex.test(info.description), `Playstyle desc contains emoji: ${info.description}`);
+  }
+
+  const sampleCareer = createBaseCareer({
+    league: 'NBA',
+    stats: {
+      out: 92,
+      ins: 90,
+      ply: 88,
+      def: 86,
+      reb: 86,
+      phy: 88,
+    },
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        ppg: 28.5,
+        rpg: 7.2,
+        apg: 8.4,
+        spg: 2.1,
+        bpg: 1.4,
+        wonMvp: true,
+        wonChampionship: true,
+      }),
+    ],
+  });
+
+  for (const camp of getSpecialCampOptions(sampleCareer)) {
+    assert.ok(!emojiRegex.test(camp.title), `Camp title contains emoji: ${camp.title}`);
+    assert.ok(!emojiRegex.test(camp.subtitle), `Camp subtitle contains emoji: ${camp.subtitle}`);
+    assert.ok(!emojiRegex.test(camp.effectText), `Camp effect contains emoji: ${camp.effectText}`);
+  }
+
+  const badges = evaluatePlayerBadges(
+    sampleCareer.stats,
+    sampleCareer.secondaryPos,
+    sampleCareer.growthDna,
+    sampleCareer.playstyle,
+    sampleCareer.traits
+  );
+  for (const badge of badges) {
+    assert.ok(!emojiRegex.test(badge), `Badge contains emoji: ${badge}`);
+  }
+
+  const posFit = analyzePositionFit(
+    sampleCareer.stats,
+    sampleCareer.heightCm,
+    sampleCareer.primaryPos,
+    sampleCareer.secondaryPos,
+    sampleCareer.coachTrust
+  );
+  assert.ok(!emojiRegex.test(posFit.coachAdvice), `Coach advice contains emoji: ${posFit.coachAdvice}`);
+
+  const legacy = evaluateCareerLegacy(sampleCareer);
+  assert.ok(!emojiRegex.test(legacy.tierTitle), `Legacy title contains emoji: ${legacy.tierTitle}`);
+  assert.ok(!emojiRegex.test(legacy.tierEmoji), `Legacy badge contains emoji: ${legacy.tierEmoji}`);
+  assert.ok(!emojiRegex.test(legacy.biography), `Legacy bio contains emoji: ${legacy.biography}`);
+
+  const hsProspect = evaluateHighSchoolProspect(
+    createBaseCareer({
+      league: 'HIGH_SCHOOL',
+      seasonLogs: [
+        createSeasonLog({
+          league: 'HIGH_SCHOOL',
+          ppg: 28.0,
+          rpg: 7.5,
+          apg: 6.2,
+          wonMvp: true,
+          wonChampionship: true,
+        }),
+      ],
+    })
+  );
+  assert.ok(!emojiRegex.test(hsProspect.summary), `HS prospect summary contains emoji: ${hsProspect.summary}`);
+});
+
+test('33. 4년 주기 국제대회, 아시안게임 난이도 완화, NBA/KBL 파이널 MVP 기록실 및 선택 초기화 검증', () => {
+  const emojiRegex = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
+
+  // 1) 4-year international cycle mapping
+  assert.equal(getInternationalTournamentByYear(2025), 'ASIA_CUP');
+  assert.equal(getInternationalTournamentByYear(2026), 'ASIAN_GAMES');
+  assert.equal(getInternationalTournamentByYear(2027), 'FIBA_WORLD_CUP');
+  assert.equal(getInternationalTournamentByYear(2028), 'OLYMPICS');
+
+  // 2) National teams pool & zero emojis across all international teams and callup events
+  assert.ok(ALL_INTERNATIONAL_TEAMS.length >= 20);
+  for (const t of ALL_INTERNATIONAL_TEAMS) {
+    assert.ok(!emojiRegex.test(t.name), `National team name contains emoji: ${t.name}`);
+    assert.ok(!emojiRegex.test(t.prestige), `National team prestige contains emoji: ${t.prestige}`);
+  }
+  assert.equal(getNationalTeamsForTournament('ASIAN_GAMES').length, 8);
+  assert.equal(getNationalTeamsForTournament('ASIA_CUP').length, 10);
+  assert.ok(getNationalTeamsForTournament('FIBA_WORLD_CUP').length >= 16);
+  assert.ok(getNationalTeamsForTournament('OLYMPICS').length >= 12);
+
+  const kblAce = createBaseCareer({
+    name: '이국대',
+    age: 24,
+    seasonYear: 2026,
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    ovr: 77,
+    militaryExempt: false,
+    stats: { ins: 76, out: 81, ply: 78, def: 75, reb: 70, phy: 78 },
+    seasonLogs: [createSeasonLog({ league: 'KBL', mpg: 34.0, ppg: 23.8, rpg: 5.5, apg: 6.2 })],
+  });
+
+  // Verify callup event creation for all 4 tournaments has zero emojis and sets enterInternationalTournament
+  for (const type of ['ASIA_CUP', 'ASIAN_GAMES', 'FIBA_WORLD_CUP', 'OLYMPICS'] as const) {
+    const evt = createInternationalCallupEvent(kblAce, 2026, type);
+    assert.ok(!emojiRegex.test(evt.title), `Callup title contains emoji: ${evt.title}`);
+    assert.ok(!emojiRegex.test(evt.description), `Callup desc contains emoji: ${evt.description}`);
+    assert.ok(
+      evt.choices.some((c) => c.enterInternationalTournament === type),
+      `Callup event for ${type} must provide enterInternationalTournament choice`
+    );
+  }
+
+  // Verify rollSeasonEvent triggers Asia Cup (2025), Asian Games (2026), World Cup (2027), Olympics (2028)
+  const nbaStarForIntl = createBaseCareer({
+    ...kblAce,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 86,
+  });
+  const evt2025 = rollSeasonEvent({ ...nbaStarForIntl, seasonYear: 2025 }, () => 0.1);
+  assert.equal(evt2025?.id, 'EVT_INTL_ASIA_CUP_2025');
+  const evt2026 = rollSeasonEvent({ ...nbaStarForIntl, seasonYear: 2026 }, () => 0.1);
+  assert.equal(evt2026?.id, 'EVT_ASIAN_GAMES_GOLD');
+  const evt2027 = rollSeasonEvent({ ...nbaStarForIntl, seasonYear: 2027 }, () => 0.1);
+  assert.equal(evt2027?.id, 'EVT_INTL_FIBA_WORLD_CUP_2027');
+  const evt2028 = rollSeasonEvent({ ...nbaStarForIntl, seasonYear: 2028 }, () => 0.1);
+  assert.equal(evt2028?.id, 'EVT_INTL_OLYMPICS_2028');
+
+  // 3) Asian Games difficulty rebalancing: KBL Ace (OVR 77) comfortably competes for Gold
+  const korRatingAg = calculateKoreaTeamEffectiveRating(kblAce, 'ASIAN_GAMES');
+  assert.ok(
+    korRatingAg >= 81,
+    `KBL Ace (OVR 77) should lift Korea Asian Games rating to >= 81, got ${korRatingAg}`
+  );
+  let agFinalsCount = 0;
+  let agGoldCount = 0;
+  const trials = 160;
+  let seed = 1337;
+  const detRng = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+  for (let i = 0; i < trials; i++) {
+    const res = simulateInternationalTournament(kblAce, 'ASIAN_GAMES', detRng);
+    if (res.reachedFinals && res.finalOpponent) {
+      agFinalsCount++;
+      const liveFinal = createLiveFinalGame(kblAce, res.finalOpponent, 'ASIAN_GAMES_FINAL', {
+        tournamentType: 'ASIAN_GAMES',
+        preMatches: res.matches,
+      });
+      const finished = skipLiveGameToEnd(liveFinal, kblAce, detRng);
+      if (finished.finalOutcome?.medal === 'GOLD') {
+        agGoldCount++;
+      }
+    }
+  }
+  const finalsRate = agFinalsCount / trials;
+  const goldRate = agGoldCount / trials;
+  assert.ok(
+    finalsRate >= 0.65,
+    `KBL Ace (OVR 77) Asian Games Finals reach rate must be >= 65%, got ${(finalsRate * 100).toFixed(1)}%`
+  );
+  assert.ok(
+    goldRate >= 0.45,
+    `KBL Ace (OVR 77) Asian Games Gold rate must be >= 45%, got ${(goldRate * 100).toFixed(1)}%`
+  );
+
+  // 4) Bronze match live game flow & Olympic Bronze military exemption
+  const olympicOpponents = getNationalTeamsForTournament('OLYMPICS');
+  const bronzeLive = createLiveFinalGame(
+    nbaStarForIntl,
+    olympicOpponents[olympicOpponents.length - 1],
+    'INTERNATIONAL_BRONZE',
+    { tournamentType: 'OLYMPICS' }
+  );
+  assert.equal(isInternationalLiveGame(bronzeLive.gameType), true);
+  // Simulate deterministic win in Bronze Medal match
+  const finishedBronzeWin = skipLiveGameToEnd(
+    { ...bronzeLive, teamScore: 95, oppScore: 70, quarter: 3 },
+    { ...nbaStarForIntl, ovr: 95, stats: { ins: 95, out: 95, ply: 95, def: 95, reb: 90, phy: 95 } },
+    () => 0.1
+  );
+  assert.equal(finishedBronzeWin.finalOutcome?.medal, 'BRONZE');
+  assert.equal(
+    finishedBronzeWin.finalOutcome?.grantedMilitaryExemption,
+    true,
+    'Olympic Bronze medal must grant military exemption'
+  );
+
+  // 5) NBA, KBL & EuroLeague FINALS_MVPS record book entries
+  const book = createInitialRecordBook();
+  assert.ok(book.NBA.some((r) => r.category === 'FINALS_MVPS' && r.value === 6));
+  assert.ok(book.KBL.some((r) => r.category === 'FINALS_MVPS' && r.value === 3));
+  assert.ok(book.EUROLEAGUE.some((r) => r.category === 'FINALS_MVPS' && r.value === 3));
+  for (const lg of ['NCAA', 'U_LEAGUE', 'B_LEAGUE', 'NBL', 'GLEAGUE', 'HIGH_SCHOOL'] as const) {
+    assert.ok(
+      !book[lg].some((r) => r.category === 'FINALS_MVPS'),
+      `${lg} must NOT include FINALS_MVPS record category`
+    );
+  }
+
+  // Breaking KBL FINALS_MVPS record (4 > 3)
+  const kblDynastyLogs = [2028, 2029, 2030, 2031].map((yr) =>
+    createSeasonLog({
+      year: yr,
+      league: 'KBL',
+      teamName: KBL_TEAMS[0].name,
+      wonChampionship: true,
+      wonFinalsMvp: true,
+    })
+  );
+  const kblDynastyCareer = createBaseCareer({
+    name: '최파이널',
+    league: 'KBL',
+    seasonYear: 2031,
+    team: KBL_TEAMS[0],
+    seasonLogs: kblDynastyLogs,
+  });
+  const kblFmvpCheck = checkAndApplyRecordBreaks(
+    book,
+    kblDynastyCareer,
+    kblDynastyLogs[kblDynastyLogs.length - 1]
+  );
+  assert.ok(
+    kblFmvpCheck.brokenRecords.some((b) => b.league === 'KBL' && b.category === 'FINALS_MVPS'),
+    '4 KBL Finals MVPs must break Yang Dong-geun baseline (3)'
+  );
+
+  // 6) Selective Record Reset persistence guard (skipRecordSync = true preserves reset recordBook even with HOF)
+  const legacy = evaluateCareerLegacy(kblDynastyCareer);
+  const hofWithRecords = buildHallOfFameEntry(kblDynastyCareer, 'VOLUNTARY', legacy);
+  assert.equal(hofWithRecords.totals.kblFinalsMvps, 4);
+
+  const syncedBook = syncRecordBookWithHof(createInitialRecordBook(), [hofWithRecords], null);
+  assert.equal(
+    syncedBook.KBL.find((r) => r.category === 'FINALS_MVPS')?.holderName,
+    '최파이널',
+    'HOF sync must reflect KBL Finals MVP record when not manually reset'
+  );
+
+  const afterManualReset = migratePersistedPayload({
+    career: null,
+    hofList: [hofWithRecords],
+    recordBook: createInitialRecordBook(),
+    skipRecordSync: true,
+  });
+  assert.equal(
+    afterManualReset.recordBook.KBL.find((r) => r.category === 'FINALS_MVPS')?.isUserRecord,
+    false,
+    'Manual record book reset (skipRecordSync=true) must NOT be overwritten by HOF on reload'
+  );
+  assert.equal(
+    afterManualReset.hofList.length,
+    1,
+    'HOF entries must remain intact when only Record Book is reset'
+  );
+  assert.ok(INTERNATIONAL_TOURNAMENT_CONFIG.OLYMPICS.militaryExemptionMinMedal === 'BRONZE');
+});
+
+test('34. Taegeukgi Flag Asset, 24 High School Emblems, Farewell Tour Save Recovery & Tone Cleanup', () => {
+  const publicDir = path.resolve(process.cwd(), 'public');
+
+  // 1) South Korea national flag (Taegeukgi) in createLiveFinalGame, local SVG asset & fallback
+  const taegeukgiPath = path.join(publicDir, 'logos', 'NAT_KOR.svg');
+  assert.ok(fs.existsSync(taegeukgiPath), 'public/logos/NAT_KOR.svg must exist');
+  const taegeukgiSvg = fs.readFileSync(taegeukgiPath, 'utf8');
+  assert.ok(taegeukgiSvg.includes('#CD2E3A') && taegeukgiSvg.includes('#0047A0'));
+
+  const intlCareer = createBaseCareer({ league: 'KBL', team: KBL_TEAMS[0], ovr: 80 });
+  const liveIntl = createLiveFinalGame(intlCareer, ASIAN_NATIONAL_TEAMS[0], 'ASIAN_GAMES_FINAL', {
+    tournamentType: 'ASIAN_GAMES',
+  });
+  assert.equal(liveIntl.playerTeam.id, 'KOR_NAT_TEAM');
+  assert.equal(liveIntl.playerTeam.logoUrl, '/logos/NAT_KOR.svg');
+  const korFallback = decodeURIComponent(generateLeagueFallbackSvgDataUri(liveIntl.playerTeam));
+  assert.ok(korFallback.includes('#CD2E3A') && korFallback.includes('#0047A0'));
+  assert.ok(!korFallback.includes('KBL PRO') && !korFallback.includes('NBA PRO'));
+
+  // 2) All 30 High School teams have valid local emblem files with zero legacy BASKETBALL CLUB template
+  assert.equal(HIGH_SCHOOL_TEAMS.length, 30);
+  for (const hs of HIGH_SCHOOL_TEAMS) {
+    assert.ok(hs.logoUrl && hs.logoUrl.startsWith('/logos/HS_'), `Missing HS logoUrl for ${hs.id}`);
+    const fullPath = path.join(publicDir, hs.logoUrl.replace(/^\//, ''));
+    assert.ok(fs.existsSync(fullPath), `Missing HS logo file: ${fullPath}`);
+    const stat = fs.statSync(fullPath);
+    assert.ok(stat.size > 300, `HS logo file too small: ${fullPath}`);
+    if (fullPath.endsWith('.svg')) {
+      const content = fs.readFileSync(fullPath, 'utf8');
+      assert.ok(
+        !content.includes('BASKETBALL CLUB'),
+        `Legacy generic template must be replaced for ${hs.id}`
+      );
+    }
+  }
+
+  // 3) Farewell Tour soft-lock self-healing in save migration & logoUrl sync
+  const stuckFarewellCareer = createBaseCareer({
+    age: 36,
+    isFarewellTour: true,
+    offseasonLocked: false,
+    offseasonOptions: [],
+    seasonPhase: 'OFFSEASON',
+    retirementReason: null,
+    team: { ...HIGH_SCHOOL_TEAMS[1], logoUrl: '/logos/HS_YONGSAN.svg' },
+  });
+  const recovered = migratePersistedPayload({
+    career: stuckFarewellCareer,
+    hofList: [],
+    recordBook: createInitialRecordBook(),
+  });
+  assert.equal(
+    recovered.career?.seasonPhase,
+    'REGULAR_SEASON',
+    'Stuck Farewell Tour save (!offseasonLocked && OFFSEASON) must auto-recover to REGULAR_SEASON'
+  );
+  assert.equal(recovered.career?.playoffBracket, null);
+  assert.equal(recovered.career?.liveGame, null);
+  assert.equal(
+    recovered.career?.team.logoUrl,
+    '/logos/HS_YONGSAN.png',
+    'normalizeTeamInfo must refresh updated local emblem extensions on save load'
+  );
+
+  // 4) Zero remaining polite endings in ALL_TEAMS prestigeDesc
+  for (const t of ALL_TEAMS) {
+    assert.ok(
+      !/(?:예요|이에요|해요|있어요|돼요|많아요|뛰어나요|펼쳐요)\.$/.test(t.prestigeDesc),
+      `Polite ending still present in ${t.id}: ${t.prestigeDesc}`
+    );
+  }
+});
+
+test('35. Incumbent Core Player Re-Signing Protection Prevents Unfair Sixth-Man / Vet-Min Demotion', () => {
+  // 1) KBL Contender starter/ace (OVR 76, 33 MPG, trust 84) re-signing must NOT drop to SIXTH_MAN_CORE
+  const kblContender = KBL_TEAMS.find((t) => t.rating >= 77) || KBL_TEAMS[0];
+  const kblCoreCareer = createBaseCareer({
+    age: 26,
+    league: 'KBL',
+    team: kblContender,
+    ovr: 76,
+    role: '주전 핵심',
+    coachTrust: 84,
+    contractType: 'KBL_MAX',
+    contractYearsLeft: 0,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'KBL',
+        teamId: kblContender.id,
+        teamName: kblContender.name,
+        ovr: 76,
+        role: '주전 핵심',
+        mpg: 33.4,
+        ppg: 18.6,
+        rpg: 5.2,
+        apg: 4.8,
+      }),
+    ],
+  });
+  const kblRole = determineTeamRolePromise(kblCoreCareer, kblContender, 'KBL_MAX', {
+    isResigning: true,
+  });
+  assert.ok(
+    kblRole.promisedRole === 'ACE_FIRST_OPTION' ||
+      kblRole.promisedRole === 'STARTER_GUARANTEE',
+    `KBL incumbent core starter must keep starter/ace promise on re-sign, got ${kblRole.promisedRole}`
+  );
+  const kblOpts = generateOffseasonOptions(kblCoreCareer, () => 0.45);
+  const kblResign = kblOpts.find((o) => o.id === 'OPT_RESIGN_CURRENT_TEAM');
+  assert.ok(kblResign, 'KBL incumbent core must receive re-sign offer');
+  assert.ok(
+    kblResign!.promisedRole === 'ACE_FIRST_OPTION' ||
+      kblResign!.promisedRole === 'STARTER_GUARANTEE',
+    `KBL re-sign option promisedRole must be starter/ace, got ${kblResign!.promisedRole}`
+  );
+
+  // 2) NBA 28yo contender starter (OVR 82, 34 MPG, trust 85) re-signing must stay starter/ace, never SIXTH_MAN_CORE
+  const nbaContender = NBA_TEAMS.find((t) => t.direction === 'CONTENDER') || NBA_TEAMS[0];
+  const nbaCoreCareer = createBaseCareer({
+    age: 28,
+    league: 'NBA',
+    team: nbaContender,
+    ovr: 82,
+    role: '주전 핵심',
+    coachTrust: 85,
+    contractType: 'NBA_STANDARD',
+    contractYearsLeft: 0,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        teamId: nbaContender.id,
+        teamName: nbaContender.name,
+        ovr: 82,
+        role: '주전 핵심',
+        mpg: 34.2,
+        ppg: 21.4,
+        rpg: 5.6,
+        apg: 5.1,
+      }),
+    ],
+  });
+  const nbaRole = determineTeamRolePromise(nbaCoreCareer, nbaContender, 'NBA_STANDARD', {
+    isResigning: true,
+  });
+  assert.ok(
+    nbaRole.promisedRole === 'ACE_FIRST_OPTION' ||
+      nbaRole.promisedRole === 'STARTER_GUARANTEE',
+    `NBA contender incumbent starter must keep starter/ace promise, got ${nbaRole.promisedRole}`
+  );
+  const nbaOpts = generateOffseasonOptions(nbaCoreCareer, () => 0.4);
+  const nbaResign = nbaOpts.find((o) => o.id === 'OPT_RESIGN_CURRENT_TEAM');
+  assert.ok(nbaResign, 'NBA contender incumbent starter must receive re-sign offer');
+  assert.ok(
+    nbaResign!.promisedRole === 'ACE_FIRST_OPTION' ||
+      nbaResign!.promisedRole === 'STARTER_GUARANTEE',
+    `NBA re-sign promisedRole must not drop to sixth man, got ${nbaResign!.promisedRole}`
+  );
+
+  // 3) 33yo NBA superstar/core starter (OVR 84, 34 MPG) must NOT be forced to NBA_VET_MIN / VETERAN_MENTOR
+  const nbaVetStar = createBaseCareer({
+    age: 33,
+    league: 'NBA',
+    team: nbaContender,
+    ovr: 84,
+    role: '팀 에이스',
+    coachTrust: 88,
+    contractType: 'NBA_MAX',
+    contractYearsLeft: 0,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        teamId: nbaContender.id,
+        teamName: nbaContender.name,
+        ovr: 84,
+        role: '팀 에이스',
+        mpg: 34.8,
+        ppg: 23.1,
+        rpg: 6.2,
+        apg: 5.8,
+      }),
+    ],
+  });
+  const vetScout = evaluateTeamScouting(nbaVetStar, nbaContender, () => 0.5, true);
+  assert.notEqual(
+    vetScout.recommendedContract,
+    'NBA_VET_MIN',
+    '33yo OVR 84 incumbent starter must NOT be downgraded to NBA_VET_MIN'
+  );
+  const vetOpts = generateOffseasonOptions(nbaVetStar, () => 0.5);
+  const vetResign = vetOpts.find((o) => o.id === 'OPT_RESIGN_CURRENT_TEAM');
+  assert.ok(vetResign);
+  assert.ok(
+    vetResign!.promisedRole === 'ACE_FIRST_OPTION' ||
+      vetResign!.promisedRole === 'STARTER_GUARANTEE',
+    `33yo OVR 84 incumbent ace must keep starter/ace role on re-sign, got ${vetResign!.promisedRole}`
+  );
+  assert.notEqual(vetResign!.contractType, 'NBA_VET_MIN');
+});
+
+test('36. Per-Team Contract Salary Differentiation Across Direction, Role, Interest & Incumbent Bonus', () => {
+  const contender =
+    NBA_TEAMS.find((t) => t.direction === 'CONTENDER') || {
+      ...NBA_TEAMS[0],
+      direction: 'CONTENDER' as const,
+    };
+  const rebuilding =
+    NBA_TEAMS.find((t) => t.direction === 'REBUILDING') || {
+      ...NBA_TEAMS[NBA_TEAMS.length - 1],
+      direction: 'REBUILDING' as const,
+    };
+
+  const contenderSalary = calculateTeamContractOfferSalary({
+    contractType: 'NBA_STANDARD',
+    ovr: 83,
+    team: contender,
+    promisedRole: 'STARTER_GUARANTEE',
+    scoutingScore: 86,
+    isResigning: false,
+    coachTrust: 80,
+    primaryPos: 'SG',
+  });
+  const rebuildingAceSalary = calculateTeamContractOfferSalary({
+    contractType: 'NBA_STANDARD',
+    ovr: 83,
+    team: rebuilding,
+    promisedRole: 'ACE_FIRST_OPTION',
+    scoutingScore: 90,
+    isResigning: false,
+    coachTrust: 80,
+    primaryPos: 'SG',
+  });
+  const incumbentSalary = calculateTeamContractOfferSalary({
+    contractType: 'NBA_STANDARD',
+    ovr: 83,
+    team: contender,
+    promisedRole: 'STARTER_GUARANTEE',
+    scoutingScore: 86,
+    isResigning: true,
+    coachTrust: 85,
+    primaryPos: 'SG',
+  });
+
+  assert.ok(
+    rebuildingAceSalary > contenderSalary,
+    `Rebuilding Ace offer (${rebuildingAceSalary}) must exceed Contender Starter offer (${contenderSalary})`
+  );
+  assert.ok(
+    incumbentSalary > contenderSalary,
+    `Incumbent re-signing offer (${incumbentSalary}) must include loyalty bonus over identical external contender offer (${contenderSalary})`
+  );
+
+  // Statutory fixed contracts remain identical across teams
+  const vetMinA = calculateTeamContractOfferSalary({
+    contractType: 'NBA_VET_MIN',
+    ovr: 76,
+    team: contender,
+    promisedRole: 'VETERAN_MENTOR',
+    scoutingScore: 80,
+  });
+  const vetMinB = calculateTeamContractOfferSalary({
+    contractType: 'NBA_VET_MIN',
+    ovr: 76,
+    team: rebuilding,
+    promisedRole: 'STARTER_GUARANTEE',
+    scoutingScore: 92,
+  });
+  assert.equal(vetMinA, vetMinB, 'NBA_VET_MIN statutory salary must stay fixed across teams');
+
+  // Full offseason FA offer list for NBA star has distinct salaries across teams
+  const faStar = createBaseCareer({
+    age: 27,
+    league: 'NBA',
+    team: contender,
+    ovr: 86,
+    role: '팀 에이스',
+    coachTrust: 84,
+    contractType: 'NBA_STANDARD',
+    contractYearsLeft: 0,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        teamId: contender.id,
+        teamName: contender.name,
+        ovr: 86,
+        role: '팀 에이스',
+        mpg: 35.1,
+        ppg: 25.4,
+        rpg: 6.1,
+        apg: 6.3,
+      }),
+    ],
+  });
+  const faOptions = generateOffseasonOptions(faStar, () => 0.42);
+  const nbaOffers = faOptions.filter(
+    (o) => o.targetLeague === 'NBA' && (o.annualSalary || 0) > 0
+  );
+  assert.ok(nbaOffers.length >= 3, 'NBA FA star must receive at least 3 NBA offers');
+  const uniqueNbaSalaries = new Set(nbaOffers.map((o) => o.annualSalary));
+  assert.ok(
+    uniqueNbaSalaries.size >= 2,
+    `NBA FA offers must have differentiated salaries per team, got ${[...uniqueNbaSalaries].join(', ')}`
+  );
+
+  // Same check for KBL FA star
+  const kblFa = createBaseCareer({
+    age: 26,
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    ovr: 78,
+    role: '팀 에이스',
+    coachTrust: 82,
+    contractType: 'KBL_MAX',
+    contractYearsLeft: 0,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'KBL',
+        teamId: KBL_TEAMS[0].id,
+        teamName: KBL_TEAMS[0].name,
+        ovr: 78,
+        role: '팀 에이스',
+        mpg: 34.0,
+        ppg: 20.5,
+      }),
+    ],
+  });
+  const kblFaOpts = generateOffseasonOptions(kblFa, () => 0.4);
+  const kblOffers = kblFaOpts.filter(
+    (o) => o.targetLeague === 'KBL' && (o.annualSalary || 0) > 0
+  );
+  const uniqueKblSalaries = new Set(kblOffers.map((o) => o.annualSalary));
+  assert.ok(
+    uniqueKblSalaries.size >= 2,
+    `KBL FA offers must have differentiated salaries per team, got ${[...uniqueKblSalaries].join(', ')}`
+  );
+});
+
+test('37. Three Independent Authentic Overseas Leagues (B.League, NBL, EuroLeague) Structure & Playoffs', () => {
+  // 1) Authentic team counts and regular-season schedules
+  assert.equal(B_LEAGUE_TEAMS.length, 26, 'B.League B1 2025-26 must have all 26 clubs (East 13 + West 13)');
+  assert.equal(NBL_TEAMS.length, 10, 'Australian NBL must have all 10 real clubs');
+  assert.equal(EUROLEAGUE_TEAMS.length, 20, 'EuroLeague must have 20 real clubs');
+  assert.equal(LEAGUE_CONFIG.B_LEAGUE.gamesPerSeason, 60);
+  assert.equal(LEAGUE_CONFIG.NBL.gamesPerSeason, 29);
+  assert.equal(LEAGUE_CONFIG.EUROLEAGUE.gamesPerSeason, 38);
+
+  // 2) B.League 8-team playoff: East top 2 + West top 2 + 4 wildcards -> QF BO3 -> SF BO3 -> Finals BO3
+  const bLeagueCareer = createBaseCareer({
+    age: 25,
+    league: 'B_LEAGUE',
+    team: B_LEAGUE_TEAMS[0],
+    ovr: 76,
+    contractType: 'BLEAGUE_CONTRACT',
+    seasonLogs: [],
+  });
+  const bStandings = generateLeagueStandings(bLeagueCareer, 46, 14, () => 0.5);
+  assert.equal(bStandings.length, 26);
+  assert.equal(bStandings.filter((s) => s.qualifiedPlayoffs).length, 8);
+  const bBracket = createPlayoffBracket(bLeagueCareer, bStandings);
+  assert.equal(bBracket.stageType, 'MAIN_PLAYOFF');
+  assert.equal(bBracket.totalRounds, 3);
+  assert.equal(bBracket.rounds[0].length, 4, 'B.League QF must have 4 matchups (8 teams)');
+  assert.equal(bBracket.rounds[0][0].bestOf, 3, 'B.League QF must be BO3');
+  const bFinished = skipEntirePlayoffs(bBracket, bLeagueCareer, bStandings, () => 0.45);
+  assert.equal(bFinished.rounds[1][0].bestOf, 3, 'B.League SF must be BO3');
+  assert.equal(bFinished.rounds[2][0].bestOf, 3, 'B.League Finals must be BO3');
+
+  // 3) NBL 6-team Finals: Seeds 1-2 bye, 3-6 2-step Play-In BO1 -> SF BO3 -> Championship Series BO5
+  const nblCareer = createBaseCareer({
+    age: 25,
+    league: 'NBL',
+    team: NBL_TEAMS[0],
+    ovr: 78,
+    contractType: 'NBL_CONTRACT',
+    seasonLogs: [],
+  });
+  const nblStandings = generateLeagueStandings(nblCareer, 22, 7, () => 0.5);
+  assert.equal(nblStandings.length, 10);
+  assert.equal(nblStandings.filter((s) => s.playInQualified).length, 4, 'NBL seeds 3-6 enter Play-In');
+  const nblPiStandings = nblStandings.map((s) => ({ ...s, isPlayerTeam: s.rank === 4 }));
+  const nblPiCareer = createBaseCareer({
+    ...nblCareer,
+    team: nblPiStandings.find((s) => s.isPlayerTeam)!.team,
+  });
+  const nblBracket = createPlayoffBracket(nblPiCareer, nblPiStandings, () => 0.45);
+  assert.equal(nblBracket.stageType, 'PLAY_IN_ROUND_1', 'NBL 3-6 seed must open with 2-step Play-In (3v4 Seeding + 5v6 Qualifier)');
+  assert.equal(nblBracket.rounds[0].length, 2);
+  assert.equal(nblBracket.rounds[0][0].bestOf, 1);
+  const nblFinished = skipEntirePlayoffs(nblBracket, nblPiCareer, nblPiStandings, () => 0.45);
+  assert.equal(nblFinished.stageType, 'MAIN_PLAYOFF');
+  assert.equal(nblFinished.rounds[0].length, 2, 'NBL Main PO SF must have 2 series');
+  assert.equal(nblFinished.rounds[0][0].bestOf, 3, 'NBL SF must be BO3');
+  assert.equal(nblFinished.rounds[1][0].bestOf, 5, 'NBL Championship Series must be BO5');
+
+  // 4) EuroLeague: 7-10 Play-In BO1 -> QF BO5 -> Final Four SF BO1 -> Final Four Championship BO1
+  const elCareer = createBaseCareer({
+    age: 26,
+    league: 'EUROLEAGUE',
+    team: EUROLEAGUE_TEAMS[0],
+    ovr: 82,
+    contractType: 'EUROLEAGUE_CONTRACT',
+    seasonLogs: [],
+  });
+  const elStandings = generateLeagueStandings(elCareer, 28, 10, () => 0.5);
+  assert.equal(elStandings.length, 20);
+  assert.equal(elStandings.filter((s) => s.qualifiedPlayoffs).length, 10, 'EuroLeague postseason = 6 direct + 4 Play-In');
+  assert.equal(elStandings.filter((s) => s.playInQualified).length, 4, 'EuroLeague Play-In = seeds 7-10');
+  const elPiStandings = elStandings.map((s) => ({ ...s, isPlayerTeam: s.rank === 8 }));
+  const elPiCareer = createBaseCareer({
+    ...elCareer,
+    team: elPiStandings.find((s) => s.isPlayerTeam)!.team,
+  });
+  const elBracket = createPlayoffBracket(elPiCareer, elPiStandings, () => 0.45);
+  assert.equal(elBracket.stageType, 'PLAY_IN_ROUND_1', 'EuroLeague 7-10 seed must open with Play-In');
+  assert.equal(elBracket.rounds[0].length, 2, 'EuroLeague Play-In R1 has 7v8 and 9v10');
+  assert.equal(elBracket.rounds[0][0].bestOf, 1);
+  const elFinished = skipEntirePlayoffs(elBracket, elPiCareer, elPiStandings, () => 0.45);
+  assert.equal(elFinished.stageType, 'MAIN_PLAYOFF');
+  assert.equal(elFinished.rounds[0].length, 4, 'EuroLeague QF must have 4 series (8 teams)');
+  assert.equal(elFinished.rounds[0][0].bestOf, 5, 'EuroLeague QF must be BO5');
+  assert.equal(elFinished.rounds[1][0].bestOf, 1, 'EuroLeague Final Four SF must be BO1');
+  assert.equal(elFinished.rounds[2][0].bestOf, 1, 'EuroLeague Final Four Finals must be BO1');
+
+  // 5) Separate record books for all 3 overseas leagues
+  const book = createInitialRecordBook();
+  assert.equal(book.B_LEAGUE.length, 7);
+  assert.equal(book.NBL.length, 7);
+  assert.equal(book.EUROLEAGUE.length, 8);
+  assert.ok(book.EUROLEAGUE.some((r) => r.category === 'FINALS_MVPS'));
+});
+
+test('38. 4-Axis Relationships, Multi-Season Story Arcs (6 Core Stats/Traits) & Legacy Save Migration', () => {
+  const proCareer = createBaseCareer({
+    league: 'NBA',
+    seasonYear: 2029,
+    seasonsPlayed: 3,
+    ovr: 84,
+    coachTrust: 82,
+    team: NBA_TEAMS[0],
+    traits: ['CLUTCH_PERFORMER', 'IRON_STAMINA'],
+    stats: { ins: 82, out: 85, ply: 84, def: 80, reb: 72, phy: 82 },
+    relationships: { coachTrust: 82, lockerRoom: 80, frontOffice: 78, mediaFan: 80 },
+    rivals: [
+      {
+        id: 'RIV_1',
+        name: '박라이벌',
+        draftYear: 2027,
+        league: 'NBA',
+        teamId: NBA_TEAMS[1].id,
+        teamName: NBA_TEAMS[1].name,
+        teamShortName: NBA_TEAMS[1].shortName,
+        pos: 'PG',
+        ovr: 83,
+        potential: 90,
+        ppg: 20.1,
+        rpg: 4.5,
+        apg: 7.2,
+        championships: 0,
+        mvps: 0,
+        allStars: 1,
+        roys: 0,
+        lastHeadline: '',
+      },
+    ],
+  });
+
+  // 1) All 4 story arcs x 3 stages have clean journalism copy and an exclusive gated 3rd choice
+  const arcIds = [
+    'COACH_TACTICS_ARC',
+    'RIVAL_DESTINY_ARC',
+    'BRAND_EMPIRE_ARC',
+    'NATIONAL_TORCH_ARC',
+  ] as const;
+
+  for (const arcId of arcIds) {
+    for (const stage of [1, 2, 3]) {
+      const evt = buildStoryArcEventById(proCareer, arcId, stage);
+      assert.equal(evt.arcId, arcId);
+      assert.equal(evt.arcStage, stage);
+      assert.equal(evt.choices.length, 3);
+      assert.equal(evt.choices[2].isExclusiveChoice, true);
+      assert.ok(
+        !/(?:예요|이에요|해요|있어요|돼요)\.$/.test(evt.description),
+        `Arc ${arcId} S${stage} description must use sports journalism tone`
+      );
+      for (const ch of evt.choices) {
+        assert.ok(
+          !/(?:예요|이에요|해요|있어요|돼요)\.$/.test(ch.description),
+          `Arc ${arcId} S${stage} choice description must use sports journalism tone`
+        );
+      }
+    }
+  }
+
+  // 2) Exclusive choice unlock check based on 6 core stats & relationships (no secondary metrics)
+  const coachS1 = buildStoryArcEventById(proCareer, 'COACH_TACTICS_ARC', 1);
+  const exclusiveChoice = coachS1.choices[2];
+  const unlockedRes = checkEncounterChoiceUnlock(proCareer, exclusiveChoice);
+  assert.equal(unlockedRes.unlocked, true, 'High-PLY career must unlock Coach S1 exclusive choice');
+
+  const rookieCareer = createBaseCareer({
+    league: 'NBA',
+    stats: { ins: 65, out: 65, ply: 58, def: 62, reb: 60, phy: 64 },
+    relationships: { coachTrust: 50, lockerRoom: 50, frontOffice: 50, mediaFan: 40 },
+  });
+  const lockedRes = checkEncounterChoiceUnlock(rookieCareer, exclusiveChoice);
+  assert.equal(lockedRes.unlocked, false, 'Low-PLY career must NOT unlock Coach S1 exclusive choice');
+  assert.ok(lockedRes.missingSummary && lockedRes.missingSummary.includes('패스'));
+
+  // 3) Encounter resolution updates core stats, relationships, and arcAdvance cleanly
+  const resolved = resolveEncounterChoiceOutcome(proCareer, coachS1, exclusiveChoice, () => 0.1);
+  assert.ok((resolved.result.statChanges?.ply || 0) > 0);
+  assert.ok((resolved.result.relationshipChanges?.lockerRoom || 0) > 0);
+  assert.equal(resolved.arcAdvance?.arcId, 'COACH_TACTICS_ARC');
+  assert.equal(resolved.arcAdvance?.nextStage, 1);
+  assert.ok(resolved.result.arcProgressNote);
+
+  // 4) Story arc roller respects cooldown and fires for eligible pro career
+  const rolledArc = rollStoryArcEvent(proCareer, () => 0.1);
+  assert.ok(rolledArc && rolledArc.arcId, 'rollStoryArcEvent must trigger eligible arc for pro career');
+
+  // 5) Legacy save migration: OVERSEAS -> B_LEAGUE/NBL/EUROLEAGUE, strip removed secondary/tiered fields, keep relationships & storyArcs
+  const legacyOverseasCareer = {
+    ...createBaseCareer({
+      league: 'B_LEAGUE',
+      team: { ...EUROLEAGUE_TEAMS[0], league: 'OVERSEAS' as unknown as CareerState['league'] },
+      coachTrust: 74,
+      relationships: undefined,
+      storyArcs: undefined,
+      seasonLogs: [
+        createSeasonLog({
+          league: 'OVERSEAS' as unknown as CareerState['league'],
+          leagueName: '해외 프로리그 (유럽/아시아)',
+          teamId: 'OVR_REALMADRID',
+          teamName: '레알 마드리드 발론세스토',
+        }),
+      ],
+    }),
+    league: 'OVERSEAS',
+    contractType: 'OVERSEAS_CONTRACT',
+    secondaryMetrics: { clutch: 77, mental: 80, condition: 65 },
+    tieredBadges: [{ id: 'DEEP_RANGE_SHOOTER', tier: 'GOLD' }],
+    badgeTrackers: { highThreeSeasons: 3 },
+  } as unknown as CareerState;
+
+  const migrated = migratePersistedPayload({
+    career: legacyOverseasCareer,
+    hofList: [],
+    recordBook: createInitialRecordBook(),
+  });
+  assert.equal(migrated.career?.league, 'EUROLEAGUE', 'Legacy Real Madrid OVERSEAS save must migrate to EUROLEAGUE');
+  assert.equal(migrated.career?.contractType, 'EUROLEAGUE_CONTRACT', 'Legacy OVERSEAS_CONTRACT must migrate to EUROLEAGUE_CONTRACT');
+  assert.equal(migrated.career?.seasonLogs[0].league, 'EUROLEAGUE');
+  assert.equal(
+    'secondaryMetrics' in (migrated.career as unknown as Record<string, unknown>),
+    false,
+    'Legacy secondaryMetrics must be stripped on migration'
+  );
+  assert.equal(
+    'tieredBadges' in (migrated.career as unknown as Record<string, unknown>),
+    false,
+    'Legacy tieredBadges must be stripped on migration'
+  );
+  assert.equal(
+    'badgeTrackers' in (migrated.career as unknown as Record<string, unknown>),
+    false,
+    'Legacy badgeTrackers must be stripped on migration'
+  );
+  assert.equal(migrated.career?.relationships?.coachTrust, 74, 'Legacy save must sync relationships.coachTrust');
+  assert.ok(migrated.career?.storyArcs?.COACH_TACTICS_ARC, 'Legacy save must hydrate all 4 storyArcs');
+});
+
+test('39. Authentic League Expansion Across All 9 Leagues (Team Counts, Schedules & Postseason Formats)', () => {
+  // Exact real-world team counts
+  assert.equal(HIGH_SCHOOL_TEAMS.length, 30);
+  assert.equal(U_LEAGUE_TEAMS.length, 12);
+  assert.equal(KBL_TEAMS.length, 10);
+  assert.equal(B_LEAGUE_TEAMS.length, 26);
+  assert.equal(NBL_TEAMS.length, 10);
+  assert.equal(EUROLEAGUE_TEAMS.length, 20);
+  assert.equal(GLEAGUE_TEAMS.length, 31);
+  assert.equal(NCAA_TEAMS.length, 32);
+  assert.equal(NBA_TEAMS.length, 30);
+  assert.equal(ALL_TEAMS.length, 202, '201 league clubs + 1 Sangmu military club = 202');
+  assert.equal(LEAGUE_CONFIG.U_LEAGUE.gamesPerSeason, 16);
+
+  // G League: 31 teams (East 16 / West 15), 12-team conference PO (R1 BO1 -> R2 BO1 w/ 1-2 bye -> CF BO1 -> Finals BO3)
+  const gCareer = createBaseCareer({ league: 'GLEAGUE', team: GLEAGUE_TEAMS[0], ovr: 76 });
+  const gStandings = generateLeagueStandings(gCareer, 36, 14, () => 0.5);
+  assert.equal(gStandings.length, 31);
+  assert.equal(gStandings.filter((s) => s.conference === 'EAST').length, 16);
+  assert.equal(gStandings.filter((s) => s.conference === 'WEST').length, 15);
+  assert.equal(gStandings.filter((s) => s.qualifiedPlayoffs).length, 12);
+  const gBracket = createPlayoffBracket(gCareer, gStandings);
+  assert.equal(gBracket.totalRounds, 4);
+  assert.equal(gBracket.rounds[0].length, 4, 'G League R1 has 4 games (East 3v6, 4v5 + West 3v6, 4v5)');
+  assert.equal(gBracket.rounds[0][0].bestOf, 1);
+  const gFinished = skipEntirePlayoffs(gBracket, gCareer, gStandings, () => 0.45);
+  assert.equal(gFinished.rounds[3][0].bestOf, 3, 'G League Finals must be BO3');
+
+  // NCAA: 32 teams, 16-team Sweet 16 single-elimination BO1
+  const ncaaCareer = createBaseCareer({ league: 'NCAA', team: NCAA_TEAMS[0], ovr: 72 });
+  const ncaaStandings = generateLeagueStandings(ncaaCareer, 28, 7, () => 0.5);
+  assert.equal(ncaaStandings.length, 32);
+  assert.equal(ncaaStandings.filter((s) => s.qualifiedPlayoffs).length, 16);
+  const ncaaBracket = createPlayoffBracket(ncaaCareer, ncaaStandings);
+  assert.equal(ncaaBracket.totalRounds, 4);
+  assert.equal(ncaaBracket.rounds[0].length, 8, 'NCAA Sweet 16 must have 8 matchups');
+  assert.equal(ncaaBracket.rounds[0][0].bestOf, 1);
+  const ncaaFinished = skipEntirePlayoffs(ncaaBracket, ncaaCareer, ncaaStandings, () => 0.45);
+  assert.equal(ncaaFinished.rounds.length, 4);
+  assert.ok(ncaaFinished.championTeamId);
+
+  // U-League & High School: 8-team single-elimination BO1
+  for (const [leagueId, teamObj, wins, losses] of [
+    ['U_LEAGUE', U_LEAGUE_TEAMS[0], 13, 3],
+    ['HIGH_SCHOOL', HIGH_SCHOOL_TEAMS[0], 24, 6],
+  ] as const) {
+    const c = createBaseCareer({ league: leagueId, team: teamObj, ovr: 68 });
+    const st = generateLeagueStandings(c, wins, losses, () => 0.5);
+    assert.equal(st.filter((s) => s.qualifiedPlayoffs).length, 8);
+    const br = createPlayoffBracket(c, st);
+    assert.equal(br.totalRounds, 3);
+    assert.equal(br.rounds[0].length, 4);
+    assert.equal(br.rounds[0][0].bestOf, 1);
+    const fin = skipEntirePlayoffs(br, c, st, () => 0.45);
+    assert.ok(fin.championTeamId);
+  }
+});
+
+test('40. Position-Aware Encounter Filtering & 15 Guard/Wing/Big Specialized Scenarios', () => {
+  // 1) All 15 new scenarios exist and are emoji-free
+  const newCodes = [
+    'GRD_01', 'GRD_02', 'GRD_03', 'GRD_04', 'GRD_05',
+    'WNG_01', 'WNG_02', 'WNG_03', 'WNG_04', 'WNG_05',
+    'BIG_01', 'BIG_02', 'BIG_03', 'BIG_04', 'BIG_05',
+  ];
+  for (const code of newCodes) {
+    const found = ENCOUNTER_SCENARIO_POOL.find((s) => s.id === `EVT_COMB_${code}`);
+    assert.ok(found, `Missing new position-specialized encounter ${code}`);
+    assert.ok(!/[\u{1F300}-\u{1FAFF}]/u.test(found.title + found.description), `${code} must contain zero emojis`);
+  }
+
+  // LCK_04 wording is position-neutral
+  const lck04 = ENCOUNTER_SCENARIO_POOL.find((s) => s.id === 'EVT_COMB_LCK_04');
+  assert.ok(lck04 && !lck04.description.includes('주전 가드와 함께'));
+
+  // 2) 200 rolls for PG must NEVER surface Big-only scenarios (POS_04, POS_05, POS_06, BIG_*)
+  const pgCareer = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    primaryPos: 'PG',
+    heightCm: 190,
+    age: 24,
+    ovr: 82,
+    storyArcs: {
+      COACH_TACTICS_ARC: { stage: 3, completed: true, lastTriggeredYear: 2029, history: [] },
+      RIVAL_DESTINY_ARC: { stage: 3, completed: true, lastTriggeredYear: 2029, history: [] },
+      BRAND_EMPIRE_ARC: { stage: 3, completed: true, lastTriggeredYear: 2029, history: [] },
+      NATIONAL_TORCH_ARC: { stage: 3, completed: true, lastTriggeredYear: 2029, history: [] },
+    },
+  });
+  let pgSeed = 11;
+  const pgRng = () => {
+    pgSeed = (pgSeed * 16807) % 2147483647;
+    return (pgSeed - 1) / 2147483646;
+  };
+  let guardSpecHits = 0;
+  for (let i = 0; i < 200; i++) {
+    const evt = rollCombinatorialEncounter(pgCareer, pgRng);
+    assert.ok(
+      !evt.id.includes('_BIG_') &&
+        evt.id !== 'EVT_COMB_POS_04' &&
+        evt.id !== 'EVT_COMB_POS_05' &&
+        evt.id !== 'EVT_COMB_POS_06',
+      `PG must never roll Big-only encounter, got ${evt.id}`
+    );
+    if (evt.id.includes('_GRD_')) guardSpecHits++;
+  }
+  assert.ok(guardSpecHits > 0, 'PG must surface guard-specialized encounters');
+
+  // 3) 200 rolls for C must NEVER surface Guard-only or OFF_03 scenarios
+  const cCareer = createBaseCareer({
+    ...pgCareer,
+    primaryPos: 'C',
+    heightCm: 213,
+  });
+  let cSeed = 37;
+  const cRng = () => {
+    cSeed = (cSeed * 16807) % 2147483647;
+    return (cSeed - 1) / 2147483646;
+  };
+  let bigSpecHits = 0;
+  for (let i = 0; i < 200; i++) {
+    const evt = rollCombinatorialEncounter(cCareer, cRng);
+    assert.ok(
+      !evt.id.includes('_GRD_') &&
+        !evt.id.includes('_WNG_') &&
+        evt.id !== 'EVT_COMB_TAC_03' &&
+        evt.id !== 'EVT_COMB_TRN_04' &&
+        evt.id !== 'EVT_COMB_OFF_03',
+      `Center must never roll Guard/Wing-only encounter, got ${evt.id}`
+    );
+    if (evt.id.includes('_BIG_')) bigSpecHits++;
+  }
+  assert.ok(bigSpecHits > 0, 'Center must surface big-man specialized encounters');
+});
+
+test('41. Position-Realistic Playstyles, Badges, Sniper 3PA Gate & Save/Switch Reconciliation', () => {
+  // 1) 500 rolls per position must strictly stay inside ALLOWED_PLAYSTYLES_BY_POS
+  const positions = ['PG', 'SG', 'SF', 'PF', 'C'] as const;
+  let s = 91;
+  const rng = () => {
+    s = (s * 48271) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+  for (const pos of positions) {
+    const height = pos === 'PG' ? 188 : pos === 'SG' ? 196 : pos === 'SF' ? 203 : pos === 'PF' ? 208 : 214;
+    for (let i = 0; i < 500; i++) {
+      const stats = createInitialStats(pos, height, rng);
+      const { playstyle } = rollPlayerDnaAndPlaystyle(stats, pos, rng);
+      assert.equal(
+        isPlaystyleAllowedForPosition(playstyle, pos),
+        true,
+        `Position ${pos} rolled forbidden playstyle ${playstyle}`
+      );
+      if (pos === 'PF' || pos === 'C') {
+        assert.notEqual(playstyle, 'THREE_AND_D', `${pos} must never be assigned THREE_AND_D`);
+      } else {
+        assert.notEqual(playstyle, 'RIM_PROTECTOR');
+        assert.notEqual(playstyle, 'STRETCH_BIG');
+        assert.notEqual(playstyle, 'POST_SCORER');
+      }
+    }
+  }
+
+  // 2) Position switch reconciliation: THREE_AND_D -> STRETCH_BIG when switching to PF/C
+  const bigShootingStats = { ins: 76, out: 80, ply: 60, def: 75, reb: 80, phy: 76 };
+  assert.equal(reconcilePlaystyleForPosition('THREE_AND_D', bigShootingStats, 'C'), 'STRETCH_BIG');
+  assert.equal(reconcilePlaystyleForPosition('THREE_AND_D', bigShootingStats, 'PF'), 'STRETCH_BIG');
+  assert.equal(getPlaystyleInfo('THREE_AND_D', 'PG').label, '3&D 가드');
+  assert.equal(getPlaystyleInfo('THREE_AND_D', 'SF').label, '3&D 윙');
+
+  // 3) Position-aware badges: Center gets '페인트존 수비수' (def 78~84) & '하이포스트 패싱 허브', Guard gets '퍼리미터 수비수' & '1옵션 볼핸들러'
+  const eliteStats = { ins: 86, out: 82, ply: 86, def: 81, reb: 85, phy: 84 };
+  const cBadges = evaluatePlayerBadges(eliteStats, null, 'BALANCED', 'STRETCH_BIG', [], 'C');
+  assert.ok(cBadges.includes('페인트존 수비수'), `Center must get 페인트존 수비수, got ${cBadges.join(', ')}`);
+  assert.ok(cBadges.includes('하이포스트 패싱 허브'), `Center must get 하이포스트 패싱 허브, got ${cBadges.join(', ')}`);
+  assert.ok(!cBadges.includes('퍼리미터 수비수'));
+  assert.ok(!cBadges.includes('1옵션 볼핸들러'));
+
+  const pgBadges = evaluatePlayerBadges(eliteStats, null, 'BALANCED', 'PLAYMAKER', [], 'PG');
+  assert.ok(pgBadges.includes('퍼리미터 수비수'));
+  assert.ok(pgBadges.includes('1옵션 볼핸들러'));
+
+  // 4) SNIPER trait requires 3PA volume gate (low-volume 42% 3P% Center does NOT unlock SNIPER)
+  const lowVolCenter = createBaseCareer({
+    primaryPos: 'C',
+    heightCm: 214,
+    traits: [],
+    stats: { ins: 84, out: 76, ply: 60, def: 82, reb: 86, phy: 80 },
+  });
+  const lowVolBox = {
+    gp: 70, mpg: 32, ppg: 18, rpg: 11, apg: 2.5, spg: 0.7, bpg: 2.1,
+    fgPct: 58, tpPct: 42.5, tpa: 0.9, ftPct: 76, singleGameHighPts: 34, injuredGamesMissed: 0,
+  };
+  const traitsLowVol = evaluateAcquiredTraits(lowVolCenter, lowVolBox, lowVolCenter.stats, []);
+  assert.ok(!traitsLowVol.nextTraits.includes('SNIPER'), 'Low 3PA volume center must not acquire SNIPER');
+
+  const highVolBox = { ...lowVolBox, tpa: 4.2 };
+  const traitsHighVol = evaluateAcquiredTraits(lowVolCenter, highVolBox, lowVolCenter.stats, []);
+  assert.ok(traitsHighVol.nextTraits.includes('SNIPER'), 'High 3PA volume stretch center with >=39.5% 3P% can acquire SNIPER');
+
+  // 5) Legacy save with Center + THREE_AND_D auto-heals on migration
+  const brokenCenterSave = createBaseCareer({
+    primaryPos: 'C',
+    heightCm: 214,
+    playstyle: 'THREE_AND_D',
+    stats: { ins: 82, out: 78, ply: 62, def: 84, reb: 86, phy: 80 },
+    badges: ['3&D 윙', '퍼리미터 수비수'],
+  });
+  const healed = migratePersistedPayload({
+    career: brokenCenterSave,
+    hofList: [],
+    recordBook: createInitialRecordBook(),
+  });
+  assert.equal(healed.career?.playstyle, 'STRETCH_BIG');
+  assert.ok(healed.career?.badges.includes('페인트존 수비수'));
+  assert.ok(!healed.career?.badges.includes('퍼리미터 수비수'));
+});
+
+test('42. Multi-Year Contract Blocks Cross-League Offers & Generates Stay + Multi-Team Trade Review Candidates', () => {
+  const kblUnderContract = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    age: 22,
+    ovr: 79,
+    contractType: 'KBL_MAX',
+    contractYearsLeft: 2,
+    annualSalary: 520000,
+    coachTrust: 75,
+    draftStock: 75,
+    promisedRole: 'ACE_FIRST_OPTION',
+    seasonLogs: [
+      {
+        seasonNumber: 1,
+        year: 2027,
+        age: 21,
+        league: 'KBL',
+        leagueName: 'KBL',
+        teamId: KBL_TEAMS[0].id,
+        teamName: KBL_TEAMS[0].name,
+        teamShortName: KBL_TEAMS[0].shortName,
+        contractType: 'KBL_MAX',
+        role: '프랜차이즈 1옵션 에이스',
+        ovr: 79,
+        gp: 54,
+        injuredGamesMissed: 0,
+        mpg: 33.5,
+        ppg: 22.4,
+        rpg: 5.1,
+        apg: 6.3,
+        spg: 1.5,
+        bpg: 0.4,
+        fgPct: 48.2,
+        tpPct: 38.5,
+        wins: 38,
+        losses: 16,
+        teamRank: 2,
+        totalLeagueTeams: 10,
+        playoffResult: 'PO 4강',
+        salaryEarned: 520000,
+        wonChampionship: false,
+        wonMvp: false,
+        wonFinalsMvp: false,
+        wonDpoy: false,
+        wonSixthMan: false,
+        wonMip: false,
+        wonRookieOfYear: false,
+        allStarSelected: true,
+        allLeagueTeam: 1,
+        singleGameHighPts: 39,
+        headline: 'KBL 정상급 활약',
+        narrativeLog: [],
+      },
+    ],
+  });
+
+  const opts = generateOffseasonOptions(kblUnderContract, () => 0.4);
+  const stayOpt = opts.find((o) => o.id === 'OPT_STAY_CURRENT_CONTRACT');
+  assert.ok(stayOpt, 'Must offer OPT_STAY_CURRENT_CONTRACT when contractYearsLeft > 0');
+  assert.equal(stayOpt.isExistingContract, true);
+  assert.equal(stayOpt.contractYears, 2);
+
+  // Cross-league offers and NBA draft MUST NOT appear while under multi-year contract
+  const crossLeagueSignOpts = opts.filter(
+    (o) =>
+      o.actionType === 'SIGN_TEAM' ||
+      o.actionType === 'ENTER_NBA_DRAFT' ||
+      o.targetLeague !== 'KBL'
+  );
+  assert.equal(
+    crossLeagueSignOpts.length,
+    0,
+    `Must NOT inject cross-league or FA offers while under contract, got: ${crossLeagueSignOpts.map((o) => o.id).join(', ')}`
+  );
+
+  // Multi-candidate trade requests (up to 3 distinct teams) with GM acceptance probability
+  const tradeOpts = opts.filter((o) => o.actionType === 'REQUEST_TRADE');
+  assert.ok(
+    tradeOpts.length >= 2 && tradeOpts.length <= 3,
+    `Expected 2~3 trade destination candidates, got ${tradeOpts.length}`
+  );
+  const uniqueTargetIds = new Set(tradeOpts.map((o) => o.targetTeam?.id));
+  assert.equal(uniqueTargetIds.size, tradeOpts.length, 'Trade candidates must be distinct teams');
+  for (const tOpt of tradeOpts) {
+    assert.ok(
+      typeof tOpt.tradeAcceptChancePct === 'number' &&
+        tOpt.tradeAcceptChancePct >= 18 &&
+        tOpt.tradeAcceptChancePct <= 94,
+      `Expected valid tradeAcceptChancePct, got ${tOpt.tradeAcceptChancePct}`
+    );
+    assert.equal(tOpt.isExistingContract, true);
+    assert.equal(tOpt.locked, false);
+  }
+
+  // When trade was already rejected this offseason, all trade options must be locked
+  const rejectedOpts = generateOffseasonOptions(
+    { ...kblUnderContract, tradeRequestedThisYear: true },
+    () => 0.4
+  );
+  const lockedTrades = rejectedOpts.filter((o) => o.actionType === 'REQUEST_TRADE');
+  assert.ok(lockedTrades.length >= 2);
+  assert.ok(lockedTrades.every((o) => o.locked === true));
+
+  // Verify brokenRolePromise significantly increases GM trade acceptance odds
+  const normalProb = calculateOffseasonTradeAcceptProb(
+    kblUnderContract,
+    KBL_TEAMS[1],
+    72
+  );
+  const brokenPromiseProb = calculateOffseasonTradeAcceptProb(
+    { ...kblUnderContract, brokenRolePromise: true },
+    KBL_TEAMS[1],
+    72
+  );
+  assert.ok(
+    brokenPromiseProb > normalProb + 0.15,
+    `Broken role promise must boost trade approval odds (${normalProb} -> ${brokenPromiseProb})`
+  );
+});
+
+test('43. Sangmu Discharge Contract Integrity & NBA Age-28 Military Deferral', () => {
+  // 1) All 6 pro leagues map to their proper contract type on Sangmu discharge (zero NBA->B.League bug)
+  assert.equal(getSangmuDischargeContractType('NBA', 90), 'NBA_MAX');
+  assert.equal(getSangmuDischargeContractType('NBA', 80), 'NBA_STANDARD');
+  assert.equal(getSangmuDischargeContractType('NBA', 72), 'NBA_VET_MIN');
+  assert.equal(getSangmuDischargeContractType('GLEAGUE', 70), 'GLEAGUE_EXHIBIT');
+  assert.equal(getSangmuDischargeContractType('EUROLEAGUE', 82), 'EUROLEAGUE_CONTRACT');
+  assert.equal(getSangmuDischargeContractType('NBL', 74), 'NBL_CONTRACT');
+  assert.equal(getSangmuDischargeContractType('B_LEAGUE', 72), 'BLEAGUE_CONTRACT');
+  assert.equal(getSangmuDischargeContractType('KBL', 80), 'KBL_MAX');
+  assert.equal(getSangmuDischargeContractType('KBL', 70), 'KBL_VET');
+  assert.equal(getSangmuDischargeContractType('KBL', 62), 'KBL_ROOKIE');
+
+  // 2) KBL player age 27 triggers Sangmu enlistment, NBA player age 27 & 28 deferred until age 29
+  const kbl27 = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    age: 27,
+    militaryExempt: false,
+    militaryServiceSeasonsLeft: 0,
+  });
+  const kblEvt = rollSeasonEvent(kbl27, () => 0.99, 2033);
+  assert.equal(kblEvt?.id, 'EVT_SANGMU_ENLISTMENT', 'Non-NBA age 27 must enlist');
+
+  const nba27 = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 27,
+    ovr: 84,
+    militaryExempt: false,
+    militaryServiceSeasonsLeft: 0,
+  });
+  const nba27Evt = rollSeasonEvent(nba27, () => 0.99, 2033);
+  assert.notEqual(nba27Evt?.id, 'EVT_SANGMU_ENLISTMENT', 'NBA age 27 must be deferred');
+
+  const nba28 = { ...nba27, age: 28 };
+  const nba28Evt = rollSeasonEvent(nba28, () => 0.99, 2035);
+  assert.notEqual(nba28Evt?.id, 'EVT_SANGMU_ENLISTMENT', 'NBA age 28 must still be deferred');
+
+  const nba29 = { ...nba27, age: 29 };
+  const nba29Evt = rollSeasonEvent(nba29, () => 0.99, 2035);
+  assert.equal(nba29Evt?.id, 'EVT_SANGMU_ENLISTMENT', 'NBA age 29 without exemption must enlist');
+  assert.ok(nba29Evt?.subtitle.includes('연기 종료'));
+});
+
+test('44. High School Age-19 Graduation, Full 4-Year College & NBA Draft Age-22 Cap', () => {
+  // 1) High school: age 18 with contractYearsLeft 1 advances; age 19 graduates with university offers
+  const hs18 = createBaseCareer({
+    league: 'HIGH_SCHOOL',
+    team: HIGH_SCHOOL_TEAMS[0],
+    age: 18,
+    contractType: 'AMATEUR',
+    contractYearsLeft: 1,
+  });
+  const hs18Opts = generateOffseasonOptions(hs18, () => 0.4);
+  assert.equal(hs18Opts[0].id, 'OPT_HS_NEXT_GRADE');
+
+  const hs19 = { ...hs18, age: 19, contractYearsLeft: 0, ovr: 68 };
+  const hs19Opts = generateOffseasonOptions(hs19, () => 0.4);
+  assert.ok(
+    hs19Opts.some((o) => o.targetLeague === 'U_LEAGUE'),
+    'Age 19 high school graduate must receive U-League offers'
+  );
+
+  // 2) College 4-year flow: age 22 with 1 year left can still stay for senior year
+  const collegeSenior = createBaseCareer({
+    league: 'U_LEAGUE',
+    team: U_LEAGUE_TEAMS[0],
+    age: 22,
+    contractType: 'AMATEUR',
+    contractYearsLeft: 1,
+  });
+  const colOpts = generateOffseasonOptions(collegeSenior, () => 0.4);
+  assert.ok(
+    colOpts.some((o) => o.id === 'OPT_COLLEGE_STAY'),
+    'Age 22 college player with 1 year left must be able to complete 4th year'
+  );
+
+  // 3) NBA draft age cap: 22yo KBL FA eligible, 23yo KBL FA blocked from draft & gets NBA FA path when elite
+  const kblFa22 = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    age: 22,
+    ovr: 82,
+    contractType: 'KBL_MAX',
+    contractYearsLeft: 0,
+    draftStock: 78,
+    totals: {
+      ...createBaseCareer().totals,
+      nbaGp: 0,
+    },
+    seasonLogs: [
+      {
+        seasonNumber: 1, year: 2029, age: 21, league: 'KBL', leagueName: 'KBL',
+        teamId: KBL_TEAMS[0].id, teamName: KBL_TEAMS[0].name, teamShortName: KBL_TEAMS[0].shortName,
+        contractType: 'KBL_MAX', role: '프랜차이즈 1옵션 에이스', ovr: 82, gp: 54, injuredGamesMissed: 0,
+        mpg: 34, ppg: 23.5, rpg: 6.2, apg: 6.5, spg: 1.6, bpg: 0.5, fgPct: 50.1, tpPct: 39.2,
+        wins: 40, losses: 14, teamRank: 1, totalLeagueTeams: 10, playoffResult: '리그 우승',
+        salaryEarned: 550000, wonChampionship: true, wonMvp: true, wonFinalsMvp: true,
+        wonDpoy: false, wonSixthMan: false, wonMip: false, wonRookieOfYear: true,
+        allStarSelected: true, allLeagueTeam: 1, singleGameHighPts: 41, headline: 'MVP', narrativeLog: [],
+      },
+    ],
+  });
+  const fa22Opts = generateOffseasonOptions(kblFa22, () => 0.4);
+  assert.ok(
+    fa22Opts.some((o) => o.actionType === 'ENTER_NBA_DRAFT'),
+    '22yo KBL FA must remain eligible for NBA draft'
+  );
+
+  const kblFa23 = { ...kblFa22, age: 23 };
+  const fa23Opts = generateOffseasonOptions(kblFa23, () => 0.4);
+  assert.ok(
+    !fa23Opts.some((o) => o.actionType === 'ENTER_NBA_DRAFT'),
+    '23yo pro FA must NOT enter NBA rookie draft'
+  );
+  assert.ok(
+    fa23Opts.some((o) => o.targetLeague === 'NBA' && o.actionType === 'SIGN_TEAM'),
+    'Elite 23yo KBL FA must have direct NBA FA signing pathway'
+  );
+});
+
+test('45. Rookie of the Year Duplicate Award Prevention Across Pro Leagues', () => {
+  const kblSeasonLog = {
+    seasonNumber: 1, year: 2027, age: 21, league: 'KBL' as const, leagueName: 'KBL',
+    teamId: KBL_TEAMS[0].id, teamName: KBL_TEAMS[0].name, teamShortName: KBL_TEAMS[0].shortName,
+    contractType: 'KBL_ROOKIE' as const, role: '주전 스타터', ovr: 76, gp: 54, injuredGamesMissed: 0,
+    mpg: 30, ppg: 18, rpg: 4, apg: 5, spg: 1.2, bpg: 0.3, fgPct: 47, tpPct: 37,
+    wins: 34, losses: 20, teamRank: 3, totalLeagueTeams: 10, playoffResult: 'PO 4강',
+    salaryEarned: 100000, wonChampionship: false, wonMvp: false, wonFinalsMvp: false,
+    wonDpoy: false, wonSixthMan: false, wonMip: false, wonRookieOfYear: true,
+    allStarSelected: true, allLeagueTeam: 2 as const, singleGameHighPts: 31, headline: 'ROY', narrativeLog: [],
+  };
+
+  // Pure rookie in KBL (only amateur HS/college logs) -> eligible
+  assert.equal(
+    isEligibleForLeagueRookieAward({ league: 'KBL', age: 21, seasonLogs: [] }),
+    true
+  );
+
+  // KBL veteran moving to B.League / NBL / G League -> NOT eligible for ROY again
+  assert.equal(
+    isEligibleForLeagueRookieAward({ league: 'B_LEAGUE', age: 24, seasonLogs: [kblSeasonLog] }),
+    false
+  );
+  assert.equal(
+    isEligibleForLeagueRookieAward({ league: 'NBL', age: 25, seasonLogs: [kblSeasonLog] }),
+    false
+  );
+
+  // EuroLeague Rising Star: <= 22 allowed, 23+ blocked
+  assert.equal(
+    isEligibleForLeagueRookieAward({ league: 'EUROLEAGUE', age: 22, seasonLogs: [kblSeasonLog] }),
+    true
+  );
+  assert.equal(
+    isEligibleForLeagueRookieAward({ league: 'EUROLEAGUE', age: 23, seasonLogs: [kblSeasonLog] }),
+    false
+  );
+
+  // NBA first season: overseas pro veteran IS eligible under real NBA rules
+  assert.equal(
+    isEligibleForLeagueRookieAward({ league: 'NBA', age: 24, seasonLogs: [kblSeasonLog] }),
+    true
+  );
+});
+
+test('46. Age 40+ Career Extension for Competitive Legends & Guaranteed Contract Protection', () => {
+  // 40yo NBA legend maintaining high OVR continues playing
+  const legend40 = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 40,
+    ovr: 86,
+    contractType: 'NBA_STANDARD',
+    contractYearsLeft: 0,
+  });
+  const elig40 = checkRetirementEligibility(legend40);
+  assert.equal(elig40.canExtendPast40, true);
+  assert.equal(elig40.isMandatoryAge40, false);
+
+  // 40yo severely declined FA without contract -> mandatory retirement
+  const declined40 = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 40,
+    ovr: 64,
+    contractType: 'NBA_VET_MIN',
+    contractYearsLeft: 0,
+  });
+  const eligDeclined40 = checkRetirementEligibility(declined40);
+  assert.equal(eligDeclined40.isMandatoryAge40, true);
+
+  // 45yo hard retirement cap applies even with high OVR
+  const legend45 = { ...legend40, age: 45 };
+  assert.equal(checkRetirementEligibility(legend45).isMandatoryAge40, true);
+
+  // 36yo declined player with active guaranteed multi-year contract is NOT force-waived out of league
+  const contractedVet = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 36,
+    ovr: 68,
+    contractType: 'NBA_STANDARD',
+    contractYearsLeft: 2,
+  });
+  assert.equal(checkRetirementEligibility(contractedVet).isOutOfLeague, false);
+});
+
+test('47. Contract Header & Existing-Contract Offer Formatters', () => {
+  const proActive = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    contractType: 'KBL_MAX',
+    contractYearsLeft: 2,
+    annualSalary: 450000,
+  });
+  assert.equal(formatHeaderContractSummary(proActive), '$450K · 잔여 2년');
+  assert.equal(
+    formatHeaderContractSummary({ ...proActive, contractYearsLeft: 0 }),
+    'FA 만료'
+  );
+  assert.equal(
+    formatHeaderContractSummary({ ...proActive, militaryServiceSeasonsLeft: 1 }),
+    '상무 · 잔여 1년'
+  );
+  assert.equal(
+    formatHeaderContractSummary({
+      ...proActive,
+      league: 'HIGH_SCHOOL',
+      contractType: 'AMATEUR',
+      contractYearsLeft: 2,
+      annualSalary: 0,
+    }),
+    '학생 · 고2'
+  );
+  assert.equal(
+    formatHeaderContractSummary({
+      ...proActive,
+      league: 'U_LEAGUE',
+      contractType: 'AMATEUR',
+      contractYearsLeft: 1,
+      annualSalary: 0,
+    }),
+    '학생 · 4학년'
+  );
+  assert.equal(
+    formatSalaryOffer(450000, 2, { isExistingContract: true }),
+    '기존 계약 $450K · 잔여 2년'
+  );
+  assert.equal(formatSalaryOffer(450000, 2), '$450K · 2년');
+});
 
 
 

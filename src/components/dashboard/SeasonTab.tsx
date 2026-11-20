@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ChevronRight, Lock } from 'lucide-react';
+import { ChevronRight, Lock, RotateCcw, X, Zap } from 'lucide-react';
 import {
   LEAGUE_BALANCE_META,
   isPersonalCareAllowedInLeague,
 } from '../../config/balanceConfig';
 import { LEAGUE_CONFIG } from '../../data/leagues';
+import { getLeagueRecordChases } from '../../engine/recordBookEngine';
 import {
   getEffectiveCashBalance,
   getPersonalCarePackageCost,
@@ -14,39 +15,19 @@ import {
 } from '../../store/useCareerStore';
 import {
   AwardRaceEntry,
+  InternationalTournamentRecord,
   OffseasonOption,
   PersonalCareId,
   TeamDirection,
 } from '../../types/game';
+import {
+  formatCurrencyDetailed,
+  formatSalaryOffer,
+} from '../../utils/formatters';
 import { Modal } from '../common/Modal';
 import { TeamEmblem } from '../common/TeamEmblem';
-import { FanReactionFeed } from './FanReactionFeed';
 import { LiveGameBroadcast } from './LiveGameBroadcast';
 import { PlayoffBracketLadder } from './PlayoffBracketLadder';
-
-function formatSalaryOffer(amountUsd?: number, years?: number): string {
-  if (!amountUsd || amountUsd <= 0) {
-    return years && years > 0 ? `아마추어 · ${years}년` : '비계약 진로';
-  }
-  const yearSuffix = years && years > 0 ? ` · ${years}년` : '';
-  if (amountUsd >= 1000000) {
-    return `$${(amountUsd / 1000000).toFixed(2)}M${yearSuffix}`;
-  }
-  if (amountUsd >= 1000) {
-    return `$${Math.round(amountUsd / 1000).toLocaleString()}K${yearSuffix}`;
-  }
-  return `$${amountUsd.toLocaleString()}${yearSuffix}`;
-}
-
-function formatUsdAmount(amountUsd: number): string {
-  if (amountUsd >= 1000000) {
-    return `$${(amountUsd / 1000000).toFixed(2)}M`;
-  }
-  if (amountUsd >= 1000) {
-    return `$${Math.round(amountUsd / 1000).toLocaleString()}K`;
-  }
-  return `$${amountUsd.toLocaleString()}`;
-}
 
 function getTeamDirectionLabel(
   direction?: TeamDirection,
@@ -55,6 +36,17 @@ function getTeamDirectionLabel(
   if (direction === 'CONTENDER' || (rating && rating >= 84)) return '우승 도전';
   if (direction === 'PLAYOFF_HUNT' || (rating && rating >= 74)) return 'PO 경쟁';
   return '리빌딩';
+}
+
+function getInternationalResultLabel(
+  result: InternationalTournamentRecord['result']
+): string {
+  if (result === 'GOLD') return '금메달';
+  if (result === 'SILVER') return '은메달';
+  if (result === 'BRONZE') return '동메달';
+  if (result === 'FOURTH') return '4위';
+  if (result === 'QUARTERFINAL') return '8강 마감';
+  return '조별리그 마감';
 }
 
 const PERSONAL_CARE_ITEMS: {
@@ -69,7 +61,7 @@ const PERSONAL_CARE_ITEMS: {
   },
   {
     id: 'REHAB_LOAD_MGMT',
-    effect: '부상률 -70% · 컨디션 관리',
+    effect: '부상률 -70% · 로드 매니지먼트',
     title: '전담 재활 · 로드 매니지먼트',
   },
   {
@@ -83,9 +75,16 @@ const RHYTHM_LABELS = ['전반기', '올스타 브레이크', '후반기', '최�
 
 export function SeasonTab() {
   const career = useCareerStore((s) => s.career);
+  const recordBook = useCareerStore((s) => s.recordBook);
+  const fastSimEnabled = useCareerStore((s) => s.fastSimEnabled);
+  const lastPersonalCareIds = useCareerStore((s) => s.lastPersonalCareIds);
+  const toggleFastSim = useCareerStore((s) => s.toggleFastSim);
   const playSeason = useCareerStore((s) => s.playSeason);
   const selectOffseasonOption = useCareerStore((s) => s.selectOffseasonOption);
   const purchasePersonalCare = useCareerStore((s) => s.purchasePersonalCare);
+  const reapplyLastPersonalCare = useCareerStore(
+    (s) => s.reapplyLastPersonalCare
+  );
   const triggerMidSeasonCrossroads = useCareerStore(
     (s) => s.triggerMidSeasonCrossroads
   );
@@ -103,6 +102,9 @@ export function SeasonTab() {
   const startFinalsLiveBroadcast = useCareerStore(
     (s) => s.startFinalsLiveBroadcast
   );
+  const dismissInternationalSummary = useCareerStore(
+    (s) => s.dismissInternationalSummary
+  );
 
   const hasEncounterOutcome = useCareerStore(
     (s) => s.lastEncounterOutcome !== null
@@ -117,6 +119,7 @@ export function SeasonTab() {
     'ALL' | 'EAST' | 'WEST'
   >('ALL');
   const [awardRaceTab, setAwardRaceTab] = useState<'MVP' | 'ROY'>('MVP');
+  const [offseasonTab, setOffseasonTab] = useState<'STAY' | 'TRADE'>('STAY');
 
   const midSeasonDone = career?.midSeasonEventTriggeredThisYear ?? false;
   const hasPendingEvent = career?.pendingEvent !== null;
@@ -132,6 +135,13 @@ export function SeasonTab() {
       !hasEncounterOutcome &&
       !offseasonLocked
     ) {
+      if (fastSimEnabled) {
+        const timer = setTimeout(() => {
+          setProgress(100);
+          playSeason();
+        }, 40);
+        return () => clearTimeout(timer);
+      }
       const timer = setTimeout(() => {
         setIsSimulating(true);
       }, 120);
@@ -144,6 +154,8 @@ export function SeasonTab() {
     hasPendingEvent,
     hasEncounterOutcome,
     offseasonLocked,
+    fastSimEnabled,
+    playSeason,
   ]);
 
   useEffect(() => {
@@ -188,13 +200,27 @@ export function SeasonTab() {
 
   const handleStartSeason = () => {
     if (isSimulating || career.offseasonLocked) return;
+    if (fastSimEnabled) {
+      if (!midSeasonDone) {
+        setProgress(50);
+        triggerMidSeasonCrossroads();
+      } else {
+        setProgress(100);
+        playSeason();
+      }
+      return;
+    }
     setProgress(25);
     setIsSimulating(true);
   };
 
   const standings = career.currentStandings || [];
+  const hasConferenceStandings =
+    career.league === 'NBA' ||
+    career.league === 'GLEAGUE' ||
+    career.league === 'B_LEAGUE';
   const filteredStandings =
-    career.league === 'NBA' && standingsConfTab !== 'ALL'
+    hasConferenceStandings && standingsConfTab !== 'ALL'
       ? standings
           .filter(
             (s) => (s.conference || s.team.conference) === standingsConfTab
@@ -232,6 +258,11 @@ export function SeasonTab() {
 
   const effectiveCash = getEffectiveCashBalance(career);
   const activeCareCount = (career.activePersonalCare || []).length;
+  const pendingReapplyCareIds = lastPersonalCareIds.filter(
+    (id) =>
+      !(career.activePersonalCare || []).includes(id) &&
+      isPersonalCareAllowedInLeague(id, career.league)
+  );
   const lastSeasonLeagueMeta = lastSeason
     ? LEAGUE_BALANCE_META[lastSeason.league]
     : LEAGUE_BALANCE_META[career.league];
@@ -249,6 +280,14 @@ export function SeasonTab() {
       ? lastSeason.playerRoyRank
       : lastSeason?.playerMvpRank;
 
+  const leagueChases = getLeagueRecordChases(recordBook, career, career.league);
+  const featuredChase =
+    leagueChases
+      .filter((c) => !c.isAlreadyHolder && c.progressPct >= 55)
+      .sort((a, b) => b.progressPct - a.progressPct)[0] ||
+    leagueChases.find((c) => c.isAlreadyHolder) ||
+    null;
+
   const currentRhythmStep =
     progress >= 100
       ? RHYTHM_LABELS[3]
@@ -257,6 +296,27 @@ export function SeasonTab() {
       : progress >= 50
       ? RHYTHM_LABELS[1]
       : RHYTHM_LABELS[0];
+
+  // 다년 프로 계약 잔여 중 여부 판정 ('소속팀 잔류' vs '트레이드 요청' 2탭 분리)
+  const isProLeague = LEAGUE_BALANCE_META[career.league].isPro;
+  const stayOption = career.offseasonOptions.find(
+    (o) => o.id === 'OPT_STAY_CURRENT_CONTRACT' && o.actionType === 'STAY_TEAM'
+  );
+  const tradeOptions = career.offseasonOptions.filter(
+    (o) => o.actionType === 'REQUEST_TRADE'
+  );
+  const auxiliaryContractOptions = career.offseasonOptions.filter(
+    (o) =>
+      o.id !== 'OPT_STAY_CURRENT_CONTRACT' && o.actionType !== 'REQUEST_TRADE'
+  );
+  const isUnderActiveProContract =
+    isProLeague &&
+    career.contractYearsLeft > 0 &&
+    career.militaryServiceSeasonsLeft === 0 &&
+    career.contractType !== 'TWO_WAY' &&
+    Boolean(stayOption);
+  const activeContractTab: 'STAY' | 'TRADE' =
+    tradeOptions.length === 0 ? 'STAY' : offseasonTab;
 
   // 하단 플로팅 CTA 도크 표시 여부
   const showRegularSeasonDock =
@@ -382,6 +442,76 @@ export function SeasonTab() {
           </section>
         )}
 
+      {/* 1.5 국제대회 결과 요약 카드 */}
+      {career.offseasonLocked &&
+        career.lastInternationalSummary &&
+        seasonPhase !== 'LIVE_FINAL_BROADCAST' && (
+          <section
+            data-testid="international-summary-card"
+            className="t-card space-y-3"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <span className="text-[12px] font-bold text-[var(--t-accent-ink)]">
+                  국가대표 국제대회 결산 · {career.lastInternationalSummary.year}
+                </span>
+                <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)] mt-0.5 truncate">
+                  {career.lastInternationalSummary.tournamentName} ·{' '}
+                  {getInternationalResultLabel(career.lastInternationalSummary.result)}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={dismissInternationalSummary}
+                className="min-h-[40px] min-w-[40px] -mr-2 -mt-1 flex items-center justify-center rounded-xl text-[var(--t-g400)] hover:text-[var(--t-g800)] cursor-pointer t-tap shrink-0"
+                aria-label="국제대회 요약 닫기"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-[13px] text-[var(--t-g700)] leading-relaxed">
+              {career.lastInternationalSummary.summaryHeadline}
+            </p>
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] font-bold tabular-nums">
+              <span className="text-[var(--t-g900)]">
+                대회 평균 {career.lastInternationalSummary.avgPts.toFixed(1)}점 ·{' '}
+                {career.lastInternationalSummary.avgReb.toFixed(1)}리바 ·{' '}
+                {career.lastInternationalSummary.avgAst.toFixed(1)}도움
+              </span>
+              {career.lastInternationalSummary.wonMvp && (
+                <span className="text-[var(--t-gold)]">· 대회 MVP</span>
+              )}
+              {career.lastInternationalSummary.grantedMilitaryExemption && (
+                <span className="text-[var(--t-ok)]">· 병역 특례 확정</span>
+              )}
+            </div>
+
+            {career.lastInternationalSummary.matches.length > 0 && (
+              <div className="divide-y divide-[var(--t-g100)] border-t border-[var(--t-g100)] text-[12px] tabular-nums">
+                {career.lastInternationalSummary.matches.map((m, idx) => (
+                  <div
+                    key={`${m.stageLabel}-${idx}`}
+                    className="py-2 flex items-center justify-between gap-2"
+                  >
+                    <span className="text-[var(--t-g600)] truncate">
+                      {m.stageLabel} · vs {m.opponentName}
+                    </span>
+                    <span
+                      className={`font-bold shrink-0 ${
+                        m.won ? 'text-[var(--t-ok)]' : 'text-[var(--t-up)]'
+                      }`}
+                    >
+                      {m.korScore}:{m.oppScore} ({m.won ? '승' : '패'}) · {m.playerPts}점
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
       {/* 2. 오프시즌 에이전트 데스크 */}
       {career.offseasonLocked && (
         <section
@@ -391,95 +521,297 @@ export function SeasonTab() {
           <div className="flex items-baseline justify-between gap-2">
             <div>
               <span className="text-[12px] font-bold text-[var(--t-accent-ink)]">
-                오프시즌
+                {isUnderActiveProContract
+                  ? `오프시즌 · 기존 계약 잔여 ${career.contractYearsLeft}년`
+                  : isProLeague &&
+                    career.contractYearsLeft === 0 &&
+                    career.militaryServiceSeasonsLeft === 0
+                  ? '오프시즌 · FA 계약 만료'
+                  : '오프시즌'}
                 {career.league === 'HIGH_SCHOOL' && career.prospectStars
                   ? ` · 유망주 ${career.prospectStars}성`
                   : ''}
               </span>
               <h2 className="text-[19px] font-bold tracking-[-0.03em] text-[var(--t-g900)] mt-0.5">
                 {career.isOutOfLeagueWarning
-                  ? '도착한 계약 오퍼가 없어요'
+                  ? '도착한 계약 오퍼가 없습니다'
+                  : isUnderActiveProContract
+                  ? activeContractTab === 'STAY'
+                    ? '현 소속팀 잔류 · 시즌 준비'
+                    : '계약 중 트레이드 요청'
+                  : isProLeague &&
+                    career.contractYearsLeft === 0 &&
+                    career.militaryServiceSeasonsLeft === 0
+                  ? 'FA 시장 · 계약 협상'
                   : '다음 시즌 진로 선택'}
               </h2>
             </div>
             <span className="text-[13px] font-bold text-[var(--t-ok)] tabular-nums shrink-0">
-              {formatUsdAmount(effectiveCash)}
+              {formatCurrencyDetailed(effectiveCash)}
             </span>
           </div>
 
-          {/* 퍼스널 케어 바텀시트 트리거 행 */}
-          <button
-            type="button"
-            onClick={() => setShowPersonalCareSheet(true)}
-            className="w-full min-h-[54px] px-4 rounded-2xl bg-[var(--t-g100)] hover:bg-[var(--t-g200)]/70 flex items-center justify-between gap-3 text-left cursor-pointer t-tap"
-          >
-            <div className="min-w-0">
-              <span className="block text-[14px] font-bold text-[var(--t-g900)]">
-                퍼스널 케어 · 에이전시 투자
-              </span>
-              <span className="block text-[12px] text-[var(--t-g500)]">
-                {activeCareCount > 0
-                  ? `${activeCareCount}개 적용 중`
-                  : '성장 효율 · 부상 방지 · 브랜드 투자'}
-              </span>
-            </div>
-            <ChevronRight className="w-4 h-4 text-[var(--t-g400)] shrink-0" />
-          </button>
+          {/* 퍼스널 케어 바텀시트 트리거 + 원탭 재적용 */}
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setShowPersonalCareSheet(true)}
+              className="w-full min-h-[54px] px-4 rounded-2xl bg-[var(--t-g100)] hover:bg-[var(--t-g200)]/70 flex items-center justify-between gap-3 text-left cursor-pointer t-tap"
+            >
+              <div className="min-w-0">
+                <span className="block text-[14px] font-bold text-[var(--t-g900)]">
+                  퍼스널 케어 · 에이전시 투자
+                </span>
+                <span className="block text-[12px] text-[var(--t-g500)]">
+                  {activeCareCount > 0
+                    ? `${activeCareCount}개 적용 중`
+                    : '성장 효율 · 부상 방지 · 브랜드 투자'}
+                </span>
+              </div>
+              <ChevronRight className="w-4 h-4 text-[var(--t-g400)] shrink-0" />
+            </button>
 
-          {/* 구단 오퍼 리스트 행 */}
-          <div className="divide-y divide-[var(--t-g100)] -mx-2">
-            {career.offseasonOptions.map((option: OffseasonOption) => {
-              const dirLabel = option.targetTeam
-                ? getTeamDirectionLabel(
-                    option.targetTeam.direction,
-                    option.targetTeam.rating
-                  )
-                : option.badgeText;
-              const roleText = option.promisedRoleLabel || '로테이션';
-              const salaryText = formatSalaryOffer(
-                option.annualSalary,
-                option.contractYears
-              );
+            {pendingReapplyCareIds.length > 0 && (
+              <button
+                type="button"
+                data-testid="reapply-personal-care-btn"
+                onClick={reapplyLastPersonalCare}
+                className="w-full min-h-[44px] px-3.5 rounded-2xl bg-[var(--t-accent-soft)] text-[var(--t-accent-ink)] text-[13px] font-bold flex items-center justify-center gap-1.5 cursor-pointer t-tap"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>
+                  이전 시즌 퍼스널 케어 {pendingReapplyCareIds.length}건 원탭 재적용
+                </span>
+              </button>
+            )}
+          </div>
 
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  disabled={option.locked}
-                  onClick={() => selectOffseasonOption(option)}
-                  className={`w-full min-h-[72px] px-2.5 py-3 rounded-2xl text-left flex items-center gap-3 t-tap ${
-                    option.locked
-                      ? 'opacity-45 cursor-not-allowed'
-                      : 'hover:bg-[var(--t-g50)] cursor-pointer'
-                  }`}
+          {/* 다년 계약 잔여 중: '소속팀 잔류' | '트레이드 요청' 전용 2탭 */}
+          {isUnderActiveProContract && stayOption ? (
+            <div className="space-y-3">
+              {tradeOptions.length > 0 && (
+                <div
+                  data-testid="offseason-contract-tabs"
+                  className="grid grid-cols-2 rounded-2xl bg-[var(--t-g100)] p-1 text-[13px] font-bold"
                 >
-                  {option.targetTeam ? (
-                    <TeamEmblem team={option.targetTeam} size="sm" />
-                  ) : (
-                    <div className="w-9 h-9 rounded-full bg-[var(--t-accent-soft)] text-[var(--t-accent-ink)] font-bold text-[12px] flex items-center justify-center shrink-0">
-                      GO
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    data-testid="offseason-tab-stay"
+                    onClick={() => setOffseasonTab('STAY')}
+                    className={`min-h-[40px] rounded-xl transition cursor-pointer ${
+                      activeContractTab === 'STAY'
+                        ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-xs'
+                        : 'text-[var(--t-g500)] hover:text-[var(--t-g800)]'
+                    }`}
+                  >
+                    현 소속팀 잔류
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="offseason-tab-trade"
+                    onClick={() => setOffseasonTab('TRADE')}
+                    className={`min-h-[40px] rounded-xl transition cursor-pointer ${
+                      activeContractTab === 'TRADE'
+                        ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-xs'
+                        : 'text-[var(--t-g500)] hover:text-[var(--t-g800)]'
+                    }`}
+                  >
+                    트레이드 요청
+                    {career.tradeRequestedThisYear
+                      ? ' (반려)'
+                      : ` (${tradeOptions.length})`}
+                  </button>
+                </div>
+              )}
 
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[15px] font-bold text-[var(--t-g900)] truncate">
-                        {option.title}
-                      </span>
-                      {option.locked && (
-                        <Lock className="w-3.5 h-3.5 text-[var(--t-g400)] shrink-0" />
-                      )}
+              {activeContractTab === 'STAY' ? (
+                <div
+                  data-testid="offseason-stay-panel"
+                  className="space-y-3"
+                >
+                  <div className="p-4 rounded-2xl bg-[var(--t-g100)] space-y-3">
+                    <div className="flex items-center gap-3">
+                      <TeamEmblem team={career.team} size="md" />
+                      <div className="min-w-0 flex-1">
+                        <span className="block text-[11px] font-bold text-[var(--t-accent-ink)]">
+                          기존 계약 유지 · 재계약 없음
+                        </span>
+                        <span className="block text-[16px] font-bold text-[var(--t-g900)] truncate">
+                          {career.team.name}
+                        </span>
+                        <span className="block text-[12px] text-[var(--t-g600)] tabular-nums mt-0.5">
+                          연 {formatCurrencyDetailed(career.annualSalary)} · 잔여{' '}
+                          {career.contractYearsLeft}년 ·{' '}
+                          {stayOption.promisedRoleLabel || '로테이션'}
+                        </span>
+                      </div>
                     </div>
-                    <p className="text-[12px] text-[var(--t-g500)] truncate tabular-nums">
-                      {dirLabel} · {roleText} · {salaryText}
+
+                    <p className="text-[12px] text-[var(--t-g600)] leading-relaxed">
+                      남은 계약 기간 동안 타 구단 FA 협상 없이 기존 조건으로 다음
+                      시즌을 이어갑니다.
                     </p>
+
+                    <button
+                      type="button"
+                      data-testid="confirm-stay-contract-btn"
+                      onClick={() => {
+                        setOffseasonTab('STAY');
+                        selectOffseasonOption(stayOption);
+                      }}
+                      className="t-cta w-full"
+                    >
+                      잔여 계약으로 다음 시즌 시작 (잔여 {career.contractYearsLeft}년)
+                    </button>
                   </div>
 
-                  <ChevronRight className="w-4 h-4 text-[var(--t-g400)] shrink-0" />
-                </button>
-              );
-            })}
-          </div>
+                  {auxiliaryContractOptions.length > 0 && (
+                    <div className="divide-y divide-[var(--t-g100)] border-t border-[var(--t-g100)] pt-1 -mx-2">
+                      {auxiliaryContractOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => selectOffseasonOption(option)}
+                          className="w-full min-h-[64px] px-2.5 py-2.5 rounded-2xl text-left flex items-center justify-between gap-3 hover:bg-[var(--t-g50)] cursor-pointer t-tap"
+                        >
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <span className="block text-[14px] font-bold text-[var(--t-g900)] truncate">
+                              {option.title}
+                            </span>
+                            <span className="block text-[12px] text-[var(--t-g500)] truncate">
+                              {option.subtitle}
+                            </span>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-[var(--t-g400)] shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  data-testid="offseason-trade-panel"
+                  className="space-y-3"
+                >
+                  <p className="text-[12px] text-[var(--t-g600)] bg-[var(--t-g100)] rounded-2xl px-3.5 py-2.5 leading-relaxed">
+                    {career.tradeRequestedThisYear
+                      ? '이번 오프시즌 트레이드 요청이 프런트에 의해 반려되었습니다. 현 소속팀 잔류 탭에서 기존 계약으로 시즌을 시작해 주세요.'
+                      : '원하는 행선지 구단을 선택해 프런트에 트레이드를 요청합니다. 구단 심사 결과에 따라 성사되거나 반려될 수 있습니다 (오프시즌 1회).'}
+                  </p>
+
+                  <div className="divide-y divide-[var(--t-g100)] -mx-2">
+                    {tradeOptions.map((option: OffseasonOption) => {
+                      const dirLabel = option.targetTeam
+                        ? getTeamDirectionLabel(
+                            option.targetTeam.direction,
+                            option.targetTeam.rating
+                          )
+                        : option.badgeText;
+                      const roleText = option.promisedRoleLabel || '로테이션';
+                      const chanceText =
+                        option.tradeAcceptChancePct !== undefined
+                          ? `승인 예상 ${option.tradeAcceptChancePct}%`
+                          : '구단 심사';
+
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          disabled={option.locked}
+                          onClick={() => selectOffseasonOption(option)}
+                          className={`w-full min-h-[72px] px-2.5 py-3 rounded-2xl text-left flex items-center gap-3 t-tap ${
+                            option.locked
+                              ? 'opacity-45 cursor-not-allowed'
+                              : 'hover:bg-[var(--t-g50)] cursor-pointer'
+                          }`}
+                        >
+                          {option.targetTeam ? (
+                            <TeamEmblem team={option.targetTeam} size="sm" />
+                          ) : (
+                            <div className="w-9 h-9 rounded-full bg-[var(--t-accent-soft)] text-[var(--t-accent-ink)] font-bold text-[12px] flex items-center justify-center shrink-0">
+                              TR
+                            </div>
+                          )}
+
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[15px] font-bold text-[var(--t-g900)] truncate">
+                                {option.title}
+                              </span>
+                              {option.locked && (
+                                <Lock className="w-3.5 h-3.5 text-[var(--t-g400)] shrink-0" />
+                              )}
+                            </div>
+                            <p className="text-[12px] text-[var(--t-g500)] truncate tabular-nums">
+                              {dirLabel} · {roleText} · {chanceText}
+                            </p>
+                          </div>
+
+                          <ChevronRight className="w-4 h-4 text-[var(--t-g400)] shrink-0" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* 계약 만료(FA) / 아마추어 / 투웨이 / 상무: 오퍼 리스트 행 */
+            <div className="divide-y divide-[var(--t-g100)] -mx-2">
+              {career.offseasonOptions.map((option: OffseasonOption) => {
+                const dirLabel = option.targetTeam
+                  ? getTeamDirectionLabel(
+                      option.targetTeam.direction,
+                      option.targetTeam.rating
+                    )
+                  : option.badgeText;
+                const roleText = option.promisedRoleLabel || '로테이션';
+                const salaryText = formatSalaryOffer(
+                  option.annualSalary,
+                  option.contractYears,
+                  { isExistingContract: option.isExistingContract }
+                );
+
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    disabled={option.locked}
+                    onClick={() => selectOffseasonOption(option)}
+                    className={`w-full min-h-[72px] px-2.5 py-3 rounded-2xl text-left flex items-center gap-3 t-tap ${
+                      option.locked
+                        ? 'opacity-45 cursor-not-allowed'
+                        : 'hover:bg-[var(--t-g50)] cursor-pointer'
+                    }`}
+                  >
+                    {option.targetTeam ? (
+                      <TeamEmblem team={option.targetTeam} size="sm" />
+                    ) : (
+                      <div className="w-9 h-9 rounded-full bg-[var(--t-accent-soft)] text-[var(--t-accent-ink)] font-bold text-[12px] flex items-center justify-center shrink-0">
+                        GO
+                      </div>
+                    )}
+
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[15px] font-bold text-[var(--t-g900)] truncate">
+                          {option.title}
+                        </span>
+                        {option.locked && (
+                          <Lock className="w-3.5 h-3.5 text-[var(--t-g400)] shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-[12px] text-[var(--t-g500)] truncate tabular-nums">
+                        {dirLabel} · {roleText} · {salaryText}
+                      </p>
+                    </div>
+
+                    <ChevronRight className="w-4 h-4 text-[var(--t-g400)] shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
 
@@ -503,6 +835,90 @@ export function SeasonTab() {
         </section>
       )}
 
+      {/* 시즌 진행 옵션 바 (빠른 진행 토글) */}
+      {showRegularSeasonDock && (
+        <section className="t-card py-3 px-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Zap
+              className={`w-4 h-4 shrink-0 ${
+                fastSimEnabled ? 'text-[var(--t-accent)]' : 'text-[var(--t-g400)]'
+              }`}
+            />
+            <div className="min-w-0">
+              <span className="block text-[13px] font-bold text-[var(--t-g900)]">
+                빠른 시즌 진행
+              </span>
+              <span className="block text-[11px] text-[var(--t-g500)] truncate">
+                중간 분기점만 정지하고 대기 연출 생략
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={fastSimEnabled}
+            data-testid="fast-sim-toggle"
+            onClick={toggleFastSim}
+            className={`min-h-[44px] px-1 flex items-center cursor-pointer shrink-0`}
+            aria-label="빠른 시즌 진행 전환"
+          >
+            <span
+              className={`w-11 h-6 rounded-full transition-colors p-0.5 flex items-center ${
+                fastSimEnabled ? 'bg-[var(--t-accent)] justify-end' : 'bg-[var(--t-g200)] justify-start'
+              }`}
+            >
+              <span className="w-5 h-5 rounded-full bg-white shadow-xs block" />
+            </span>
+          </button>
+        </section>
+      )}
+
+      {/* 역대 리그 기록 추격 카드 */}
+      {featuredChase && seasonPhase !== 'LIVE_FINAL_BROADCAST' && (
+        <section
+          data-testid="record-chase-card"
+          className="t-card space-y-2.5"
+        >
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[12px] font-bold text-[var(--t-accent-ink)]">
+              {leagueInfo.shortName} 역대 기록{' '}
+              {featuredChase.isAlreadyHolder ? '보유 중' : '추격'}
+            </span>
+            <span className="text-[12px] font-bold text-[var(--t-g500)] tabular-nums">
+              {featuredChase.progressPct}%
+            </span>
+          </div>
+
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[15px] font-bold text-[var(--t-g900)] truncate">
+              {featuredChase.entry.label}
+            </span>
+            <span className="text-[13px] font-bold text-[var(--t-g900)] tabular-nums shrink-0">
+              {featuredChase.entry.unit === '점' || featuredChase.entry.unit === '회'
+                ? `${featuredChase.currentValue.toLocaleString()} / ${featuredChase.entry.value.toLocaleString()}${featuredChase.entry.unit}`
+                : `${featuredChase.currentValue.toFixed(1)} / ${featuredChase.entry.value.toFixed(1)} ${featuredChase.entry.unit}`}
+            </span>
+          </div>
+
+          <div className="w-full h-1.5 rounded-full bg-[var(--t-g100)] overflow-hidden">
+            <div
+              style={{ width: `${featuredChase.progressPct}%` }}
+              className={`h-full rounded-full transition-all duration-300 ${
+                featuredChase.isAlreadyHolder
+                  ? 'bg-[var(--t-gold)]'
+                  : 'bg-[var(--t-accent)]'
+              }`}
+            />
+          </div>
+
+          <p className="text-[12px] text-[var(--t-g500)] truncate">
+            {featuredChase.isAlreadyHolder
+              ? `${featuredChase.entry.year}년 수립 · 리그 역대 1위 보유`
+              : `역대 1위 ${featuredChase.entry.holderName} (${featuredChase.entry.teamName}, ${featuredChase.entry.year})`}
+          </p>
+        </section>
+      )}
+
       {/* 역할 보장 위반 시 긴급 트레이드 요청 행 */}
       {career.brokenRolePromise && (
         <section className="t-card flex items-center justify-between gap-3">
@@ -518,7 +934,7 @@ export function SeasonTab() {
             type="button"
             disabled={Boolean(career.tradeRequestedThisYear)}
             onClick={requestTrade}
-            className={`min-h-[40px] px-3.5 rounded-xl text-[13px] font-bold shrink-0 cursor-pointer t-tap ${
+            className={`min-h-[44px] px-4 rounded-xl text-[13px] font-bold shrink-0 cursor-pointer t-tap ${
               career.tradeRequestedThisYear
                 ? 'bg-[var(--t-g100)] text-[var(--t-g400)] cursor-not-allowed'
                 : 'bg-[var(--t-up)] text-white'
@@ -529,7 +945,7 @@ export function SeasonTab() {
         </section>
       )}
 
-      {/* 4. 직전 시즌 요약 + 언론/팬 반응 피드 + MVP/ROY 레이스 */}
+      {/* 4. 직전 시즌 요약 + MVP/ROY 레이스 */}
       {lastSeason ? (
         <>
           <section className="t-card space-y-5">
@@ -577,9 +993,6 @@ export function SeasonTab() {
                 </span>
               </div>
             </div>
-
-            {/* 언론 1면 + 팬 커뮤니티 반응 피드 */}
-            <FanReactionFeed career={career} season={lastSeason} />
 
             {/* 상세 기록 & 리그 순위표 바텀시트 트리거 */}
             <button
@@ -704,7 +1117,7 @@ export function SeasonTab() {
       <Modal
         open={showPersonalCareSheet}
         title="퍼스널 케어 · 에이전시"
-        subtitle={`보유 자산 ${formatUsdAmount(effectiveCash)}`}
+        subtitle={`보유 자산 ${formatCurrencyDetailed(effectiveCash)}`}
         onClose={() => setShowPersonalCareSheet(false)}
         testId="personal-care-desk"
       >
@@ -738,7 +1151,7 @@ export function SeasonTab() {
                   data-testid={`care-btn-${item.id}`}
                   disabled={isPurchased || !allowedInLeague || !canAfford}
                   onClick={() => purchasePersonalCare(item.id)}
-                  className={`min-h-[38px] px-3.5 rounded-xl text-[13px] font-bold whitespace-nowrap shrink-0 cursor-pointer t-tap tabular-nums ${
+                  className={`min-h-[44px] px-4 rounded-xl text-[13px] font-bold whitespace-nowrap shrink-0 cursor-pointer t-tap tabular-nums ${
                     isPurchased
                       ? 'bg-[var(--t-ok-soft)] text-[var(--t-ok)] cursor-default'
                       : !allowedInLeague || !canAfford
@@ -750,7 +1163,7 @@ export function SeasonTab() {
                     ? '적용됨'
                     : !allowedInLeague
                     ? '잠김'
-                    : formatUsdAmount(cost)}
+                    : formatCurrencyDetailed(cost)}
                 </button>
               </div>
             );
@@ -828,7 +1241,7 @@ export function SeasonTab() {
                   <h4 className="text-[14px] font-bold text-[var(--t-g900)]">
                     리그 순위표
                   </h4>
-                  {career.league === 'NBA' && (
+                  {hasConferenceStandings && (
                     <div className="inline-flex rounded-xl bg-[var(--t-g100)] p-0.5 text-[12px] font-semibold">
                       {(
                         [
@@ -866,7 +1279,7 @@ export function SeasonTab() {
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className="w-5 text-center font-bold text-[var(--t-g500)] shrink-0">
-                          {career.league === 'NBA' && standingsConfTab !== 'ALL'
+                          {hasConferenceStandings && standingsConfTab !== 'ALL'
                             ? row.conferenceRank || row.rank
                             : row.rank}
                         </span>
@@ -878,12 +1291,18 @@ export function SeasonTab() {
                         </span>
                         <span
                           className={`text-[11px] font-bold w-8 text-right ${
-                            row.qualifiedPlayoffs
+                            row.playInQualified
+                              ? 'text-[var(--t-gold)]'
+                              : row.qualifiedPlayoffs
                               ? 'text-[var(--t-accent-ink)]'
                               : 'text-[var(--t-g400)]'
                           }`}
                         >
-                          {row.qualifiedPlayoffs ? 'PO' : '-'}
+                          {row.playInQualified
+                            ? 'PI'
+                            : row.qualifiedPlayoffs
+                            ? 'PO'
+                            : '-'}
                         </span>
                       </div>
                     </div>
@@ -944,7 +1363,10 @@ export function SeasonTab() {
                 onClick={batchAdvanceEarlyPlayoffs}
                 className="t-cta"
               >
-                포스트시즌 라운드 진행
+                {bracket?.stageType === 'PLAY_IN_ROUND_1' ||
+                bracket?.stageType === 'PLAY_IN_DECIDER'
+                  ? '플레이인 토너먼트 진행'
+                  : '포스트시즌 라운드 진행'}
               </button>
             )}
           </div>

@@ -13,12 +13,20 @@ import {
 import {
   AGING_RETIREMENT_CONFIG,
   ECONOMY_CONFIG,
+  INTERNATIONAL_TOURNAMENT_CONFIG,
   clampNum,
 } from '../config/balanceConfig';
 import { getTeamById } from '../data/teams';
 import { LEAGUE_CONFIG } from '../data/leagues';
 
-const PRO_LEAGUES: LeagueId[] = ['NBA', 'KBL', 'OVERSEAS', 'GLEAGUE'];
+const PRO_LEAGUES: LeagueId[] = [
+  'NBA',
+  'KBL',
+  'B_LEAGUE',
+  'NBL',
+  'EUROLEAGUE',
+  'GLEAGUE',
+];
 
 export interface AgingCurveOptions {
   growthDna?: GrowthDna;
@@ -186,6 +194,7 @@ export function checkRetirementEligibility(career: CareerState): {
   canDeclareFarewellTour: boolean;
   isOutOfLeague: boolean;
   isMandatoryAge40: boolean;
+  canExtendPast40: boolean;
 } {
   const canRetireVoluntarily =
     career.age >= AGING_RETIREMENT_CONFIG.voluntaryRetireAge ||
@@ -208,6 +217,13 @@ export function checkRetirementEligibility(career: CareerState): {
       ? career.seasonLogs[career.seasonLogs.length - 1]
       : null;
 
+  const hasActiveGuaranteedContract =
+    career.contractYearsLeft > 0 &&
+    career.contractType !== 'TWO_WAY' &&
+    career.contractType !== 'FREE_AGENT' &&
+    career.contractType !== 'AMATEUR' &&
+    career.contractType !== 'MILITARY_SERVICE';
+
   // 고정 OVR 수치 대신 소속 리그 수비 저항(LDR) 대비 경쟁력 상실 및 실전 성적 급락을 유기적으로 판정
   const ovrGapFromLeague = career.ovr - leagueLdr;
   const severeRealGameDecline =
@@ -216,26 +232,44 @@ export function checkRetirementEligibility(career: CareerState): {
     lastLog.mpg < 8.5 &&
     lastLog.rpg + lastLog.apg < 2.8;
 
+  // 보장 다년 계약 중에는 노쇠화로 일방 방출(미계약 은퇴)되지 않음
   const isOutOfLeague =
+    !hasActiveGuaranteedContract &&
     career.age >= AGING_RETIREMENT_CONFIG.outOfLeagueMinAge &&
     ((ovrGapFromLeague <= -12 && (!lastLog || lastLog.ppg < 4.5)) ||
       (ovrGapFromLeague <= -8 && severeRealGameDecline));
 
+  // 만 40세 이후에도 리그 경쟁력을 유지하거나 보장 계약이 남아 있으면 44세까지 현역 연장 허용
+  const maintainsAge40Competitiveness =
+    hasActiveGuaranteedContract ||
+    ovrGapFromLeague >= AGING_RETIREMENT_CONFIG.age40ExtensionMaxLdrGap ||
+    (lastLog !== null &&
+      lastLog.ppg >= AGING_RETIREMENT_CONFIG.age40ExtensionMinPpg &&
+      lastLog.mpg >= AGING_RETIREMENT_CONFIG.age40ExtensionMinMpg);
+
+  const canExtendPast40 =
+    career.age < AGING_RETIREMENT_CONFIG.hardRetireAge &&
+    maintainsAge40Competitiveness &&
+    !isOutOfLeague;
+
   const isMandatoryAge40 =
-    career.age >= AGING_RETIREMENT_CONFIG.mandatoryRetireAge;
+    career.age >= AGING_RETIREMENT_CONFIG.hardRetireAge ||
+    (career.age >= AGING_RETIREMENT_CONFIG.mandatoryRetireAge &&
+      !canExtendPast40);
 
   return {
     canRetireVoluntarily,
     canDeclareFarewellTour,
     isOutOfLeague,
     isMandatoryAge40,
+    canExtendPast40,
   };
 }
 
 /**
  * 6. 영구 결번(Jersey Retirement) 기준 대폭 상향 및 프로 한정 & 6단계 레거시 등급 심사
  * - 대학/아마추어 팀(HIGH_SCHOOL, U_LEAGUE, NCAA) 및 상무는 영구 결번 심사 대상에서 완전 제외
- * - 오직 프로 구단(NBA, KBL, OVERSEAS, GLEAGUE)에서만 심사하며, 해당 단일 프로 구단(honoredTeam) 소속 누적 기록만 기준:
+ * - 오직 프로 구단(NBA, KBL, B_LEAGUE, NBL, EUROLEAGUE, GLEAGUE)에서만 심사하며, 해당 단일 프로 구단(honoredTeam) 소속 누적 기록만 기준:
  *   1) 프랜차이즈 헌신 (필수): 단일 프로 구단 최소 7시즌 이상 활약 AND 해당 구단 누적 득점 10,000점 이상 (KBL/해외/G리그는 6,000점 이상)
  *   2) 압도적 구단 업적 (다음 중 1개 이상 충족):
  *      - 해당 구단 소속 정규리그 MVP 2회 이상
@@ -341,10 +375,23 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
 
   const jerseyRetired = meetsCommitment && meetsDominantAchievement;
 
-  // 레거시 점수 계산 (신규 어워드 파이널 MVP, DPOY, 식스맨, MIP, 올-리그 팀 및 시그니처 스니커즈 마케팅 보너스 모두 반영)
+  // 레거시 점수 계산 (신규 어워드 파이널 MVP, DPOY, 식스맨, MIP, 올-리그 팀, 국제대회 메달/MVP 및 마케팅 보너스 반영)
   const marketingLegacyBonus =
     (career.fanPopularity || 0) * 10 +
     (career.purchasedPersonalCareCount || 0) * 80;
+  const internationalLegacyBonus = (career.internationalHistory || []).reduce(
+    (sum, rec) => {
+      const pts = INTERNATIONAL_TOURNAMENT_CONFIG[rec.tournamentType]?.legacyPoints;
+      if (!pts) return sum;
+      let delta = 0;
+      if (rec.result === 'GOLD') delta += pts.gold;
+      else if (rec.result === 'SILVER') delta += pts.silver;
+      else if (rec.result === 'BRONZE') delta += pts.bronze;
+      if (rec.wonMvp) delta += pts.mvp;
+      return sum + delta;
+    },
+    0
+  );
   const legacyScore = Math.round(
     career.totals.points * 0.12 +
       career.totals.nbaPoints * 0.18 +
@@ -362,14 +409,15 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
       career.totals.nbaAllStars * 300 +
       (career.totals.allStars - career.totals.nbaAllStars) * 100 +
       career.peakOvr * 15 +
-      marketingLegacyBonus
+      marketingLegacyBonus +
+      internationalLegacyBonus
   );
 
   let tierId: LegacyTierId = 'COURT_CHALLENGER';
-  let tierTitle = '🌱 코트의 도전자';
-  let tierEmoji = '🌱';
+  let tierTitle = '코트의 도전자';
+  const tierEmoji = '';
   let summaryComment =
-    '비록 화려한 스포트라이트는 짧았지만, 벤치 끝자리에서 흘린 땀방울만큼은 누구보다 진실했어요.';
+    '벤치에서 출발해 끝까지 코트를 지키며 자신의 커리어를 완주했습니다.';
 
   const finalsMvps = career.totals.finalsMvps || 0;
 
@@ -381,10 +429,9 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     finalsMvps >= goatReq.minFinalsMvps
   ) {
     tierId = 'GOAT';
-    tierTitle = '🐐 GOAT (역대 최고 농구 황제)';
-    tierEmoji = '🐐';
+    tierTitle = '역대 최고 선수 (GOAT)';
     summaryComment =
-      '농구 역사의 모든 페이지를 새로 써 내려간 위대한 전설이에요! 당신의 이름은 영원히 코트 위에 살아 숨 쉴 거예요.';
+      'NBA MVP, 파이널 우승, 파이널 MVP를 모두 다수 석권하며 농구 역사상 최고 반열에 이름을 올렸습니다.';
   } else if (
     career.totals.nbaMvps >= 1 ||
     (career.totals.nbaChampionships >= 2 && career.totals.nbaAllStars >= 4) ||
@@ -392,29 +439,26 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     career.totals.nbaPoints >= 15000
   ) {
     tierId = 'FIRST_BALLOT_HOF';
-    tierTitle = '🏛️ 네이스미스 명예의 전당 퍼스트 발롯';
-    tierEmoji = '🏛️';
+    tierTitle = '명예의 전당 퍼스트 발롯';
     summaryComment =
-      '세계 최고의 무대 NBA를 지배하며 시대를 풍미한 슈퍼스타예요! 첫 투표 만에 만장일치급으로 명예의 전당에 헌액되었어요.';
+      'NBA 무대에서 수년간 리그 최정상급 기량을 증명하며 첫 투표 만에 명예의 전당 헌액 자격을 확보했습니다.';
   } else if (
     career.totals.nbaAllStars >= 1 ||
     career.totals.nbaChampionships >= 1 ||
     career.totals.nbaPoints >= 6000
   ) {
     tierId = 'NBA_ALL_STAR';
-    tierTitle = '⭐ 자랑스러운 NBA 올스타 & 챔피언';
-    tierEmoji = '⭐';
+    tierTitle = 'NBA 올스타 · 챔피언';
     summaryComment =
-      '바늘구멍 같은 NBA 무대에서 올스타·챔피언 반열에 올라 세계 최정상 선수들과 어깨를 나란히 한 자랑스러운 커리어예요!';
+      'NBA 주축 선수로 자리 잡아 올스타 선정과 우승 경쟁 무대에서 뚜렷한 족적을 남겼습니다.';
   } else if (
     career.totals.nbaGp >= 120 ||
     career.totals.nbaPoints >= 1500
   ) {
     tierId = 'NBA_VETERAN';
-    tierTitle = '🏀 당당한 NBA 정식 리거 & 베테랑';
-    tierEmoji = '🏀';
+    tierTitle = 'NBA 정식 리거';
     summaryComment =
-      '세계 최고의 농구 무대 NBA 코트를 수년간 누비며 값진 족적을 남긴 정식 빅리거예요!';
+      '치열한 NBA 로스터 경쟁을 뚫고 다년간 정식 로테이션 멤버로 활약했습니다.';
   } else if (
     career.totals.championships >= 2 ||
     career.totals.mvps >= 1 ||
@@ -422,16 +466,14 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     legacyScore >= 2600
   ) {
     tierId = 'ASIA_KBL_LEGEND';
-    tierTitle = '👑 KBL & 아시아 올타임 레전드';
-    tierEmoji = '👑';
+    tierTitle = 'KBL · 아시아 최정상급 선수';
     summaryComment =
-      '한국과 아시아 농구 코트를 평정하며 수많은 팬들에게 잊지 못할 명승부를 선물한 불멸의 레전드예요!';
+      'KBL과 아시아 프로 무대에서 리그를 대표하는 간판 선수로 오랜 기간 정상급 성적을 남겼습니다.';
   } else if (career.seasonsPlayed >= 6 || career.totals.points >= 2200) {
     tierId = 'PRO_VETERAN';
-    tierTitle = '💼 든든한 프로 베테랑';
-    tierEmoji = '💼';
+    tierTitle = '프로 베테랑';
     summaryComment =
-      '오랜 세월 프로 코트를 누비며 팀의 소금 같은 역할을 해낸 모범적인 베테랑 선수로 기억될 거예요.';
+      '여러 시즌 동안 안정적인 경기력과 팀 기여도를 보여주며 신뢰받는 프로 베테랑으로 경력을 마쳤습니다.';
   }
 
   return {
@@ -456,6 +498,18 @@ export function buildHallOfFameEntry(
   evaluation: LegacyEvaluation
 ): HallOfFameEntry {
   const gp = Math.max(1, career.totals.gp);
+  const nbaFinalsMvps = career.seasonLogs.filter(
+    (l) => l.league === 'NBA' && l.wonFinalsMvp
+  ).length;
+  const kblChampionships = career.seasonLogs.filter(
+    (l) => l.league === 'KBL' && l.wonChampionship
+  ).length;
+  const kblMvps = career.seasonLogs.filter(
+    (l) => l.league === 'KBL' && l.wonMvp
+  ).length;
+  const kblFinalsMvps = career.seasonLogs.filter(
+    (l) => l.league === 'KBL' && l.wonFinalsMvp
+  ).length;
   return {
     id: `HOF_${career.id}_${Date.now()}`,
     inductedAt: new Date().toISOString(),
@@ -488,12 +542,20 @@ export function buildHallOfFameEntry(
       mvps: career.totals.mvps,
       nbaMvps: career.totals.nbaMvps,
       finalsMvps: career.totals.finalsMvps || 0,
+      nbaFinalsMvps,
+      kblChampionships,
+      kblMvps,
+      kblFinalsMvps,
       dpoys: career.totals.dpoys || 0,
       sixthManAwards: career.totals.sixthManAwards || 0,
       mips: career.totals.mips || 0,
       allLeagueSelections: career.totals.allLeagueSelections || 0,
       allStars: career.totals.allStars,
       nbaAllStars: career.totals.nbaAllStars,
+      internationalMedals: career.totals.internationalMedals
+        ? { ...career.totals.internationalMedals }
+        : undefined,
+      internationalMvps: career.totals.internationalMvps || 0,
     },
     careerAverages: {
       ppg: Number((career.totals.points / gp).toFixed(1)),

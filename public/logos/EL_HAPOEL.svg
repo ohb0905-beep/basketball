@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <polygon points="64,8 118,64 64,120 10,64" fill="#D6001C" stroke="#1E293B" stroke-width="5"/>
+  <line x1="22" y1="64" x2="106" y2="64" stroke="#1E293B" stroke-width="2" opacity="0.28"/>
+  <text x="64" y="42" text-anchor="middle" fill="#1E293B" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="800" letter-spacing="1.2">EUROLEAGUE</text>
+  <text x="64" y="75" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="900" letter-spacing="0.5">HTA</text>
+  <text x="64" y="96" text-anchor="middle" fill="#FFFFFF" opacity="0.85" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="0.8">TEL AVIV</text>
+</svg>

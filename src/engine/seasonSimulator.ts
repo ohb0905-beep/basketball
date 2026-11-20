@@ -26,17 +26,20 @@ import {
   PlayerTraitId,
   PlaystyleArchetype,
   Position,
+  RelationshipMetrics,
   RivalPlayer,
   RolePromiseType,
   SeasonBoxScore,
   StandingEntry,
   StatDelta,
+  TeamInfo,
   TrainingFocus,
 } from '../types/game';
 import {
   generateLeagueStandings,
   getPlayoffCutoffByLeague,
 } from './playoffEngine';
+import { getEffectiveRelationships } from './progressionEngine';
 import { applyAgingCurve } from './retirementEngine';
 import {
   calculateBiomechanicalProfile,
@@ -63,8 +66,10 @@ export function getLeagueBaselineTeamRating(
 
 const AWARD_LEAGUE_PRIORITY: LeagueId[] = [
   'NBA',
+  'EUROLEAGUE',
+  'NBL',
+  'B_LEAGUE',
   'KBL',
-  'OVERSEAS',
   'GLEAGUE',
   'NCAA',
   'U_LEAGUE',
@@ -151,8 +156,12 @@ export function getContractDefaultSalary(
       return 120000 + Math.max(0, ovr - 65) * 8000;
     case 'KBL_MAX':
       return 380000 + Math.max(0, ovr - 72) * 24000;
-    case 'OVERSEAS_CONTRACT':
-      return 450000 + Math.max(0, ovr - 70) * 38000;
+    case 'BLEAGUE_CONTRACT':
+      return 240000 + Math.max(0, ovr - 67) * 26000;
+    case 'NBL_CONTRACT':
+      return 320000 + Math.max(0, ovr - 69) * 32000;
+    case 'EUROLEAGUE_CONTRACT':
+      return 950000 + Math.max(0, ovr - 75) * 140000;
     case 'GLEAGUE_EXHIBIT':
     case 'SUMMER_LEAGUE_INVITE':
       return 45000;
@@ -167,6 +176,177 @@ export function getContractDefaultSalary(
     default:
       return 0;
   }
+}
+
+const PRO_LEAGUE_SET: ReadonlySet<LeagueId> = new Set([
+  'NBA',
+  'EUROLEAGUE',
+  'NBL',
+  'B_LEAGUE',
+  'KBL',
+  'GLEAGUE',
+]);
+
+/**
+ * 상무 전역 후 복귀 리그와 전역 시점 OVR에 맞는 정확한 계약 유형 산출
+ * (NBA/G리그 복귀 시 B.리그 계약으로 잘못 매핑되거나 벤치급 KBL 선수가 무조건 KBL_MAX가 되는 버그 방지)
+ */
+export function getSangmuDischargeContractType(
+  returnLeague: LeagueId,
+  ovr: number
+): ContractType {
+  switch (returnLeague) {
+    case 'NBA':
+      return ovr >= 86
+        ? 'NBA_MAX'
+        : ovr >= 75
+        ? 'NBA_STANDARD'
+        : 'NBA_VET_MIN';
+    case 'EUROLEAGUE':
+      return 'EUROLEAGUE_CONTRACT';
+    case 'NBL':
+      return 'NBL_CONTRACT';
+    case 'B_LEAGUE':
+      return 'BLEAGUE_CONTRACT';
+    case 'GLEAGUE':
+      return 'GLEAGUE_EXHIBIT';
+    case 'KBL':
+    default:
+      return ovr >= 76 ? 'KBL_MAX' : ovr >= 66 ? 'KBL_VET' : 'KBL_ROOKIE';
+  }
+}
+
+/**
+ * 리그별 현실 신인왕(ROY) 자격 판정 (타 프로 리그 이적 베테랑의 신인왕 중복 수상 방지)
+ * - 아마추어(고교·대학): 해당 리그 첫 시즌
+ * - NBA: NBA 첫 시즌(현실 규정상 해외 프로 경력자도 NBA 루키 자격 보유)
+ * - 유로리그(Rising Star): 유로리그 첫 시즌 + 만 22세 이하
+ * - KBL / B.리그 / NBL / G리그: 타 프로 리그 경력이 없는 순수 프로 1년 차 + 만 24세 이하
+ */
+export function isEligibleForLeagueRookieAward(
+  career: Pick<CareerState, 'league' | 'age' | 'seasonLogs'>
+): boolean {
+  const logs = career.seasonLogs || [];
+  const playedInCurrentLeague = logs.some((l) => l.league === career.league);
+  if (playedInCurrentLeague) return false;
+
+  if (!PRO_LEAGUE_SET.has(career.league)) {
+    return true;
+  }
+
+  if (career.league === 'NBA') {
+    return true;
+  }
+
+  if (career.league === 'EUROLEAGUE') {
+    return career.age <= 22;
+  }
+
+  const priorProSeasons = logs.filter((l) => PRO_LEAGUE_SET.has(l.league)).length;
+  return priorProSeasons === 0 && career.age <= 24;
+}
+
+const FIXED_STATUTORY_CONTRACTS: ReadonlySet<ContractType> = new Set([
+  'AMATEUR',
+  'MILITARY_SERVICE',
+  'GLEAGUE_EXHIBIT',
+  'SUMMER_LEAGUE_INVITE',
+  'TWO_WAY',
+  'NBA_VET_MIN',
+]);
+
+function hashTeamIdSpread(teamId: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < teamId.length; i++) {
+    hash ^= teamId.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const normalized = ((hash >>> 0) % 1000) / 1000; // 0 ~ 0.999
+  return (normalized - 0.45) * 0.09; // -0.0405 ~ +0.0495
+}
+
+/**
+ * 구단별 차등 연봉 산출 공식 (구단 기조 · 약속 역할 · 스카우팅 관심도/포지션 적합도 · 재계약 보너스 반영)
+ * - 법정 고정 계약(TWO_WAY, NBA_VET_MIN, GLEAGUE_EXHIBIT, SUMMER_LEAGUE_INVITE, MILITARY_SERVICE, AMATEUR)은 기준 연봉 유지
+ */
+export function calculateTeamContractOfferSalary(params: {
+  contractType: ContractType;
+  ovr: number;
+  team: TeamInfo;
+  promisedRole: RolePromiseType;
+  scoutingScore?: number;
+  isResigning?: boolean;
+  coachTrust?: number;
+  primaryPos?: Position;
+  secondaryPos?: Position | null;
+  rng?: () => number;
+}): number {
+  const {
+    contractType,
+    ovr,
+    team,
+    promisedRole,
+    scoutingScore = 72,
+    isResigning = false,
+    coachTrust = 60,
+    primaryPos,
+    secondaryPos,
+    rng,
+  } = params;
+
+  const base = getContractDefaultSalary(contractType, ovr);
+  if (base <= 0 || FIXED_STATUTORY_CONTRACTS.has(contractType)) {
+    return base;
+  }
+
+  // 1) 구단 기조 보정 (리빌딩 구단은 프리미엄, 우승후보는 페이컷/샐러리캡 압박)
+  const dir = team.direction || 'PLAYOFF_HUNT';
+  const dirMult =
+    dir === 'REBUILDING' ? 1.09 : dir === 'CONTENDER' ? 0.91 : 1.01;
+
+  // 2) 약속 역할 보정
+  const roleMult =
+    promisedRole === 'ACE_FIRST_OPTION'
+      ? 1.13
+      : promisedRole === 'STARTER_GUARANTEE'
+      ? 1.03
+      : promisedRole === 'PROSPECT_DEVELOPMENT'
+      ? 0.97
+      : promisedRole === 'SIXTH_MAN_CORE'
+      ? 0.89
+      : 0.82;
+
+  // 3) 구단 스카우팅 관심도 & 포지션 니즈 보정
+  const interestDelta = clampNum((scoutingScore - 70) * 0.0055, -0.07, 0.13);
+  const needs = team.neededPositions || [];
+  const needDelta =
+    primaryPos && needs.includes(primaryPos)
+      ? 0.045
+      : secondaryPos && needs.includes(secondaryPos)
+      ? 0.02
+      : 0;
+  const fitMult = 1 + interestDelta + needDelta;
+
+  // 4) 원소속팀 재계약(버드 라이츠/프랜차이즈 로열티) 보너스
+  const resignMult = isResigning
+    ? 1.05 + clampNum((coachTrust - 55) * 0.0016, -0.02, 0.06)
+    : 1.0;
+
+  // 5) 구단 고유 마켓/협상 편차 (동일 기조·역할이어도 구단별 제시액이 구분되도록)
+  const teamSignature = hashTeamIdSpread(team.id);
+  const randJitter = rng ? (rng() - 0.5) * 0.05 : 0;
+  const marketMult = 1 + teamSignature + randJitter;
+
+  const raw = base * dirMult * roleMult * fitMult * resignMult * marketMult;
+
+  const step =
+    contractType === 'NBA_MAX' || contractType === 'NBA_STANDARD'
+      ? 50000
+      : contractType === 'EUROLEAGUE_CONTRACT'
+      ? 25000
+      : 5000;
+
+  return Math.max(step, Math.round(raw / step) * step);
 }
 
 /**
@@ -839,6 +1019,12 @@ export function calculateOrganicTrustDelta(params: {
   let roleContribution = 0;
   if (playstyle === 'PLAYMAKER' || pos === 'PG') {
     roleContribution = ast36 * 1.45 + pts36 * 0.42 + stk36 * 1.65 + reb36 * 0.35;
+  } else if (playstyle === 'STRETCH_BIG') {
+    roleContribution =
+      reb36 * 0.9 + stk36 * 1.7 + (tpPct - 33.5) * 0.7 + pts36 * 0.5 + ast36 * 0.55;
+  } else if (playstyle === 'POST_SCORER') {
+    roleContribution =
+      pts36 * 0.56 + reb36 * 1.05 + stk36 * 1.6 + (fgPct - 46.0) * 0.5 + ast36 * 0.5;
   } else if (playstyle === 'RIM_PROTECTOR' || pos === 'C' || pos === 'PF') {
     roleContribution = reb36 * 1.2 + stk36 * 2.25 + pts36 * 0.42 + ast36 * 0.65;
   } else if (playstyle === 'THREE_AND_D') {
@@ -973,14 +1159,12 @@ export function evaluateFluidSeasonAwards(params: {
     currImpact - prevImpact >= 5.2 &&
     currImpact / Math.max(6, prevImpact) >= 1.28;
 
-  const hadPreviousSeasonInLeague = career.seasonLogs.some(
-    (l) => l.league === career.league
-  );
+  const isRookieEligible = isEligibleForLeagueRookieAward(career);
   // 신인왕: 득점 단일 컷 대신 올라운드 공헌도(득점+리바+어시+수비) 통합 평가 (패스형 PG/수비형 빅맨도 공정 수상)
   const royAllAroundIndex = ppg * 1.0 + rpg * 0.72 + apg * 0.92 + (spg + bpg) * 2.0;
   const dynamicRoyBar = (16.5 + ldrScale * 5.2) * seasonPaceFactor;
   const wonRookieOfYear =
-    !hadPreviousSeasonInLeague &&
+    isRookieEligible &&
     eligibleForMajorAwards &&
     royAllAroundIndex >= dynamicRoyBar &&
     mpg >= AWARD_VOTING_CONFIG.minMpgForMajorAward;
@@ -1039,7 +1223,9 @@ export function checkPotentialBreakthrough(params: {
   const isProLeague =
     career.league === 'NBA' ||
     career.league === 'KBL' ||
-    career.league === 'OVERSEAS' ||
+    career.league === 'B_LEAGUE' ||
+    career.league === 'NBL' ||
+    career.league === 'EUROLEAGUE' ||
     career.league === 'GLEAGUE';
 
   if (
@@ -1104,6 +1290,7 @@ export interface SimulatedSeasonResult {
   newlyAcquiredTraitNames: string[];
   updatedRivals: RivalPlayer[];
   brokenRolePromise: boolean;
+  nextRelationships: RelationshipMetrics;
 }
 
 /**
@@ -1213,7 +1400,12 @@ export function simulateSeason(
     0.2,
     Math.min(
       3.1,
-      Number(((mpg / 36) * 1.55 * defEdge + (rng() * 0.3 - 0.15)).toFixed(1))
+      Number(
+        (
+          (mpg / 36) * 1.55 * defEdge +
+          (rng() * 0.3 - 0.15)
+        ).toFixed(1)
+      )
     )
   );
   const posBlkMult =
@@ -1237,7 +1429,10 @@ export function simulateSeason(
       31.5,
       Math.min(
         64.5,
-        42.5 + (offEdge - 1.0) * 11.5 - mismatch.fgPctPenalty + rng() * 3.0
+        42.5 +
+          (offEdge - 1.0) * 11.5 -
+          mismatch.fgPctPenalty +
+          rng() * 3.0
       )
     ).toFixed(1)
   );
@@ -1255,6 +1450,41 @@ export function simulateSeason(
       )
     ).toFixed(1)
   );
+
+  // 포지션·플레이성향·외곽 능력치 기반 경기당 3점슛 시도 수(tpa) 산출
+  const posBaseTpa36 =
+    career.primaryPos === 'C'
+      ? career.playstyle === 'STRETCH_BIG'
+        ? 4.2
+        : career.stats.out >= 74
+        ? 3.0
+        : career.stats.out >= 64
+        ? 1.2
+        : 0.3
+      : career.primaryPos === 'PF'
+      ? career.playstyle === 'STRETCH_BIG'
+        ? 5.0
+        : career.stats.out >= 70
+        ? 3.4
+        : 1.5
+      : career.primaryPos === 'SG'
+      ? 6.4
+      : career.primaryPos === 'PG'
+      ? 5.6
+      : 5.2;
+  const styleTpaBonus =
+    career.playstyle === 'THREE_AND_D' || career.playstyle === 'STRETCH_BIG'
+      ? 1.1
+      : career.playstyle === 'POST_SCORER' || career.playstyle === 'RIM_PROTECTOR'
+      ? -0.9
+      : 0;
+  const rawTpa =
+    (mpg / 36) *
+    Math.max(
+      0.1,
+      posBaseTpa36 + (career.stats.out - 68) * 0.11 + styleTpaBonus + (rng() * 1.0 - 0.5)
+    );
+  const tpa = Number(clampNum(rawTpa, 0.1, 12.5).toFixed(1));
 
   const burstFactor = 1.62 + rng() * 0.52;
   const singleGameHighPts = Math.max(
@@ -1310,6 +1540,7 @@ export function simulateSeason(
   const teamRank = myStanding ? myStanding.rank : 1;
   const totalLeagueTeams = standings.length;
   const qualifiedPlayoffs = Boolean(myStanding?.qualifiedPlayoffs);
+  const playInQualified = Boolean(myStanding?.playInQualified);
 
   // 유동적 정규시즌 수상 판정 (우승/파이널 MVP는 절대 선반영하지 않음)
   const awards = evaluateFluidSeasonAwards({
@@ -1326,8 +1557,12 @@ export function simulateSeason(
     rng,
   });
 
-  // 정규시즌 종료 시점에는 오직 'PO 진출' 또는 'PO 탈락'만 기록 (포스트시즌 결과 스포일러 원천 차단!)
-  const playoffResult = qualifiedPlayoffs ? 'PO 진출' : 'PO 탈락';
+  // 정규시즌 종료 시점에는 오직 'PO 진출', '플레이인 진출', 또는 'PO 탈락'만 기록 (포스트시즌 결과 스포일러 원천 차단!)
+  const playoffResult = playInQualified
+    ? '플레이인 진출'
+    : qualifiedPlayoffs
+    ? 'PO 진출'
+    : 'PO 탈락';
 
   const salaryEarned =
     career.annualSalary > 0
@@ -1357,8 +1592,12 @@ export function simulateSeason(
   const headline = generateSeasonHeadline(headlineCtx);
   const narrativeLog = generateSeasonNarrativeLogs(headlineCtx, FAREWELL_TOUR_LOGS);
 
+  const hasConferenceStandings =
+    career.league === 'NBA' ||
+    career.league === 'GLEAGUE' ||
+    career.league === 'B_LEAGUE';
   const rankDisplay =
-    career.league === 'NBA' && myStanding?.conference
+    hasConferenceStandings && myStanding?.conference
       ? `${myStanding.conference === 'EAST' ? '동부' : '서부'} ${
           myStanding.conferenceRank ?? teamRank
         }위 (전체 ${teamRank}위)`
@@ -1445,6 +1684,7 @@ export function simulateSeason(
     bpg,
     fgPct,
     tpPct,
+    tpa,
     wins,
     losses,
     teamRank,
@@ -1478,15 +1718,13 @@ export function simulateSeason(
   }
 
   // 🏆 통합 MVP & 신인왕(ROY) 투표 레이스 TOP 5 보드 (단일 공식 · 점수 조작 0% · 정직한 순위 반영)
-  const hadPreviousSeasonInLeague = career.seasonLogs.some(
-    (l) => l.league === career.league
-  );
+  const isRookieSeasonEligible = isEligibleForLeagueRookieAward(career);
   const awardRaces = buildAwardRaceTop5({
     career,
     boxScore,
     standings,
     updatedRivals,
-    isRookieSeason: !hadPreviousSeasonInLeague,
+    isRookieSeason: isRookieSeasonEligible,
     rng,
   });
 
@@ -1499,9 +1737,12 @@ export function simulateSeason(
     boxScore.allLeagueTeam = 1;
     awards.allLeagueTeam = 1;
   }
-  if (!hadPreviousSeasonInLeague) {
+  if (isRookieSeasonEligible) {
     boxScore.wonRookieOfYear = awardRaces.playerWonRoy;
     awards.wonRookieOfYear = awardRaces.playerWonRoy;
+  } else {
+    boxScore.wonRookieOfYear = false;
+    awards.wonRookieOfYear = false;
   }
 
   boxScore.mvpRace = awardRaces.mvpRace;
@@ -1590,8 +1831,29 @@ export function simulateSeason(
     career.secondaryPos,
     career.growthDna,
     career.playstyle,
-    nextTraits
+    nextTraits,
+    career.primaryPos
   );
+
+  // 4축 관계도 자연 갱신
+  const prevRelationships = getEffectiveRelationships(career);
+  const lockerDelta =
+    (winRate >= 0.58 ? 3 : winRate < 0.36 ? -2 : 1) +
+    (apg >= 6.0 ? 2 : 0) +
+    (awards.wonSixthMan ? 3 : 0);
+  const frontOfficeDelta =
+    (qualifiedPlayoffs ? 3 : -1) +
+    (awards.wonMvp || awards.allStarSelected ? 4 : 0) -
+    (brokenRolePromise ? 6 : 0);
+  const mediaDelta =
+    (awards.wonMvp ? 8 : awards.allStarSelected ? 5 : ppg >= 20 ? 3 : 1) +
+    ((career.activePersonalCare || []).includes('SIGNATURE_SNEAKER_MARKETING') ? 4 : 0);
+  const nextRelationships: RelationshipMetrics = {
+    coachTrust: nextCoachTrust,
+    lockerRoom: clampNum(prevRelationships.lockerRoom + lockerDelta, 15, 100),
+    frontOffice: clampNum(prevRelationships.frontOffice + frontOfficeDelta, 15, 100),
+    mediaFan: clampNum(prevRelationships.mediaFan + mediaDelta, 15, 100),
+  };
 
   return {
     boxScore,
@@ -1608,6 +1870,7 @@ export function simulateSeason(
     newlyAcquiredTraitNames: newlyAcquired.map((t) => t.name),
     updatedRivals,
     brokenRolePromise,
+    nextRelationships,
   };
 }
 

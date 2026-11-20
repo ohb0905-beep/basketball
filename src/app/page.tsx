@@ -19,6 +19,7 @@ import { DraftLiveStage } from '../components/draft/DraftLiveStage';
 import { HeroSection } from '../components/home/HeroSection';
 import { RetirementCeremony } from '../components/retirement/RetirementCeremony';
 import { useCareerStore } from '../store/useCareerStore';
+import { hasSeasonBottomDock } from '../utils/formatters';
 
 const DASHBOARD_TABS = [
   { id: 'SEASON' as const, label: '시즌', icon: Calendar },
@@ -85,11 +86,7 @@ export default function BenchToMvpApp() {
   const hasSeasonDock =
     showBottomTabBar &&
     activeTab === 'SEASON' &&
-    Boolean(career) &&
-    ((!career!.offseasonLocked && career!.seasonPhase === 'REGULAR_SEASON') ||
-      (career!.seasonPhase === 'POSTSEASON_BRACKET' &&
-        Boolean(career!.playoffBracket) &&
-        !career!.playoffBracket?.championTeamId));
+    hasSeasonBottomDock(career);
 
   return (
     <div className="min-h-screen bg-[var(--t-bg)] text-[var(--t-g900)] flex flex-col">
@@ -182,11 +179,11 @@ export default function BenchToMvpApp() {
         </nav>
       )}
 
-      {/* 분기점 인카운터 바텀시트 */}
+      {/* 분기점 인카운터 바텀시트 (대시보드 진입 시에만 표시) */}
       <CareerEventModal
-        event={career?.pendingEvent || null}
+        event={view === 'DASHBOARD' ? career?.pendingEvent || null : null}
         career={career}
-        lastOutcome={lastEncounterOutcome}
+        lastOutcome={view === 'DASHBOARD' ? lastEncounterOutcome : null}
         onSelectChoice={resolveEventChoice}
         onDismissOutcome={dismissEncounterOutcome}
       />

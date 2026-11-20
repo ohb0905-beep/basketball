@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <path d="M16 10 H112 V66 C112 96 64 118 64 118 C64 118 16 96 16 66 Z" fill="#C8102E" stroke="#D4AF37" stroke-width="5"/>
+  <path d="M22 18 H106 V34 H22 Z" fill="#D4AF37" opacity="0.22"/>
+  <text x="64" y="42" text-anchor="middle" fill="#D4AF37" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="800" letter-spacing="1.2">EUROLEAGUE</text>
+  <text x="64" y="75" text-anchor="middle" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="900" letter-spacing="0.5">ASM</text>
+  <text x="64" y="96" text-anchor="middle" fill="#FFFFFF" opacity="0.85" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="0.8">MONACO</text>
+</svg>

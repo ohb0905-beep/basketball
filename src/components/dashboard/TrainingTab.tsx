@@ -4,15 +4,29 @@ import React, { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { POSITION_HEIGHT_RANGES, POSITION_LABELS } from '../../data/archetypes';
 import {
+  RELATIONSHIP_LABELS,
+  getEffectiveRelationships,
+  getEffectiveStoryArcs,
+} from '../../engine/progressionEngine';
+import {
   analyzePositionFit,
   calculateBiomechanicalProfile,
   calculateOvr,
   canSwitchToPosition,
   getBiomechanicalGrowthElasticity,
+  getGrowthDnaInfo,
   getSpecialCampOptions,
 } from '../../engine/statCalculator';
 import { getEffectiveCashBalance, useCareerStore } from '../../store/useCareerStore';
-import { PlayerStats, Position, TrainingFocus } from '../../types/game';
+import {
+  PlayerStats,
+  Position,
+  RelationshipMetrics,
+  StoryArcId,
+  TrainingFocus,
+  TrainingPresetId,
+} from '../../types/game';
+import { formatCurrencyDetailed } from '../../utils/formatters';
 import { Modal, SelectionCheckCircle } from '../common/Modal';
 import { getScoutingBalanceBadges } from '../create/PlayerCreator';
 
@@ -23,6 +37,41 @@ const STAT_META: { key: keyof PlayerStats; label: string; code: string }[] = [
   { key: 'def', label: '수비력', code: 'DEF' },
   { key: 'reb', label: '리바운드', code: 'REB' },
   { key: 'phy', label: '피지컬', code: 'PHY' },
+];
+
+const TRAINING_PRESETS: {
+  id: TrainingPresetId;
+  label: string;
+  desc: string;
+  matchesFocus: (focus: TrainingFocus, pos: Position) => boolean;
+}[] = [
+  {
+    id: 'SHOOTING_SPACING',
+    label: '슈팅 · 스페이싱',
+    desc: '외곽 집중',
+    matchesFocus: (f) => f === 'OUTSIDE_SHOOTING',
+  },
+  {
+    id: 'ALL_AROUND',
+    label: '올라운드',
+    desc: '전 항목 균형',
+    matchesFocus: (f) => f === 'BALANCED',
+  },
+  {
+    id: 'DEFENSE_GLASS',
+    label: '수비 · 보드',
+    desc: '포지션 맞춤 수비',
+    matchesFocus: (f, pos) =>
+      pos === 'PF' || pos === 'C'
+        ? f === 'REBOUND_POST'
+        : f === 'DEFENSE_LOCKDOWN',
+  },
+  {
+    id: 'PHYSICAL_ENGINE',
+    label: '체력 · 내구성',
+    desc: '피지컬 집중',
+    matchesFocus: (f) => f === 'PHYSICAL_CONDITIONING',
+  },
 ];
 
 const TRAINING_FOCUS_OPTIONS: {
@@ -39,15 +88,10 @@ const TRAINING_FOCUS_OPTIONS: {
   { id: 'PHYSICAL_CONDITIONING', label: '피지컬 컨디셔닝', tag: 'PHY 집중' },
 ];
 
-function formatCashK(amount: number): string {
-  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(2)}M`;
-  if (amount >= 1000) return `$${Math.round(amount / 1000).toLocaleString()}K`;
-  return `$${amount.toLocaleString()}`;
-}
-
 export function TrainingTab() {
   const career = useCareerStore((s) => s.career);
   const setTrainingFocus = useCareerStore((s) => s.setTrainingFocus);
+  const applyTrainingPreset = useCareerStore((s) => s.applyTrainingPreset);
   const switchPrimaryPosition = useCareerStore((s) => s.switchPrimaryPosition);
   const unlockSecondaryPosition = useCareerStore((s) => s.unlockSecondaryPosition);
   const runSpecialCamp = useCareerStore((s) => s.runSpecialCamp);
@@ -63,6 +107,7 @@ export function TrainingTab() {
     career.secondaryPos,
     career.coachTrust
   );
+  const dnaInfo = getGrowthDnaInfo(career.growthDna);
   const biomech = calculateBiomechanicalProfile(career.heightCm, career.primaryPos);
   const { overallBadge, reachBadge, agilityBadge } = getScoutingBalanceBadges(biomech);
   const elasticityMap = getBiomechanicalGrowthElasticity(
@@ -70,6 +115,16 @@ export function TrainingTab() {
     career.primaryPos,
     career.stats
   );
+  const relationships = getEffectiveRelationships(career);
+  const storyArcs = getEffectiveStoryArcs(career);
+  const arcList = (Object.keys(storyArcs) as StoryArcId[]).map((k) => storyArcs[k]);
+  const relationshipKeys: (keyof RelationshipMetrics)[] = [
+    'coachTrust',
+    'lockerRoom',
+    'frontOffice',
+    'mediaFan',
+  ];
+
   const specialCamps = getSpecialCampOptions(career);
   const campDoneThisYear = career.lastCampYear === career.seasonYear;
   const cash = getEffectiveCashBalance(career);
@@ -79,11 +134,16 @@ export function TrainingTab() {
     <div className="space-y-3">
       {/* 1. 6대 핵심 능력치 (1줄 슬림 바) */}
       <section className="t-card space-y-4">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-            능력치
-          </h2>
-          <span className="text-[12px] font-semibold text-[var(--t-g500)] tabular-nums">
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
+              능력치
+            </h2>
+            <p className="text-[12px] text-[var(--t-g500)] mt-0.5 truncate">
+              {dnaInfo.label} · 전성기 {dnaInfo.peakAgeRange[0]}~{dnaInfo.peakAgeRange[1]}세
+            </p>
+          </div>
+          <span className="text-[12px] font-semibold text-[var(--t-g500)] tabular-nums shrink-0">
             잠재력 {career.potential}
           </span>
         </div>
@@ -133,10 +193,96 @@ export function TrainingTab() {
             );
           })}
         </div>
+
+        {career.badges && career.badges.length > 0 && (
+          <div className="pt-3.5 border-t border-[var(--t-g100)] space-y-1">
+            <span className="block text-[12px] font-semibold text-[var(--t-g500)]">
+              획득 배지
+            </span>
+            <p className="text-[13px] font-medium text-[var(--t-g800)] leading-relaxed">
+              {career.badges.join(' · ')}
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* 1-B. 4축 관계도 & 멀티 시즌 스토리 아크 */}
+      <section className="t-card space-y-4" data-testid="relationships-arcs-section">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
+            관계도 · 커리어 서사
+          </h2>
+          <span className="text-[12px] text-[var(--t-g500)]">
+            전용 분기 연동
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          {relationshipKeys.map((axis) => {
+            const val = relationships[axis];
+            return (
+              <div key={axis} className="space-y-1.5 min-w-0">
+                <div className="flex items-baseline justify-between gap-1 text-[12px]">
+                  <span className="font-semibold text-[var(--t-g700)] truncate">
+                    {RELATIONSHIP_LABELS[axis]}
+                  </span>
+                  <span className="font-bold text-[var(--t-g900)] tabular-nums shrink-0">
+                    {val}
+                  </span>
+                </div>
+                <div className="h-[5px] rounded-full bg-[var(--t-g100)] overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      val >= 75
+                        ? 'bg-[var(--t-ok)]'
+                        : val < 40
+                        ? 'bg-[var(--t-up)]'
+                        : 'bg-[var(--t-accent)]'
+                    }`}
+                    style={{ width: `${val}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="pt-3.5 border-t border-[var(--t-g100)] divide-y divide-[var(--t-g100)]">
+          {arcList.map((arc) => {
+            const statusText = arc.completed
+              ? '완결'
+              : arc.stage > 0
+              ? `${arc.stage}/${arc.maxStage}단계`
+              : '대기';
+            return (
+              <div key={arc.id} className="py-2.5 first:pt-0 last:pb-0 space-y-0.5">
+                <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                  <span className="font-bold text-[var(--t-g900)] truncate">
+                    {arc.title}
+                  </span>
+                  <span
+                    className={`text-[12px] font-bold tabular-nums shrink-0 ${
+                      arc.completed
+                        ? 'text-[var(--t-ok)]'
+                        : arc.stage > 0
+                        ? 'text-[var(--t-accent-ink)]'
+                        : 'text-[var(--t-g400)]'
+                    }`}
+                  >
+                    {statusText}
+                  </span>
+                </div>
+                <p className="text-[12px] text-[var(--t-g500)] leading-snug">
+                  {arc.summary}
+                </p>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       {/* 2. 시즌 중점 훈련 */}
-      <section className="t-card space-y-3">
+      <section className="t-card space-y-3.5">
         <div className="flex items-baseline justify-between">
           <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
             중점 훈련
@@ -144,7 +290,40 @@ export function TrainingTab() {
           <span className="text-[12px] text-[var(--t-g500)]">다음 시즌 반영</span>
         </div>
 
-        <div className="divide-y divide-[var(--t-g100)] -mx-2">
+        {/* 원탭 훈련 프리셋 4종 */}
+        <div className="grid grid-cols-2 gap-2" data-testid="training-presets">
+          {TRAINING_PRESETS.map((preset) => {
+            const active = preset.matchesFocus(
+              career.trainingFocus,
+              career.primaryPos
+            );
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => applyTrainingPreset(preset.id)}
+                className={`min-h-[48px] px-3 py-2 rounded-2xl text-left transition cursor-pointer t-tap ${
+                  active
+                    ? 'bg-[var(--t-accent)] text-white'
+                    : 'bg-[var(--t-g100)] text-[var(--t-g900)] hover:bg-[var(--t-g200)]/70'
+                }`}
+              >
+                <span className="block text-[13px] font-bold leading-snug">
+                  {preset.label}
+                </span>
+                <span
+                  className={`block text-[11px] leading-snug ${
+                    active ? 'text-white/80' : 'text-[var(--t-g500)]'
+                  }`}
+                >
+                  {preset.desc}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="divide-y divide-[var(--t-g100)] -mx-2 pt-1">
           {TRAINING_FOCUS_OPTIONS.map((opt) => {
             const selected = career.trainingFocus === opt.id;
             return (
@@ -178,7 +357,7 @@ export function TrainingTab() {
             특별 캠프
           </h2>
           <span className="text-[13px] font-semibold text-[var(--t-ok)] tabular-nums">
-            {campDoneThisYear ? '이번 시즌 수료' : `자산 ${formatCashK(cash)}`}
+            {campDoneThisYear ? '이번 시즌 수료' : `자산 ${formatCurrencyDetailed(cash)}`}
           </span>
         </div>
 
@@ -195,14 +374,14 @@ export function TrainingTab() {
                     {camp.title}
                   </div>
                   <div className="text-[12px] text-[var(--t-g500)] tabular-nums truncate">
-                    {camp.effectText} · {formatCashK(camp.costUsd)}
+                    {camp.effectText} · {formatCurrencyDetailed(camp.costUsd)}
                   </div>
                 </div>
                 <button
                   type="button"
                   disabled={campDoneThisYear || !canAfford}
                   onClick={() => runSpecialCamp(camp.id)}
-                  className={`min-h-[38px] px-3.5 rounded-xl text-[13px] font-bold whitespace-nowrap shrink-0 cursor-pointer t-tap ${
+                  className={`min-h-[44px] px-4 rounded-xl text-[13px] font-bold whitespace-nowrap shrink-0 cursor-pointer t-tap ${
                     campDoneThisYear || !canAfford
                       ? 'bg-[var(--t-g100)] text-[var(--t-g400)] cursor-not-allowed'
                       : 'bg-[var(--t-accent-soft)] text-[var(--t-accent-ink)] hover:bg-[var(--t-accent)] hover:text-white'
@@ -352,7 +531,7 @@ export function TrainingTab() {
                         switchPrimaryPosition(pos);
                         setShowPositionSheet(false);
                       }}
-                      className={`min-h-[34px] w-12 rounded-xl text-[12px] font-bold cursor-pointer t-tap ${
+                      className={`min-h-[40px] px-3 rounded-xl text-[12px] font-bold cursor-pointer t-tap ${
                         check.allowed
                           ? 'bg-[var(--t-g900)] text-[var(--t-card)]'
                           : 'bg-[var(--t-g100)] text-[var(--t-g400)] cursor-not-allowed'

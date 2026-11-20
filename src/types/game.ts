@@ -2,7 +2,9 @@ export type LeagueId =
   | 'HIGH_SCHOOL'
   | 'U_LEAGUE'
   | 'KBL'
-  | 'OVERSEAS'
+  | 'B_LEAGUE'
+  | 'NBL'
+  | 'EUROLEAGUE'
   | 'GLEAGUE'
   | 'NCAA'
   | 'NBA';
@@ -15,7 +17,9 @@ export type ContractType =
   | 'KBL_ROOKIE'
   | 'KBL_MAX'
   | 'KBL_VET'
-  | 'OVERSEAS_CONTRACT'
+  | 'BLEAGUE_CONTRACT'
+  | 'NBL_CONTRACT'
+  | 'EUROLEAGUE_CONTRACT'
   | 'GLEAGUE_EXHIBIT'
   | 'SUMMER_LEAGUE_INVITE'
   | 'TWO_WAY'
@@ -37,6 +41,8 @@ export type PlaystyleArchetype =
   | 'PLAYMAKER'     // 플로어 제너럴 플레이메이커
   | 'THREE_AND_D'   // 3&D 윙 스페셜리스트
   | 'RIM_PROTECTOR' // 림 프로텍터 & 보드 장악 빅맨
+  | 'STRETCH_BIG'   // 스트레치 빅 (외곽 스페이싱 포워드/센터)
+  | 'POST_SCORER'   // 포스트 스코어러 (골밑 득점형 빅맨)
   | 'ALL_ROUNDER';  // 공수겸장 올라운더
 
 /**
@@ -143,6 +149,38 @@ export interface StatDelta {
   phy: number;
 }
 
+/**
+ * 4축 관계도 (0 ~ 100)
+ */
+export type RelationshipAxis = 'coachTrust' | 'lockerRoom' | 'frontOffice' | 'mediaFan';
+
+export interface RelationshipMetrics {
+  coachTrust: number;
+  lockerRoom: number;
+  frontOffice: number;
+  mediaFan: number;
+}
+
+/**
+ * 멀티 시즌 스토리 아크 (각 3단계 진행)
+ */
+export type StoryArcId =
+  | 'COACH_TACTICS_ARC'
+  | 'RIVAL_DESTINY_ARC'
+  | 'BRAND_EMPIRE_ARC'
+  | 'NATIONAL_TORCH_ARC';
+
+export interface StoryArcState {
+  id: StoryArcId;
+  title: string;
+  stage: number; // 0(대기), 1, 2, 3(완결)
+  maxStage: number;
+  completed: boolean;
+  lastTriggeredYear: number | null;
+  branchTag?: string;
+  summary: string;
+}
+
 export interface LeagueConfig {
   id: LeagueId;
   name: string;
@@ -221,6 +259,7 @@ export interface StandingEntry {
   gb: number;
   isPlayerTeam: boolean;
   qualifiedPlayoffs: boolean;
+  playInQualified?: boolean;
 }
 
 export interface PlayoffSeriesMatchup {
@@ -237,6 +276,8 @@ export interface PlayoffSeriesMatchup {
   winnerId: string | null;
   involvesPlayer: boolean;
   summaryLog: string[];
+  isPlayIn?: boolean;
+  playInSlot?: '7v8' | '9v10' | '3v4' | '5v6' | 'DECIDER';
 }
 
 export interface PlayoffBracketState {
@@ -250,6 +291,8 @@ export interface PlayoffBracketState {
   pendingConfFinalsGame7?: boolean; // 컨퍼런스 파이널이 실제로 3승 3패 7차전에 돌입했을 때만 true
   championTeamId: string | null;
   playoffResultLabel: string;
+  stageType?: 'PLAY_IN_ROUND_1' | 'PLAY_IN_DECIDER' | 'MAIN_PLAYOFF';
+  playInSeeds?: Record<string, StandingEntry>; // e.g. EAST_7, EAST_8, WEST_7, WEST_8, SEED_7, SEED_8, NBL_3, NBL_4
 }
 
 export type LiveTacticId =
@@ -355,8 +398,60 @@ export interface LiveQuarterLog {
   plays?: LiveCourtPlay[];
 }
 
+export type InternationalTournamentType =
+  | 'ASIA_CUP'
+  | 'ASIAN_GAMES'
+  | 'FIBA_WORLD_CUP'
+  | 'OLYMPICS';
+
+export type InternationalMedalType =
+  | 'GOLD'
+  | 'SILVER'
+  | 'BRONZE'
+  | 'FOURTH'
+  | 'QUARTERFINAL';
+
+export interface InternationalTournamentResult {
+  tournamentType: InternationalTournamentType;
+  tournamentName: string;
+  reachedFinals: boolean;
+  reachedBronzeMatch: boolean;
+  eliminatedStage: 'QUARTERFINAL' | 'SEMIFINAL' | null;
+  finalOpponent: TeamInfo | null;
+  bronzeOpponent: TeamInfo | null;
+  korEffectiveRating: number;
+  matches: AsianGamesMatchLog[];
+  summaryHeadline: string;
+}
+
+export interface InternationalTournamentRecord {
+  id: string;
+  year: number;
+  age: number;
+  tournamentType: InternationalTournamentType;
+  tournamentName: string;
+  result: InternationalMedalType;
+  wonMvp: boolean;
+  grantedMilitaryExemption: boolean;
+  avgPts: number;
+  avgReb: number;
+  avgAst: number;
+  opponentInMedalGame?: string;
+  medalGameScore?: string;
+  matches: AsianGamesMatchLog[];
+  summaryHeadline: string;
+}
+
 export interface LiveGameState {
-  gameType: 'LEAGUE_FINALS' | 'CONF_FINALS_GAME7' | 'ASIAN_GAMES_FINAL';
+  gameType:
+    | 'LEAGUE_FINALS'
+    | 'CONF_FINALS_GAME7'
+    | 'ASIAN_GAMES_FINAL'
+    | 'INTERNATIONAL_FINAL'
+    | 'INTERNATIONAL_BRONZE';
+  internationalTournamentType?: InternationalTournamentType;
+  internationalTournamentName?: string;
+  internationalPreMatches?: AsianGamesMatchLog[];
   title: string;
   subtitle: string;
   playerTeam: TeamInfo;
@@ -367,11 +462,12 @@ export interface LiveGameState {
   oppScore: number;
   currentTactic: LiveTacticId;
   momentum: 'HOT' | 'NEUTRAL' | 'COLD';
-  foulLimit?: number; // NBA/G리그 6반칙, KBL/아마추어/아시안게임 5반칙
+  foulLimit?: number; // NBA/G리그 6반칙, KBL/아마추어/국제대회 5반칙
   fouledOut?: boolean;
   overtimeCount?: number; // 0 = 정규 4Q, 1 = 1OT, 2 = 2OT, 3 = 3OT
   pendingClutchPossession?: boolean;
   clutchPossessionResolved?: boolean;
+  clutchConvertedInGame?: boolean;
   clutchScenario?: ClutchScenarioType;
   clutchSituationText?: string;
   playerStats: {
@@ -391,7 +487,10 @@ export interface LiveGameState {
   finalOutcome?: {
     won: boolean;
     wonFinalsMvp: boolean;
+    wonTournamentMvp?: boolean;
+    medal?: InternationalMedalType;
     grantedMilitaryExemption: boolean;
+    clutchHeroSuccess?: boolean;
     headline: string;
   };
 }
@@ -438,6 +537,7 @@ export interface SeasonBoxScore {
   bpg: number;
   fgPct: number;
   tpPct: number;
+  tpa?: number; // 경기당 평균 3점슛 시도 수 (SNIPER 볼륨 검증용)
   wins: number;
   losses: number;
   teamRank?: number;
@@ -518,13 +618,30 @@ export interface EncounterSuccessCheck {
   label?: string; // UI 표시용 판정 기준 라벨 (예: '외곽 슈팅(OUT) 기반')
 }
 
+export interface EncounterChoiceRequirements {
+  minStat?: Partial<PlayerStats>;
+  minRelationship?: Partial<RelationshipMetrics>;
+  requiredTrait?: PlayerTraitId;
+  label: string;
+}
+
+export interface StoryArcAdvancePayload {
+  arcId: StoryArcId;
+  nextStage: number;
+  branchTag?: string;
+  summary: string;
+  completed?: boolean;
+}
+
 export interface EncounterOutcomeBranch {
   narrative: string;
   statChanges?: Partial<PlayerStats>;
+  relationshipChanges?: Partial<RelationshipMetrics>;
   trustDelta?: number;
   draftStockDelta?: number;
   potentialDelta?: number;
   cashDelta?: number;
+  arcAdvance?: StoryArcAdvancePayload;
   nextChainEvent?: CareerEvent;
 }
 
@@ -538,10 +655,12 @@ export interface EncounterResolutionResult {
   outcomeTier: 'CRITICAL_SUCCESS' | 'SUCCESS' | 'FAILURE' | 'GUARANTEED';
   narrative: string;
   statChanges: Partial<PlayerStats>;
+  relationshipChanges?: Partial<RelationshipMetrics>;
   trustDelta: number;
   draftStockDelta: number;
   potentialDelta: number;
   cashDelta: number;
+  arcProgressNote?: string;
   chainedNextSeasonTitle?: string;
 }
 
@@ -555,7 +674,11 @@ export interface CareerEventChoice {
   successOutcome?: EncounterOutcomeBranch;
   failureOutcome?: EncounterOutcomeBranch;
   requiredTrait?: PlayerTraitId;
+  requirements?: EncounterChoiceRequirements;
+  isExclusiveChoice?: boolean;
   statChanges?: Partial<PlayerStats>;
+  relationshipChanges?: Partial<RelationshipMetrics>;
+  arcAdvance?: StoryArcAdvancePayload;
   trustDelta?: number;
   draftStockDelta?: number;
   potentialDelta?: number;
@@ -565,6 +688,7 @@ export interface CareerEventChoice {
   grantMilitaryExemption?: boolean;
   startAsianGamesFinal?: boolean;
   enterAsianGamesTournament?: boolean;
+  enterInternationalTournament?: InternationalTournamentType;
   enlistSangmu?: boolean;
   startFarewellTour?: boolean;
   executeTradeToContender?: boolean;
@@ -579,6 +703,9 @@ export interface CareerEvent {
   title: string;
   subtitle: string;
   description: string;
+  arcId?: StoryArcId;
+  arcStage?: number;
+  arcTitle?: string;
   category:
     | 'POSITION'
     | 'MILITARY'
@@ -616,6 +743,8 @@ export interface OffseasonOption {
     | 'START_FAREWELL_TOUR'
     | 'RETIRE_OUT_OF_LEAGUE'
     | 'RETURN_KBL_FAREWELL';
+  isExistingContract?: boolean;
+  tradeAcceptChancePct?: number;
   locked?: boolean;
   lockReason?: string;
 }
@@ -683,12 +812,22 @@ export interface HallOfFameEntry {
     mvps: number;
     nbaMvps: number;
     finalsMvps: number;
+    nbaFinalsMvps?: number;
+    kblChampionships?: number;
+    kblMvps?: number;
+    kblFinalsMvps?: number;
     dpoys: number;
     sixthManAwards: number;
     mips: number;
     allLeagueSelections: number;
     allStars: number;
     nbaAllStars: number;
+    internationalMedals?: {
+      gold: number;
+      silver: number;
+      bronze: number;
+    };
+    internationalMvps?: number;
   };
   careerAverages: {
     ppg: number;
@@ -766,6 +905,8 @@ export interface CareerState {
   seenEventIds?: string[];
   recentEventCategories?: string[];
   pendingChainEvent?: CareerEvent | null;
+  relationships?: RelationshipMetrics;
+  storyArcs?: Record<StoryArcId, StoryArcState>;
   pendingSeasonSettlement?: {
     nextStats: PlayerStats;
     statDelta: StatDelta;
@@ -777,6 +918,7 @@ export interface CareerState {
     nextBadges: string[];
     nextTraits: PlayerTraitId[];
     brokenRolePromise: boolean;
+    nextRelationships?: RelationshipMetrics;
   } | null;
   seasonPhase?: SeasonPhase;
   currentStandings?: StandingEntry[];
@@ -787,6 +929,8 @@ export interface CareerState {
   badges: string[];
   seasonLogs: SeasonBoxScore[];
   milestones: CareerMilestone[];
+  internationalHistory?: InternationalTournamentRecord[];
+  lastInternationalSummary?: InternationalTournamentRecord | null;
   careerHighs: CareerHighs;
   totals: {
     gp: number;
@@ -808,6 +952,13 @@ export interface CareerState {
     allLeagueSelections: number;
     allStars: number;
     nbaAllStars: number;
+    internationalCaps?: number;
+    internationalMedals?: {
+      gold: number;
+      silver: number;
+      bronze: number;
+    };
+    internationalMvps?: number;
   };
   offseasonLocked: boolean;
   offseasonOptions: OffseasonOption[];
@@ -824,3 +975,71 @@ export interface CareerState {
   retirementReason: RetirementReason | null;
   legacyEvaluation: LegacyEvaluation | null;
 }
+
+export type TrainingPresetId =
+  | 'SHOOTING_SPACING'
+  | 'ALL_AROUND'
+  | 'DEFENSE_GLASS'
+  | 'PHYSICAL_ENGINE';
+
+export type LeagueRecordCategory =
+  | 'CAREER_POINTS'
+  | 'SINGLE_GAME_POINTS'
+  | 'SEASON_PPG'
+  | 'SEASON_RPG'
+  | 'SEASON_APG'
+  | 'CHAMPIONSHIPS'
+  | 'MVPS'
+  | 'FINALS_MVPS';
+
+export type ResetScope = 'RECORD_BOOK' | 'HALL_OF_FAME' | 'ALL';
+
+export interface LeagueRecordEntry {
+  id: string;
+  league: LeagueId;
+  category: LeagueRecordCategory;
+  label: string;
+  unit: string;
+  value: number;
+  holderName: string;
+  teamName: string;
+  year: number;
+  isUserRecord: boolean;
+  playerId?: string;
+}
+
+export type RecordBookState = Record<LeagueId, LeagueRecordEntry[]>;
+
+export interface RecordBreakEvent {
+  league: LeagueId;
+  category: LeagueRecordCategory;
+  label: string;
+  unit: string;
+  previousValue: number;
+  previousHolder: string;
+  newValue: number;
+  holderName: string;
+  teamName: string;
+  year: number;
+}
+
+export interface LeagueRecordChase {
+  entry: LeagueRecordEntry;
+  currentValue: number;
+  remaining: number;
+  progressPct: number;
+  isAlreadyHolder: boolean;
+}
+
+export interface HofCompendiumSummary {
+  totalInductees: number;
+  bestFiveFilled: number;
+  retiredJerseysCount: number;
+  retiredTeams: string[];
+  userBrokenRecordsCount: number;
+  totalRecordSlots: number;
+  tiersUnlocked: Record<LegacyTierId, number>;
+  unlockedTierCount: number;
+  totalTiers: number;
+}
+

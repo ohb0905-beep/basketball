@@ -8,32 +8,20 @@ import {
 } from '../../engine/statCalculator';
 import { getEffectiveCashBalance } from '../../store/useCareerStore';
 import { CareerState } from '../../types/game';
+import {
+  formatCurrencyCompact,
+  formatHeaderContractSummary,
+} from '../../utils/formatters';
 import { TeamEmblem } from '../common/TeamEmblem';
-
-function stripLeadingSymbol(text: string): string {
-  return text.replace(/^[^\p{L}\p{N}#]+/u, '').trim();
-}
-
-function formatCurrencyCompact(amountUsd: number): string {
-  if (!amountUsd || amountUsd <= 0) return '$0';
-  if (amountUsd >= 1000000) {
-    return `$${(amountUsd / 1000000).toFixed(1)}M`;
-  }
-  if (amountUsd >= 1000) {
-    return `$${Math.round(amountUsd / 1000).toLocaleString()}K`;
-  }
-  return `$${amountUsd.toLocaleString()}`;
-}
 
 export function PlayerHeader({ career }: { career: CareerState }) {
   const leagueInfo = LEAGUE_CONFIG[career.league];
   const isAtGrowthCap = career.ovr >= leagueInfo.growthCap && career.age <= 28;
-  const playstyleLabel = stripLeadingSymbol(
-    getPlaystyleInfo(career.playstyle || 'ALL_ROUNDER').badge
-  );
-  const traitLabels = (career.traits || []).map((tId) =>
-    stripLeadingSymbol(getTraitInfo(tId).badge)
-  );
+  const playstyleLabel = getPlaystyleInfo(
+    career.playstyle || 'ALL_ROUNDER',
+    career.primaryPos
+  ).label;
+  const traitLabels = (career.traits || []).map((tId) => getTraitInfo(tId).name);
   const cash = getEffectiveCashBalance(career);
 
   return (
@@ -105,11 +93,12 @@ export function PlayerHeader({ career }: { career: CareerState }) {
         </div>
 
         <div className="min-w-0">
-          <span className="block text-[11px] text-[var(--t-g500)]">연봉</span>
-          <span className="block text-[13px] font-bold text-[var(--t-g900)] tabular-nums mt-0.5">
-            {career.annualSalary > 0
-              ? formatCurrencyCompact(career.annualSalary)
-              : '학생'}
+          <span className="block text-[11px] text-[var(--t-g500)]">계약</span>
+          <span
+            data-testid="header-contract-summary"
+            className="block text-[13px] font-bold text-[var(--t-g900)] tabular-nums truncate mt-0.5"
+          >
+            {formatHeaderContractSummary(career)}
           </span>
         </div>
 

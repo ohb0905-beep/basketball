@@ -95,12 +95,18 @@ function SeriesSlotCard({
               : 'text-[var(--t-g400)]'
           }
         >
-          {match.involvesPlayer ? '내 팀' : `${match.bestOf}전`}
+          {match.involvesPlayer
+            ? '내 팀'
+            : match.bestOf === 1
+            ? '단판'
+            : `${match.bestOf}전`}
         </span>
         <span className="text-[var(--t-g400)]">
           {isFinished
             ? '확정'
-            : match.higherSeedWins === 3 && match.lowerSeedWins === 3
+            : match.bestOf === 7 &&
+              match.higherSeedWins === 3 &&
+              match.lowerSeedWins === 3
             ? '7차전'
             : '진행'}
         </span>
@@ -247,7 +253,7 @@ export function PlayoffBracketLadder({
     return count;
   }, [bracket.rounds]);
 
-  const bracketKey = `${bracket.year}_${bracket.league}`;
+  const bracketKey = `${bracket.year}_${bracket.league}_${bracket.stageType || 'MAIN_PLAYOFF'}`;
   const prevStateRef = useRef<{
     key: string;
     roundsLen: number;
@@ -354,42 +360,114 @@ export function PlayoffBracketLadder({
     setIsClimbing(false);
   };
 
-  const isNba = bracket.league === 'NBA';
-  const isSixTeam = !isNba && bracket.totalRounds === 3;
+  const isPlayInStage =
+    bracket.stageType === 'PLAY_IN_ROUND_1' ||
+    bracket.stageType === 'PLAY_IN_DECIDER';
+  const isNba = !isPlayInStage && bracket.league === 'NBA';
+  const isNcaa = !isPlayInStage && bracket.league === 'NCAA';
+  const is16Team = isNba || isNcaa;
+  const is12Team = !isPlayInStage && bracket.league === 'GLEAGUE';
+  const is8Team =
+    !isPlayInStage &&
+    (bracket.league === 'B_LEAGUE' ||
+      bracket.league === 'EUROLEAGUE' ||
+      bracket.league === 'U_LEAGUE' ||
+      bracket.league === 'HIGH_SCHOOL');
+  const isSixTeam = !isPlayInStage && bracket.league === 'KBL';
 
-  const finalsSeries = bracket.rounds[bracket.totalRounds - 1]?.[0] || null;
+  const finalsSeries =
+    !isPlayInStage
+      ? bracket.rounds[bracket.totalRounds - 1]?.[0] || null
+      : null;
   const championEntry = bracket.championTeamId
     ? standings.find((s) => s.team.id === bracket.championTeamId) || null
     : null;
   const showChampion =
     Boolean(championEntry) && displayStep >= bracket.totalRounds + 1;
 
-  const nbaEastR1 = isNba
+  // 16-team (NBA East/West or NCAA Left/Right)
+  const left16R1 = isNba
+    ? (bracket.rounds[0] || []).filter((m) => m.conference === 'EAST')
+    : isNcaa
+    ? (bracket.rounds[0] || []).slice(0, 4)
+    : [];
+  const right16R1 = isNba
+    ? (bracket.rounds[0] || []).filter((m) => m.conference !== 'EAST')
+    : isNcaa
+    ? (bracket.rounds[0] || []).slice(4, 8)
+    : [];
+  const left16R2 = isNba
+    ? (bracket.rounds[1] || []).filter((m) => m.conference === 'EAST')
+    : isNcaa
+    ? (bracket.rounds[1] || []).slice(0, 2)
+    : [];
+  const right16R2 = isNba
+    ? (bracket.rounds[1] || []).filter((m) => m.conference !== 'EAST')
+    : isNcaa
+    ? (bracket.rounds[1] || []).slice(2, 4)
+    : [];
+  const left16CF = isNba
+    ? (bracket.rounds[2] || []).filter((m) => m.conference === 'EAST')[0] || null
+    : isNcaa
+    ? bracket.rounds[2]?.[0] || null
+    : null;
+  const right16CF = isNba
+    ? (bracket.rounds[2] || []).filter((m) => m.conference !== 'EAST')[0] || null
+    : isNcaa
+    ? bracket.rounds[2]?.[1] || null
+    : null;
+
+  // 12-team (G League East/West: 2 R1 matches -> 2 R2 matches w/ #1/#2 bye -> 1 CF -> Finals)
+  const gEastStandings = is12Team
+    ? standings
+        .filter((s) => (s.conference || s.team.conference) === 'EAST')
+        .sort((a, b) => (a.conferenceRank || a.rank) - (b.conferenceRank || b.rank))
+    : [];
+  const gWestStandings = is12Team
+    ? standings
+        .filter((s) => (s.conference || s.team.conference) === 'WEST')
+        .sort((a, b) => (a.conferenceRank || a.rank) - (b.conferenceRank || b.rank))
+    : [];
+  const gEastR1 = is12Team
     ? (bracket.rounds[0] || []).filter((m) => m.conference === 'EAST')
     : [];
-  const nbaWestR1 = isNba
+  const gWestR1 = is12Team
     ? (bracket.rounds[0] || []).filter((m) => m.conference !== 'EAST')
     : [];
-  const nbaEastR2 = isNba
+  const gEastR2 = is12Team
     ? (bracket.rounds[1] || []).filter((m) => m.conference === 'EAST')
     : [];
-  const nbaWestR2 = isNba
+  const gWestR2 = is12Team
     ? (bracket.rounds[1] || []).filter((m) => m.conference !== 'EAST')
     : [];
-  const nbaEastCF = isNba
+  const gEastCF = is12Team
     ? (bracket.rounds[2] || []).filter((m) => m.conference === 'EAST')[0] || null
     : null;
-  const nbaWestCF = isNba
+  const gWestCF = is12Team
     ? (bracket.rounds[2] || []).filter((m) => m.conference !== 'EAST')[0] || null
     : null;
 
+  // 8-team (B.League / EuroLeague / U-League / High School: 4 QF -> 2 SF -> Finals)
+  const eightLeftQF = is8Team ? (bracket.rounds[0] || []).slice(0, 2) : [];
+  const eightRightQF = is8Team ? (bracket.rounds[0] || []).slice(2, 4) : [];
+  const eightLeftSF = is8Team ? bracket.rounds[1]?.[0] || null : null;
+  const eightRightSF = is8Team ? bracket.rounds[1]?.[1] || null : null;
+
+  // 6-team (KBL: 2 R1 -> 2 SF w/ #1/#2 bye -> Finals)
   const sixLeftR1 = isSixTeam ? bracket.rounds[0]?.[0] || null : null;
   const sixRightR1 = isSixTeam ? bracket.rounds[0]?.[1] || null : null;
   const sixLeftR2 = isSixTeam ? bracket.rounds[1]?.[0] || null : null;
   const sixRightR2 = isSixTeam ? bracket.rounds[1]?.[1] || null : null;
 
-  const fourLeftSF = !isNba && !isSixTeam ? bracket.rounds[0]?.[0] || null : null;
-  const fourRightSF = !isNba && !isSixTeam ? bracket.rounds[0]?.[1] || null : null;
+  // 4-team (NBL Main PO: 2 SF -> Championship)
+  const fourLeftSF =
+    !isPlayInStage && !is16Team && !is12Team && !is8Team && !isSixTeam
+      ? bracket.rounds[0]?.[0] || null
+      : null;
+  const fourRightSF =
+    !isPlayInStage && !is16Team && !is12Team && !is8Team && !isSixTeam
+      ? bracket.rounds[0]?.[1] || null
+      : null;
 
   const build4to2Edges = (
     seriesList: PlayoffSeriesMatchup[],
@@ -459,15 +537,172 @@ export function PlayoffBracketLadder({
     ];
   };
 
+  const build2to2Edges = (
+    seriesList: (PlayoffSeriesMatchup | null | undefined)[],
+    direction: 'L2R' | 'R2L',
+    roundNum: number
+  ): ConnectorEdge[] => {
+    const startX = direction === 'L2R' ? 0 : 40;
+    const endX = direction === 'L2R' ? 40 : 0;
+    const yInputs = [100, 300];
+    return yInputs.map((yIn, idx) => {
+      const m = seriesList[idx];
+      const winnerId = getSeriesWinnerTeamId(m);
+      const lit = Boolean(winnerId) && displayStep >= roundNum + 1;
+      const isPlayerPath = winnerId === playerTeamId;
+      return {
+        id: `${direction}_2to2_${idx}`,
+        d: `M ${startX} ${yIn} H ${endX}`,
+        lit,
+        isPlayerPath,
+        roundNumber: roundNum,
+      };
+    });
+  };
+
   const showLeft = wingFocus === 'ALL' || wingFocus === 'LEFT';
   const showCenter = wingFocus === 'ALL' || wingFocus === 'CENTER';
   const showRight = wingFocus === 'ALL' || wingFocus === 'RIGHT';
 
-  const finalsLabel = isNba
-    ? 'NBA 파이널'
-    : isSixTeam
-    ? '챔피언 결정전'
-    : '결승전';
+  const finalsLabel =
+    bracket.league === 'NBA'
+      ? 'NBA 파이널'
+      : bracket.league === 'GLEAGUE'
+      ? 'G리그 파이널'
+      : bracket.league === 'EUROLEAGUE'
+      ? '유로리그 파이널'
+      : bracket.league === 'B_LEAGUE'
+      ? 'B.리그 파이널'
+      : bracket.league === 'NBL'
+      ? 'NBL 챔피언십'
+      : bracket.league === 'KBL'
+      ? '챔피언 결정전'
+      : bracket.league === 'NCAA'
+      ? 'NCAA 결승전'
+      : '결승전';
+
+  const hasEastWestTabs = isNba || is12Team;
+
+  // 플레이인 토너먼트 전용 렌더링 (NBA 7-10, EuroLeague 7-10, NBL 3-6)
+  if (isPlayInStage) {
+    const playInR1 = bracket.rounds[0] || [];
+    const playInDecider = bracket.rounds[1] || [];
+    const isNbaPlayIn = bracket.league === 'NBA';
+    const isNblPlayIn = bracket.league === 'NBL';
+
+    const renderPlayInGroup = (
+      label: string,
+      r1List: PlayoffSeriesMatchup[],
+      deciderList: PlayoffSeriesMatchup[]
+    ) => (
+      <div className="space-y-2">
+        <div className="text-[11px] font-bold text-[var(--t-g600)]">
+          {label}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div className="space-y-2">
+            <div className="text-[10px] font-bold text-[var(--t-g400)]">
+              {isNblPlayIn ? '시딩전 / 엘리미네이터' : '플레이인 1라운드'}
+            </div>
+            {r1List.map((m) => (
+              <div key={m.id} className="space-y-1">
+                <div className="text-[10px] font-semibold text-[var(--t-g500)]">
+                  {m.roundLabel}
+                </div>
+                <SeriesSlotCard
+                  match={m}
+                  placeholderTitle={m.roundLabel}
+                  playerTeamId={playerTeamId}
+                  isRevealed
+                  isHighlightedNew={false}
+                  compact
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2 flex flex-col justify-center">
+            <div className="text-[10px] font-bold text-[var(--t-gold)]">
+              {isNblPlayIn ? '4시드 최종 결정전' : '8시드 최종 결정전'}
+            </div>
+            {deciderList.length > 0 ? (
+              deciderList.map((m) => (
+                <div key={m.id} className="space-y-1">
+                  <div className="text-[10px] font-semibold text-[var(--t-g500)]">
+                    {m.roundLabel}
+                  </div>
+                  <SeriesSlotCard
+                    match={m}
+                    placeholderTitle={m.roundLabel}
+                    playerTeamId={playerTeamId}
+                    isRevealed
+                    isHighlightedNew
+                    compact
+                  />
+                </div>
+              ))
+            ) : (
+              <SeriesSlotCard
+                match={null}
+                placeholderTitle={
+                  isNblPlayIn
+                    ? '3·4위전 패자 vs 5·6위전 승자'
+                    : '7·8위전 패자 vs 9·10위전 승자'
+                }
+                playerTeamId={playerTeamId}
+                isRevealed={false}
+                isHighlightedNew={false}
+                compact
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+
+    return (
+      <div
+        data-testid="playoff-bracket-ladder"
+        className="rounded-2xl bg-[var(--t-g100)] p-3 sm:p-4 space-y-3"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[13px] font-bold text-[var(--t-g800)]">
+            플레이인 토너먼트 대진표
+          </span>
+          <span className="text-[11px] font-bold text-[var(--t-gold)]">
+            {bracket.stageType === 'PLAY_IN_DECIDER'
+              ? '최종 결정전'
+              : '단판 승부'}
+          </span>
+        </div>
+
+        <div className="space-y-4">
+          {isNbaPlayIn ? (
+            <>
+              {renderPlayInGroup(
+                '동부 컨퍼런스 플레이인',
+                playInR1.filter((m) => m.conference === 'EAST'),
+                playInDecider.filter((m) => m.conference === 'EAST')
+              )}
+              {renderPlayInGroup(
+                '서부 컨퍼런스 플레이인',
+                playInR1.filter((m) => m.conference !== 'EAST'),
+                playInDecider.filter((m) => m.conference !== 'EAST')
+              )}
+            </>
+          ) : (
+            renderPlayInGroup(
+              isNblPlayIn
+                ? 'NBL 플레이인 (3위~6위)'
+                : '유로리그 플레이인 (7위~10위)',
+              playInR1,
+              playInDecider
+            )
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -501,9 +736,9 @@ export function PlayoffBracketLadder({
         {(
           [
             { id: 'ALL', label: '전체' },
-            { id: 'LEFT', label: isNba ? '동부' : '좌측' },
+            { id: 'LEFT', label: hasEastWestTabs ? '동부' : '좌측' },
             { id: 'CENTER', label: '파이널' },
-            { id: 'RIGHT', label: isNba ? '서부' : '우측' },
+            { id: 'RIGHT', label: hasEastWestTabs ? '서부' : '우측' },
           ] as { id: WingFocus; label: string }[]
         ).map((tab) => (
           <button
@@ -523,7 +758,7 @@ export function PlayoffBracketLadder({
 
       {/* 좌→중앙←우 대진표 캔버스 */}
       <div className="overflow-x-auto pb-1">
-        {isNba ? (
+        {is16Team ? (
           <div
             className={`flex items-stretch ${
               wingFocus === 'ALL' ? 'min-w-[840px]' : 'min-w-full justify-center'
@@ -533,14 +768,14 @@ export function PlayoffBracketLadder({
               <div className="flex items-stretch flex-1">
                 <div className="flex-1 min-w-[112px] flex flex-col">
                   <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
-                    동부 1R
+                    {isNba ? '동부 1R' : '16강 A'}
                   </div>
                   <div className="flex-1 grid grid-rows-4 gap-2 items-center">
                     {[0, 1, 2, 3].map((i) => (
                       <SeriesSlotCard
-                        key={`east-r1-${i}`}
-                        match={nbaEastR1[i]}
-                        placeholderTitle="동부 1R"
+                        key={`left16-r1-${i}`}
+                        match={left16R1[i]}
+                        placeholderTitle={isNba ? '동부 1R' : '16강'}
                         playerTeamId={playerTeamId}
                         isRevealed={displayStep >= 1}
                         isHighlightedNew={isClimbing && displayStep === 1}
@@ -552,21 +787,21 @@ export function PlayoffBracketLadder({
 
                 <div className="pt-6 flex items-stretch">
                   <BracketConnectorSvg
-                    edges={build4to2Edges(nbaEastR1, 'L2R', 1)}
+                    edges={build4to2Edges(left16R1, 'L2R', 1)}
                     shouldReduceMotion={prefersReducedMotion}
                   />
                 </div>
 
                 <div className="flex-1 min-w-[112px] flex flex-col">
                   <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
-                    동부 4강
+                    {isNba ? '동부 4강' : '8강 A'}
                   </div>
                   <div className="flex-1 grid grid-rows-2 gap-2 items-center">
                     {[0, 1].map((i) => (
                       <SeriesSlotCard
-                        key={`east-r2-${i}`}
-                        match={nbaEastR2[i]}
-                        placeholderTitle="동부 4강"
+                        key={`left16-r2-${i}`}
+                        match={left16R2[i]}
+                        placeholderTitle={isNba ? '동부 4강' : '8강'}
                         playerTeamId={playerTeamId}
                         isRevealed={displayStep >= 2}
                         isHighlightedNew={isClimbing && displayStep === 2}
@@ -578,19 +813,19 @@ export function PlayoffBracketLadder({
 
                 <div className="pt-6 flex items-stretch">
                   <BracketConnectorSvg
-                    edges={build2to1Edges(nbaEastR2, 'L2R', 2)}
+                    edges={build2to1Edges(left16R2, 'L2R', 2)}
                     shouldReduceMotion={prefersReducedMotion}
                   />
                 </div>
 
                 <div className="flex-1 min-w-[112px] flex flex-col">
                   <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
-                    동부 결승
+                    {isNba ? '동부 결승' : '파이널 포 A'}
                   </div>
                   <div className="flex-1 grid grid-rows-1 items-center">
                     <SeriesSlotCard
-                      match={nbaEastCF}
-                      placeholderTitle="동부 결승"
+                      match={left16CF}
+                      placeholderTitle={isNba ? '동부 결승' : '파이널 포'}
                       playerTeamId={playerTeamId}
                       isRevealed={displayStep >= 3}
                       isHighlightedNew={isClimbing && displayStep === 3}
@@ -604,7 +839,7 @@ export function PlayoffBracketLadder({
             {showLeft && showCenter && (
               <div className="pt-6 flex items-stretch">
                 <BracketConnectorSvg
-                  edges={build1to1Edge(nbaEastCF, 'L2R', 3)}
+                  edges={build1to1Edge(left16CF, 'L2R', 3)}
                   shouldReduceMotion={prefersReducedMotion}
                 />
               </div>
@@ -666,7 +901,206 @@ export function PlayoffBracketLadder({
             {showRight && showCenter && (
               <div className="pt-6 flex items-stretch">
                 <BracketConnectorSvg
-                  edges={build1to1Edge(nbaWestCF, 'R2L', 3)}
+                  edges={build1to1Edge(right16CF, 'R2L', 3)}
+                  shouldReduceMotion={prefersReducedMotion}
+                />
+              </div>
+            )}
+
+            {showRight && (
+              <div className="flex items-stretch flex-1">
+                <div className="flex-1 min-w-[112px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    {isNba ? '서부 결승' : '파이널 포 B'}
+                  </div>
+                  <div className="flex-1 grid grid-rows-1 items-center">
+                    <SeriesSlotCard
+                      match={right16CF}
+                      placeholderTitle={isNba ? '서부 결승' : '파이널 포'}
+                      playerTeamId={playerTeamId}
+                      isRevealed={displayStep >= 3}
+                      isHighlightedNew={isClimbing && displayStep === 3}
+                      compact
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-6 flex items-stretch">
+                  <BracketConnectorSvg
+                    edges={build2to1Edges(right16R2, 'R2L', 2)}
+                    shouldReduceMotion={prefersReducedMotion}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-[112px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    {isNba ? '서부 4강' : '8강 B'}
+                  </div>
+                  <div className="flex-1 grid grid-rows-2 gap-2 items-center">
+                    {[0, 1].map((i) => (
+                      <SeriesSlotCard
+                        key={`right16-r2-${i}`}
+                        match={right16R2[i]}
+                        placeholderTitle={isNba ? '서부 4강' : '8강'}
+                        playerTeamId={playerTeamId}
+                        isRevealed={displayStep >= 2}
+                        isHighlightedNew={isClimbing && displayStep === 2}
+                        compact
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-6 flex items-stretch">
+                  <BracketConnectorSvg
+                    edges={build4to2Edges(right16R1, 'R2L', 1)}
+                    shouldReduceMotion={prefersReducedMotion}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-[112px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    {isNba ? '서부 1R' : '16강 B'}
+                  </div>
+                  <div className="flex-1 grid grid-rows-4 gap-2 items-center">
+                    {[0, 1, 2, 3].map((i) => (
+                      <SeriesSlotCard
+                        key={`right16-r1-${i}`}
+                        match={right16R1[i]}
+                        placeholderTitle={isNba ? '서부 1R' : '16강'}
+                        playerTeamId={playerTeamId}
+                        isRevealed={displayStep >= 1}
+                        isHighlightedNew={isClimbing && displayStep === 1}
+                        compact
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : is12Team ? (
+          <div
+            className={`flex items-stretch ${
+              wingFocus === 'ALL' ? 'min-w-[820px]' : 'min-w-full justify-center'
+            } min-h-[260px]`}
+          >
+            {showLeft && (
+              <div className="flex items-stretch flex-1">
+                <div className="flex-1 min-w-[112px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    동부 6강
+                  </div>
+                  <div className="flex-1 grid grid-rows-2 gap-2 items-center">
+                    {[0, 1].map((i) => (
+                      <SeriesSlotCard
+                        key={`g-east-r1-${i}`}
+                        match={gEastR1[i]}
+                        placeholderTitle="동부 6강"
+                        playerTeamId={playerTeamId}
+                        isRevealed={displayStep >= 1}
+                        isHighlightedNew={isClimbing && displayStep === 1}
+                        compact
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-6 flex items-stretch">
+                  <BracketConnectorSvg
+                    edges={build2to2Edges(gEastR1, 'L2R', 1)}
+                    shouldReduceMotion={prefersReducedMotion}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-[112px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    동부 4강
+                  </div>
+                  <div className="flex-1 grid grid-rows-2 gap-2 items-center">
+                    {[0, 1].map((i) => (
+                      <SeriesSlotCard
+                        key={`g-east-r2-${i}`}
+                        match={gEastR2[i]}
+                        placeholderTitle="동부 4강"
+                        byeSeed={gEastStandings[i] || null}
+                        playerTeamId={playerTeamId}
+                        isRevealed={displayStep >= 2}
+                        isHighlightedNew={isClimbing && displayStep === 2}
+                        compact
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-6 flex items-stretch">
+                  <BracketConnectorSvg
+                    edges={build2to1Edges(gEastR2, 'L2R', 2)}
+                    shouldReduceMotion={prefersReducedMotion}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-[112px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    동부 결승
+                  </div>
+                  <div className="flex-1 grid grid-rows-1 items-center">
+                    <SeriesSlotCard
+                      match={gEastCF}
+                      placeholderTitle="동부 결승"
+                      playerTeamId={playerTeamId}
+                      isRevealed={displayStep >= 3}
+                      isHighlightedNew={isClimbing && displayStep === 3}
+                      compact
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showLeft && showCenter && (
+              <div className="pt-6 flex items-stretch">
+                <BracketConnectorSvg
+                  edges={build1to1Edge(gEastCF, 'L2R', 3)}
+                  shouldReduceMotion={prefersReducedMotion}
+                />
+              </div>
+            )}
+
+            {showCenter && (
+              <div className="w-[146px] shrink-0 flex flex-col justify-center items-center px-1">
+                <div className="text-[10px] font-bold text-[var(--t-gold)] text-center pb-2 flex items-center justify-center gap-1">
+                  <Trophy className="w-3 h-3" />
+                  <span>{finalsLabel}</span>
+                </div>
+                <div className="w-full space-y-2">
+                  {showChampion && championEntry && (
+                    <div className="rounded-xl bg-[var(--t-gold-soft)] p-2 text-center flex flex-col items-center gap-1">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[var(--t-gold)]">
+                        <Crown className="w-3 h-3" /> CHAMPION
+                      </span>
+                      <TeamEmblem team={championEntry.team} size="sm" />
+                      <span className="text-[12px] font-bold text-[var(--t-g900)]">
+                        {championEntry.team.shortName}
+                      </span>
+                    </div>
+                  )}
+                  <SeriesSlotCard
+                    match={finalsSeries}
+                    placeholderTitle={finalsLabel}
+                    playerTeamId={playerTeamId}
+                    isRevealed={displayStep >= 4}
+                    isHighlightedNew={isClimbing && displayStep === 4}
+                    compact
+                  />
+                </div>
+              </div>
+            )}
+
+            {showRight && showCenter && (
+              <div className="pt-6 flex items-stretch">
+                <BracketConnectorSvg
+                  edges={build1to1Edge(gWestCF, 'R2L', 3)}
                   shouldReduceMotion={prefersReducedMotion}
                 />
               </div>
@@ -680,7 +1114,7 @@ export function PlayoffBracketLadder({
                   </div>
                   <div className="flex-1 grid grid-rows-1 items-center">
                     <SeriesSlotCard
-                      match={nbaWestCF}
+                      match={gWestCF}
                       placeholderTitle="서부 결승"
                       playerTeamId={playerTeamId}
                       isRevealed={displayStep >= 3}
@@ -692,7 +1126,7 @@ export function PlayoffBracketLadder({
 
                 <div className="pt-6 flex items-stretch">
                   <BracketConnectorSvg
-                    edges={build2to1Edges(nbaWestR2, 'R2L', 2)}
+                    edges={build2to1Edges(gWestR2, 'R2L', 2)}
                     shouldReduceMotion={prefersReducedMotion}
                   />
                 </div>
@@ -704,9 +1138,10 @@ export function PlayoffBracketLadder({
                   <div className="flex-1 grid grid-rows-2 gap-2 items-center">
                     {[0, 1].map((i) => (
                       <SeriesSlotCard
-                        key={`west-r2-${i}`}
-                        match={nbaWestR2[i]}
+                        key={`g-west-r2-${i}`}
+                        match={gWestR2[i]}
                         placeholderTitle="서부 4강"
+                        byeSeed={gWestStandings[i] || null}
                         playerTeamId={playerTeamId}
                         isRevealed={displayStep >= 2}
                         isHighlightedNew={isClimbing && displayStep === 2}
@@ -718,21 +1153,171 @@ export function PlayoffBracketLadder({
 
                 <div className="pt-6 flex items-stretch">
                   <BracketConnectorSvg
-                    edges={build4to2Edges(nbaWestR1, 'R2L', 1)}
+                    edges={build2to2Edges(gWestR1, 'R2L', 1)}
                     shouldReduceMotion={prefersReducedMotion}
                   />
                 </div>
 
                 <div className="flex-1 min-w-[112px] flex flex-col">
                   <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
-                    서부 1R
+                    서부 6강
                   </div>
-                  <div className="flex-1 grid grid-rows-4 gap-2 items-center">
-                    {[0, 1, 2, 3].map((i) => (
+                  <div className="flex-1 grid grid-rows-2 gap-2 items-center">
+                    {[0, 1].map((i) => (
                       <SeriesSlotCard
-                        key={`west-r1-${i}`}
-                        match={nbaWestR1[i]}
-                        placeholderTitle="서부 1R"
+                        key={`g-west-r1-${i}`}
+                        match={gWestR1[i]}
+                        placeholderTitle="서부 6강"
+                        playerTeamId={playerTeamId}
+                        isRevealed={displayStep >= 1}
+                        isHighlightedNew={isClimbing && displayStep === 1}
+                        compact
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : is8Team ? (
+          <div
+            className={`flex items-stretch ${
+              wingFocus === 'ALL' ? 'min-w-[660px]' : 'min-w-full justify-center'
+            } min-h-[240px]`}
+          >
+            {showLeft && (
+              <div className="flex items-stretch flex-1">
+                <div className="flex-1 min-w-[116px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    8강 A
+                  </div>
+                  <div className="flex-1 grid grid-rows-2 gap-2 items-center">
+                    {[0, 1].map((i) => (
+                      <SeriesSlotCard
+                        key={`eight-lqf-${i}`}
+                        match={eightLeftQF[i]}
+                        placeholderTitle="8강"
+                        playerTeamId={playerTeamId}
+                        isRevealed={displayStep >= 1}
+                        isHighlightedNew={isClimbing && displayStep === 1}
+                        compact
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-6 flex items-stretch">
+                  <BracketConnectorSvg
+                    edges={build2to1Edges(eightLeftQF, 'L2R', 1)}
+                    shouldReduceMotion={prefersReducedMotion}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-[116px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    {bracket.league === 'EUROLEAGUE' ? '파이널 포 A' : '4강 A'}
+                  </div>
+                  <div className="flex-1 grid grid-rows-1 items-center">
+                    <SeriesSlotCard
+                      match={eightLeftSF}
+                      placeholderTitle={
+                        bracket.league === 'EUROLEAGUE' ? '파이널 포' : '4강'
+                      }
+                      playerTeamId={playerTeamId}
+                      isRevealed={displayStep >= 2}
+                      isHighlightedNew={isClimbing && displayStep === 2}
+                      compact
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showLeft && showCenter && (
+              <div className="pt-6 flex items-stretch">
+                <BracketConnectorSvg
+                  edges={build1to1Edge(eightLeftSF, 'L2R', 2)}
+                  shouldReduceMotion={prefersReducedMotion}
+                />
+              </div>
+            )}
+
+            {showCenter && (
+              <div className="w-[146px] shrink-0 flex flex-col justify-center items-center px-1">
+                <div className="text-[10px] font-bold text-[var(--t-gold)] text-center pb-2 flex items-center gap-1">
+                  <Trophy className="w-3 h-3" />
+                  <span>{finalsLabel}</span>
+                </div>
+                <div className="w-full space-y-2">
+                  {showChampion && championEntry && (
+                    <div className="rounded-xl bg-[var(--t-gold-soft)] p-2 text-center flex flex-col items-center gap-1">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[var(--t-gold)]">
+                        <Crown className="w-3 h-3" /> CHAMPION
+                      </span>
+                      <TeamEmblem team={championEntry.team} size="sm" />
+                      <span className="text-[12px] font-bold text-[var(--t-g900)]">
+                        {championEntry.team.shortName}
+                      </span>
+                    </div>
+                  )}
+                  <SeriesSlotCard
+                    match={finalsSeries}
+                    placeholderTitle={finalsLabel}
+                    playerTeamId={playerTeamId}
+                    isRevealed={displayStep >= 3}
+                    isHighlightedNew={isClimbing && displayStep === 3}
+                    compact
+                  />
+                </div>
+              </div>
+            )}
+
+            {showRight && showCenter && (
+              <div className="pt-6 flex items-stretch">
+                <BracketConnectorSvg
+                  edges={build1to1Edge(eightRightSF, 'R2L', 2)}
+                  shouldReduceMotion={prefersReducedMotion}
+                />
+              </div>
+            )}
+
+            {showRight && (
+              <div className="flex items-stretch flex-1">
+                <div className="flex-1 min-w-[116px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    {bracket.league === 'EUROLEAGUE' ? '파이널 포 B' : '4강 B'}
+                  </div>
+                  <div className="flex-1 grid grid-rows-1 items-center">
+                    <SeriesSlotCard
+                      match={eightRightSF}
+                      placeholderTitle={
+                        bracket.league === 'EUROLEAGUE' ? '파이널 포' : '4강'
+                      }
+                      playerTeamId={playerTeamId}
+                      isRevealed={displayStep >= 2}
+                      isHighlightedNew={isClimbing && displayStep === 2}
+                      compact
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-6 flex items-stretch">
+                  <BracketConnectorSvg
+                    edges={build2to1Edges(eightRightQF, 'R2L', 1)}
+                    shouldReduceMotion={prefersReducedMotion}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-[116px] flex flex-col">
+                  <div className="text-[10px] font-bold text-[var(--t-g500)] text-center pb-2">
+                    8강 B
+                  </div>
+                  <div className="flex-1 grid grid-rows-2 gap-2 items-center">
+                    {[0, 1].map((i) => (
+                      <SeriesSlotCard
+                        key={`eight-rqf-${i}`}
+                        match={eightRightQF[i]}
+                        placeholderTitle="8강"
                         playerTeamId={playerTeamId}
                         isRevealed={displayStep >= 1}
                         isHighlightedNew={isClimbing && displayStep === 1}

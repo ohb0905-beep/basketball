@@ -7,9 +7,11 @@ import {
   PlayerStats,
   PlayerTraitId,
   Position,
+  RelationshipMetrics,
 } from '../types/game';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import { clampNum } from '../config/balanceConfig';
+import { rollStoryArcEvent } from './storyArcEngine';
 
 export type CareerEventCategory = NonNullable<CareerEvent['category']>;
 
@@ -32,6 +34,8 @@ export interface EncounterScenarioTemplate {
   subtitle: string;
   description: string;
   allowedLeagues?: LeagueId[];
+  allowedPositions?: Position[];
+  excludedPositions?: Position[];
   minAge?: number;
   maxAge?: number;
   preferredPositions?: Position[];
@@ -105,6 +109,9 @@ const SCENARIO_SEEDS: Array<{
   subtitle: string;
   description: string;
   tags: CareerContextTag[];
+  allowedPositions?: Position[];
+  excludedPositions?: Position[];
+  preferredPositions?: Position[];
   c1Label: string;
   c1Desc: string;
   c1Summary: string;
@@ -186,6 +193,8 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '2대2 게임 정밀도 향상',
     description: '수비수의 사각지대를 노리는 스크린 각도와 팝아웃 타이밍을 세밀하게 교정하는 비디오 세션이 열렸어요.',
     tags: ['BENCH_SPARK', 'PRO_STAR'],
+    allowedPositions: ['SF', 'PF', 'C'],
+    preferredPositions: ['PF', 'C'],
     c1Label: '픽앤팝 3점슛 릴리스 속도 단축',
     c1Desc: '스크린 직후 반 박자 빠르게 솟아올라 외곽포를 터뜨려요.',
     c1Summary: 'OUT +2, INS +1 · 스카우트 주가 +4',
@@ -206,6 +215,8 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '수비 로테이션 코어 역할',
     description: '반대편 골밑 돌파를 저지한 뒤 곧바로 코너 슈터에게 복귀하는 고난도 로테이션 수비 임무가 주어졌어요.',
     tags: ['CHAMPIONSHIP_HUNT', 'VETERAN_LEADER'],
+    allowedPositions: ['SF', 'PF', 'C'],
+    preferredPositions: ['PF', 'C'],
     c1Label: '폭발적인 클로즈아웃과 패스 레인 차단',
     c1Desc: '넓은 수비 범위로 상대의 킥아웃 패스를 가로채요.',
     c1Summary: 'DEF +2, PLY +1 · 감독 신뢰도 +6',
@@ -226,6 +237,8 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '코트 비전 업그레이드',
     description: '페인트존 근처에서 볼을 잡을 때마다 상대가 즉각 더블팀 함정 수비를 걸어오고 있어요.',
     tags: ['PRIME_ACE', 'HOT_STREAK'],
+    allowedPositions: ['SF', 'PF', 'C'],
+    preferredPositions: ['PF', 'C'],
     c1Label: '반대편 코너로 찔러주는 대각선 스킵 패스',
     c1Desc: '더블팀을 역이용해 노마크 동료에게 완벽한 3점 찬스를 선물해요.',
     c1Summary: 'PLY +2, OUT +1 · 감독 신뢰도 +6',
@@ -288,6 +301,8 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '4쿼터 역전용 비밀 병기',
     description: '지고 있는 경기 후반 흐름을 뒤집기 위해 하프라인부터 강하게 압박하는 프레스 전술 훈련이 진행되었어요.',
     tags: ['BENCH_SPARK', 'CHAMPIONSHIP_HUNT'],
+    allowedPositions: ['PG', 'SG', 'SF'],
+    preferredPositions: ['PG', 'SG'],
     c1Label: '최전방에서 볼핸들러를 질식시키는 압박 수비',
     c1Desc: '지치지 않는 체력으로 상대 가드의 턴오버를 유발해요.',
     c1Summary: 'DEF +2, PHY +1 · 감독 신뢰도 +6',
@@ -428,7 +443,7 @@ const SCENARIO_SEEDS: Array<{
     code: 'LCK_04',
     title: '원정 비행기 안에서의 전술 보드 토론',
     subtitle: '장거리 원정길 팀워크',
-    description: '연속 원정 경기로 이동하는 비행기 안에서 주전 가드와 함께 다음 상대의 드롭백 수비 파훼법을 논의했어요.',
+    description: '연속 원정 경기로 이동하는 비행기 안에서 팀의 핵심 동료들과 다음 상대의 드롭백 수비 파훼법을 논의했습니다.',
     tags: ['HOT_STREAK', 'CHAMPIONSHIP_HUNT'],
     c1Label: '앨리웁 롭 패스와 백도어 컷 수신호 맞추기',
     c1Desc: '눈빛만 봐도 통하는 골밑 침투 호흡을 완벽히 맞춰요.',
@@ -898,6 +913,7 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '농구 연구가 라이프스타일',
     description: '숙소에서 여가 시간마다 세계 최정상 선수들의 풋워크와 픽앤롤 리딩 영상을 프레임 단위로 분석하고 있어요.',
     tags: ['AMATEUR_PROSPECT', 'BENCH_SPARK'],
+    excludedPositions: ['C'],
     c1Label: '최정상 가드들의 픽앤롤 포켓 패스와 헤지테이션 연구',
     c1Desc: '수비 타이밍을 뺏는 완급 조절과 패스 시야를 체득해요.',
     c1Summary: 'PLY +2, INS +1 · 감독 신뢰도 +6',
@@ -980,6 +996,8 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '림 어택 피니시 진화',
     description: '골밑 블록슛을 피해 림 반대편으로 흘려 넣는 하이글래스 스핀 기술이 손끝에 완벽히 익었어요.',
     tags: ['HOT_STREAK', 'AMATEUR_PROSPECT'],
+    allowedPositions: ['PG', 'SG', 'SF', 'PF'],
+    preferredPositions: ['PG', 'SG', 'SF'],
     c1Label: '강한 콘택트 후에도 밸런스를 잃지 않는 바디 컨트롤 완성',
     c1Desc: '장신 빅맨 앞에서도 확률 높은 인사이드 득점을 올려요.',
     c1Summary: 'INS +2, PHY +1 · 스카우트 주가 +5',
@@ -1020,6 +1038,7 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '리바운드 보드 지배력 향상',
     description: '슛이 림에 맞는 각도만 봐도 공이 어디로 튈지 먼저 읽고 두 번째 점프를 가장 빠르게 띄우는 감각을 깨우쳤어요.',
     tags: ['BENCH_SPARK', 'CHAMPIONSHIP_HUNT'],
+    preferredPositions: ['PF', 'C'],
     c1Label: '공격 리바운드 후 즉각 풋백 득점으로 연결하는 탄력 훈련',
     c1Desc: '귀중한 세컨드 찬스 득점으로 팀의 사기를 끌어올려요.',
     c1Summary: 'REB +2, INS +1 · 감독 신뢰도 +6',
@@ -1040,6 +1059,8 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '플레이메이킹 시야 확장',
     description: '드리블 리듬을 죽이지 않고 수비수 두 명 사이 좁은 틈으로 찔러 넣는 원핸드 패스 감각이 절정에 달했어요.',
     tags: ['PRIME_ACE', 'VETERAN_LEADER'],
+    allowedPositions: ['PG', 'SG', 'SF'],
+    preferredPositions: ['PG', 'SG'],
     c1Label: '픽앤롤 빅맨의 입맛에 딱 맞는 어시스트 배달',
     c1Desc: '코트 위 동료들의 야투율을 함께 끌어올리는 야전사령관이 되어요.',
     c1Summary: 'PLY +2, OUT +1 · 감독 신뢰도 +7',
@@ -1080,6 +1101,8 @@ const SCENARIO_SEEDS: Array<{
     subtitle: '아이솔레이션 시그니처 장착',
     description: '전력 질주하다가 순식간에 멈춰 서며 수비수와 1.5m 공간을 창출하는 스텝백과 헤지테이션 카운터가 완성되었어요.',
     tags: ['HOT_STREAK', 'CONTRACT_YEAR'],
+    allowedPositions: ['PG', 'SG', 'SF', 'PF'],
+    preferredPositions: ['PG', 'SG', 'SF'],
     c1Label: '스텝백 3점슛과 미드레인지 점퍼 연계 완성',
     c1Desc: '샷클락이 쫓기는 순간에도 언제든 슛 공간을 만들어내요.',
     c1Summary: 'OUT +2, INS +1 · 스카우트 주가 +6',
@@ -1093,9 +1116,352 @@ const SCENARIO_SEEDS: Array<{
     c2Trust: 5,
     c2Draft: 6,
   },
+
+  // GUARD SPECIALIZED (5) - PG / SG
+  {
+    category: 'ROLE_ADAPTATION',
+    code: 'GRD_01',
+    title: '픽앤롤 스네이크 드리블 & 포켓 패스 교정',
+    subtitle: '가드 전술 리딩 심화 세션',
+    description: '상대 드롭백 수비를 흔들기 위해 스크린 직후 수비수를 등에 업는 스네이크 드리블과 롤맨 포켓 패스 타이밍을 집중 점검했습니다.',
+    tags: ['PRIME_ACE', 'PRO_STAR'],
+    allowedPositions: ['PG', 'SG'],
+    preferredPositions: ['PG', 'SG'],
+    c1Label: '롤맨의 보폭에 맞춘 바운스 포켓 패스 정교화',
+    c1Desc: '턴오버를 최소화하며 빅맨의 손쉬운 림 마무리 비율을 끌어올립니다.',
+    c1Summary: 'PLY +2, DEF +1 · 감독 신뢰도 +7',
+    c1Stats: { ply: 2, def: 1 },
+    c1Trust: 7,
+    c1Draft: 4,
+    c2Label: '스네이크 드리블 직후 플로터와 미드레인지 풀업 공략',
+    c2Desc: '드롭백 수비가 물러선 공간을 직접 타격해 득점 주도권을 쥡니다.',
+    c2Summary: 'INS +2, OUT +1 · 스카우트 주가 +5',
+    c2Stats: { ins: 2, out: 1 },
+    c2Trust: 4,
+    c2Draft: 5,
+  },
+  {
+    category: 'TACTICAL_CLASH',
+    code: 'GRD_02',
+    title: '풀코트 압박 돌파 & 하프코트 템포 조율',
+    subtitle: '백코트 경기 운영 과제',
+    description: '상대 팀이 경기 초반부터 엔드라인 풀코트 프레스로 볼 운반을 방해하며 팀의 공격 템포를 흔들고 있습니다.',
+    tags: ['ROOKIE_WALL', 'CHAMPIONSHIP_HUNT'],
+    allowedPositions: ['PG', 'SG'],
+    preferredPositions: ['PG', 'SG'],
+    c1Label: '침착한 리트리트 드리블과 안정적인 템포 제어',
+    c1Desc: '하프라인을 안정적으로 넘긴 뒤 세트 오펜스를 정돈해 실책을 줄입니다.',
+    c1Summary: 'PLY +2, PHY +1 · 감독 신뢰도 +7',
+    c1Stats: { ply: 2, phy: 1 },
+    c1Trust: 7,
+    c1Draft: 3,
+    c2Label: '트랩 수비 틈새를 찢는 가속 돌파로 역습 전환',
+    c2Desc: '압박을 정면으로 뚫어내며 수적 우위 속공 찬스를 직접 만듭니다.',
+    c2Summary: 'PHY +2, INS +1 · 스카우트 주가 +5',
+    c2Stats: { phy: 2, ins: 1 },
+    c2Trust: 5,
+    c2Draft: 5,
+  },
+  {
+    category: 'SCOUTING_SHOWCASE',
+    code: 'GRD_03',
+    title: '오프더드리블 스텝백 3점 리듬 완성',
+    subtitle: '백코트 슈팅 창조력 점검',
+    description: '샷클락 5초 미만 상황에서 스스로 슈팅 공간을 만들어내는 사이드스텝·스텝백 3점슛 루틴을 코치진 앞에서 시연했습니다.',
+    tags: ['HOT_STREAK', 'CONTRACT_YEAR'],
+    allowedPositions: ['PG', 'SG'],
+    preferredPositions: ['PG', 'SG'],
+    c1Label: '하체 밸런스를 지키는 풀업 캐치 리듬 정착',
+    c1Desc: '기복 없는 슈팅 폼으로 외곽 성공률을 안정적으로 끌어올립니다.',
+    c1Summary: 'OUT +2, PLY +1 · 감독 신뢰도 +6',
+    c1Stats: { out: 2, ply: 1 },
+    c1Trust: 6,
+    c1Draft: 4,
+    c2Label: '딥 쓰리 레인지 확장으로 수비 라인 강제 견인',
+    c2Desc: '아크 1미터 뒤에서 던지는 장거리포로 팀 스페이싱을 넓힙니다.',
+    c2Summary: 'OUT +2, INS +1 · 스카우트 주가 +6',
+    c2Stats: { out: 2, ins: 1 },
+    c2Trust: 4,
+    c2Draft: 6,
+  },
+  {
+    category: 'LOCKER_ROOM',
+    code: 'GRD_04',
+    title: '백코트 투가드 라인업 볼 점유율 조율',
+    subtitle: '파트너 가드와의 역할 분담',
+    description: '코칭스태프가 두 명의 가드를 동시 기용하는 투가드 라인업을 가동하면서 온볼 리딩과 오프볼 스페이싱 비중을 조율하게 됐습니다.',
+    tags: ['BENCH_SPARK', 'PRO_STAR'],
+    allowedPositions: ['PG', 'SG'],
+    preferredPositions: ['PG', 'SG'],
+    c1Label: '오프볼 스크린 활용과 캐치앤슛 비중 확대 수용',
+    c1Desc: '동료 가드의 돌파 공간을 열어주며 백코트 공존 효율을 높입니다.',
+    c1Summary: 'OUT +2, DEF +1 · 감독 신뢰도 +8',
+    c1Stats: { out: 2, def: 1 },
+    c1Trust: 8,
+    c1Draft: 3,
+    c2Label: '핵심 클러치 구간 메인 볼핸들러 권한 확보 요청',
+    c2Desc: '승부처 공격 설계를 직접 맡아 야전사령관 입지를 공고히 합니다.',
+    c2Summary: 'PLY +2, INS +1 · 스카우트 주가 +5',
+    c2Stats: { ply: 2, ins: 1 },
+    c2Trust: 5,
+    c2Draft: 5,
+  },
+  {
+    category: 'RIVAL_SHOWDOWN',
+    code: 'GRD_05',
+    title: '상대 빅맨 스위치 헌팅 매치업 공략',
+    subtitle: '미스매치 아이솔레이션 대결',
+    description: '상대 벤치가 스위치 수비를 고수하면서 발이 느린 상대 센터가 아크 정면에서 당신과 1대1로 맞붙는 구도가 반복되고 있습니다.',
+    tags: ['PRIME_ACE', 'CHAMPIONSHIP_HUNT'],
+    allowedPositions: ['PG', 'SG'],
+    preferredPositions: ['PG', 'SG'],
+    c1Label: '헬프 수비를 끌어낸 뒤 코너 슈터에게 킥아웃',
+    c1Desc: '미스매치로 수비 균형을 무너뜨려 팀 전체 오픈 3점을 양산합니다.',
+    c1Summary: 'PLY +2, OUT +1 · 감독 신뢰도 +7',
+    c1Stats: { ply: 2, out: 1 },
+    c1Trust: 7,
+    c1Draft: 4,
+    c2Label: '스피드 크로스오버로 빅맨을 제치고 림 직격',
+    c2Desc: '발이 느린 수비수를 정면 돌파하며 상대 수비 전술을 무력화합니다.',
+    c2Summary: 'INS +2, PHY +1 · 스카우트 주가 +6',
+    c2Stats: { ins: 2, phy: 1 },
+    c2Trust: 4,
+    c2Draft: 6,
+  },
+
+  // WING SPECIALIZED (5) - SG / SF
+  {
+    category: 'ROLE_ADAPTATION',
+    code: 'WNG_01',
+    title: '코너 3&D 클로즈아웃 & 외곽 스페이싱 특화',
+    subtitle: '현대 농구 핵심 윙 역할 점검',
+    description: '양쪽 코너에서 수비를 묶어두다가 수비 전환 시 상대 외곽 슈터의 슛을 끝까지 견제하는 3&D 윙 임무가 강조되고 있습니다.',
+    tags: ['BENCH_SPARK', 'CHAMPIONSHIP_HUNT'],
+    allowedPositions: ['SG', 'SF'],
+    preferredPositions: ['SG', 'SF'],
+    c1Label: '코너 3점 릴리스 안정화와 패스 레인 차단 집중',
+    c1Desc: '어떤 라인업에도 즉시 투입 가능한 고효율 공수 겸장 윙으로 자리 잡습니다.',
+    c1Summary: 'OUT +2, DEF +1 · 감독 신뢰도 +8',
+    c1Stats: { out: 2, def: 1 },
+    c1Trust: 8,
+    c1Draft: 4,
+    c2Label: '클로즈아웃 수비를 역이용하는 원드리블 풀업 돌파',
+    c2Desc: '슈터 견제를 뚫고 페인트존까지 파고드는 공격 다양성을 더합니다.',
+    c2Summary: 'INS +2, OUT +1 · 스카우트 주가 +5',
+    c2Stats: { ins: 2, out: 1 },
+    c2Trust: 5,
+    c2Draft: 5,
+  },
+  {
+    category: 'RIVAL_SHOWDOWN',
+    code: 'WNG_02',
+    title: '상대 에이스 윙과의 정면 아이솔레이션 맞대결',
+    subtitle: '프런트코트-백코트 경계 승부',
+    description: '리그 정상급 장신 윙 스코어러와의 맞대결에서 감독님이 공수 양면의 직접 매치업을 지시했습니다.',
+    tags: ['PRIME_ACE', 'HOT_STREAK'],
+    allowedPositions: ['SG', 'SF'],
+    preferredPositions: ['SG', 'SF'],
+    c1Label: '긴 팔과 사이드 스텝으로 상대 미드레인지 봉쇄',
+    c1Desc: '상대 에이스의 리듬을 끊어내며 수비 집중력을 입증합니다.',
+    c1Summary: 'DEF +2, PHY +1 · 감독 신뢰도 +8',
+    c1Stats: { def: 2, phy: 1 },
+    c1Trust: 8,
+    c1Draft: 4,
+    c2Label: '윙 아이솔레이션 정면 승부로 득점 화력 대결',
+    c2Desc: '강한 1대1 돌파와 풀업 점퍼로 코트 주도권을 빼앗아 옵니다.',
+    c2Summary: 'INS +2, OUT +1 · 스카우트 주가 +6',
+    c2Stats: { ins: 2, out: 1 },
+    c2Trust: 4,
+    c2Draft: 6,
+  },
+  {
+    category: 'TACTICAL_CLASH',
+    code: 'WNG_03',
+    title: '오프볼 핀다운 컬 & 플레어 스크린 동선 최적화',
+    subtitle: '무빙 슈터 전술 패턴 완성',
+    description: '볼 없이 베이스라인과 45도를 오가며 빅맨의 핀다운 스크린을 타고 나오는 전술 패턴이 팀의 핵심 공격 옵션으로 채택됐습니다.',
+    tags: ['AMATEUR_PROSPECT', 'PRO_STAR'],
+    allowedPositions: ['SG', 'SF'],
+    preferredPositions: ['SG', 'SF'],
+    c1Label: '스크린 직후 원스텝 캐치앤슛 타이밍 숙달',
+    c1Desc: '불필요한 드리블을 줄이고 수비가 따라붙기 전 외곽포를 꽂습니다.',
+    c1Summary: 'OUT +2, PHY +1 · 감독 신뢰도 +7',
+    c1Stats: { out: 2, phy: 1 },
+    c1Trust: 7,
+    c1Draft: 4,
+    c2Label: '수비 추격을 따돌리는 백도어 컬 컷과 림 마무리',
+    c2Desc: '외곽을 과도하게 견제하는 수비 뒤공간을 찔러 쉬운 득점을 올립니다.',
+    c2Summary: 'INS +2, PLY +1 · 스카우트 주가 +5',
+    c2Stats: { ins: 2, ply: 1 },
+    c2Trust: 5,
+    c2Draft: 5,
+  },
+  {
+    category: 'POSITION',
+    code: 'WNG_04',
+    title: '1번부터 4번까지 소화하는 멀티 스위치 수비',
+    subtitle: '스위처블 윙 수비수 진화',
+    description: '상대 픽앤롤 공격에 맞서 가드부터 파워포워드까지 포지션 구분 없이 스위치 수비를 소화하는 핵심 수비 축을 맡게 됐습니다.',
+    tags: ['CHAMPIONSHIP_HUNT', 'CONTRACT_YEAR'],
+    allowedPositions: ['SG', 'SF'],
+    preferredPositions: ['SG', 'SF'],
+    c1Label: '포스트 미스매치 프런팅 수비와 박스아웃 보강',
+    c1Desc: '체격이 큰 포워드를 상대로도 골밑 자리를 쉽게 내주지 않습니다.',
+    c1Summary: 'DEF +2, REB +1 · 감독 신뢰도 +8',
+    c1Stats: { def: 2, reb: 1 },
+    c1Trust: 8,
+    c1Draft: 4,
+    c2Label: '빠른 횡이동과 패스 길 차단으로 트랜지션 유도',
+    c2Desc: '스위치 직후 스틸을 만들어내며 팀의 속공 리듬을 살립니다.',
+    c2Summary: 'DEF +2, PHY +1 · 스카우트 주가 +5',
+    c2Stats: { def: 2, phy: 1 },
+    c2Trust: 6,
+    c2Draft: 5,
+  },
+  {
+    category: 'SCOUTING_SHOWCASE',
+    code: 'WNG_05',
+    title: '트랜지션 윙 레인 피니시 & 트레일러 선택',
+    subtitle: '속공 마무리 결정력 점검',
+    description: '수비 리바운드 직후 양쪽 사이드 레인을 전력 질주해 속공을 마무리하는 트랜지션 효율이 스카우트들의 주목을 받고 있습니다.',
+    tags: ['ROOKIE_WALL', 'HOT_STREAK'],
+    allowedPositions: ['SG', 'SF'],
+    preferredPositions: ['SG', 'SF'],
+    c1Label: '사이드 레인 트레일러 3점슛과 코너 스페이싱',
+    c1Desc: '속공 가담 시 외곽에서 정확히 마무리하며 공격 흐름을 넓힙니다.',
+    c1Summary: 'OUT +2, PLY +1 · 감독 신뢰도 +6',
+    c1Stats: { out: 2, ply: 1 },
+    c1Trust: 6,
+    c1Draft: 4,
+    c2Label: '수비수 콘택트를 이겨내는 유로스텝 림 어택',
+    c2Desc: '앤드원 파울을 유도하는 과감한 속공 돌파로 경기 분위기를 바꿉니다.',
+    c2Summary: 'INS +2, PHY +1 · 스카우트 주가 +6',
+    c2Stats: { ins: 2, phy: 1 },
+    c2Trust: 5,
+    c2Draft: 6,
+  },
+
+  // BIG MAN SPECIALIZED (5) - PF / C
+  {
+    category: 'TACTICAL_CLASH',
+    code: 'BIG_01',
+    title: '픽앤롤 드롭 커버리지 vs 하드 헤지 수비 선택',
+    subtitle: '프런트코트 수비 시스템 조율',
+    description: '상대 가드의 픽앤롤 공격에 맞서 페인트존을 지키는 드롭백 수비와 외곽까지 튀어나가는 헤지 수비 중 기준을 정해야 합니다.',
+    tags: ['PRO_STAR', 'CHAMPIONSHIP_HUNT'],
+    allowedPositions: ['PF', 'C'],
+    preferredPositions: ['PF', 'C'],
+    c1Label: '골밑 림 보호와 리바운드 사수를 위한 정교한 드롭백',
+    c1Desc: '돌파 경로와 롭 패스를 동시에 차단하며 페인트존 실점을 줄입니다.',
+    c1Summary: 'DEF +2, REB +1 · 감독 신뢰도 +8',
+    c1Stats: { def: 2, reb: 1 },
+    c1Trust: 8,
+    c1Draft: 3,
+    c2Label: '3점 라인 밖까지 압박하는 공격적 헤지 앤 리커버',
+    c2Desc: '넓은 수비 기동력을 증명하며 현대 농구형 빅맨 가치를 높입니다.',
+    c2Summary: 'DEF +2, PHY +1 · 스카우트 주가 +5',
+    c2Stats: { def: 2, phy: 1 },
+    c2Trust: 6,
+    c2Draft: 5,
+  },
+  {
+    category: 'SCOUTING_SHOWCASE',
+    code: 'BIG_02',
+    title: '로우포스트 훅샷 & 업앤언더 풋워크 연마',
+    subtitle: '골밑 정통 스코어링 완성',
+    description: '전담 빅맨 코치와 함께 로우 블록에서 수비수의 중심을 무너뜨리는 드롭스텝, 베이비 훅, 업앤언더 연계 풋워크를 집중 훈련했습니다.',
+    tags: ['PRIME_ACE', 'AMATEUR_PROSPECT'],
+    allowedPositions: ['PF', 'C'],
+    preferredPositions: ['PF', 'C'],
+    c1Label: '양손 마무리 훅샷과 안정적인 포스트 자리 잡기',
+    c1Desc: '미스매치가 생길 때마다 확실한 골밑 2점을 보장하는 축이 됩니다.',
+    c1Summary: 'INS +2, REB +1 · 감독 신뢰도 +7',
+    c1Stats: { ins: 2, reb: 1 },
+    c1Trust: 7,
+    c1Draft: 4,
+    c2Label: '페이스업 미드레인지 점퍼와 스핀 무브 카운터 확장',
+    c2Desc: '포스트와 미드레인지를 오가며 상대 빅맨을 림 밖으로 끌어냅니다.',
+    c2Summary: 'INS +2, OUT +1 · 스카우트 주가 +6',
+    c2Stats: { ins: 2, out: 1 },
+    c2Trust: 5,
+    c2Draft: 6,
+  },
+  {
+    category: 'ROLE_ADAPTATION',
+    code: 'BIG_03',
+    title: '하이포스트 쇼트롤 4대3 패싱 허브 임무',
+    subtitle: '컨트롤 타워 빅맨 진화',
+    description: '상대가 팀의 주전 가드에게 블리츠 더블팀을 걸자, 자유투 라인 부근에서 공을 받아 4대3 공격을 전개하는 쇼트롤 허브 역할이 주어졌습니다.',
+    tags: ['HOT_STREAK', 'VETERAN_LEADER'],
+    allowedPositions: ['PF', 'C'],
+    preferredPositions: ['PF', 'C'],
+    c1Label: '코너 슈터와 베이스라인 컷인을 살리는 패스 전개',
+    c1Desc: '높은 타점에서 코트 전체를 조망하며 팀 오펜스의 윤활유가 됩니다.',
+    c1Summary: 'PLY +2, REB +1 · 감독 신뢰도 +8',
+    c1Stats: { ply: 2, reb: 1 },
+    c1Trust: 8,
+    c1Draft: 4,
+    c2Label: '하이포스트 캐치 직후 원드리블 덩크와 플로터 마무리',
+    c2Desc: '도움 수비가 주저하는 틈을 타 직접 페인트존을 폭격합니다.',
+    c2Summary: 'INS +2, PLY +1 · 스카우트 주가 +5',
+    c2Stats: { ins: 2, ply: 1 },
+    c2Trust: 5,
+    c2Draft: 5,
+  },
+  {
+    category: 'RIVAL_SHOWDOWN',
+    code: 'BIG_04',
+    title: '리그 최정상 리바운더와의 골밑 보드 경합',
+    subtitle: '페인트존 육탄전 승부',
+    description: '거구의 상대 센터가 공격 리바운드로 경기 흐름을 장악하려 들자, 코칭스태프가 박스아웃과 골밑 제공권 장악을 최우선 과제로 주문했습니다.',
+    tags: ['CONTRACT_YEAR', 'BENCH_SPARK'],
+    allowedPositions: ['PF', 'C'],
+    preferredPositions: ['PF', 'C'],
+    c1Label: '철저한 로우 바디 박스아웃으로 상대 보드 원천 봉쇄',
+    c1Desc: '세컨드 찬스 실점을 막아내며 팀 수비 안정감을 끌어올립니다.',
+    c1Summary: 'REB +2, DEF +1 · 감독 신뢰도 +8',
+    c1Stats: { reb: 2, def: 1 },
+    c1Trust: 8,
+    c1Draft: 3,
+    c2Label: '공격 리바운드 경합 가담과 풋백 덩크 맞불',
+    c2Desc: '상대 골밑을 정면으로 두드리며 리바운드 주도권을 탈환합니다.',
+    c2Summary: 'REB +2, INS +1 · 스카우트 주가 +5',
+    c2Stats: { reb: 2, ins: 1 },
+    c2Trust: 5,
+    c2Draft: 5,
+  },
+  {
+    category: 'LOAD_MANAGEMENT',
+    code: 'BIG_05',
+    title: '림 프로텍션 수직성 & 파울 트러블 관리',
+    subtitle: '빅맨 수비 규율 정비',
+    description: '상대 돌파수들이 블록슛을 노리는 타이밍에 몸을 부딪혀 파울을 유도하는 패턴이 잦아지며 파울 관리가 과제로 떠올랐습니다.',
+    tags: ['ROOKIE_WALL', 'CHAMPIONSHIP_HUNT'],
+    allowedPositions: ['PF', 'C'],
+    preferredPositions: ['PF', 'C'],
+    c1Label: '두 팔을 수직으로 유지하는 버티컬리티 규율 정착',
+    c1Desc: '불필요한 파울을 줄이고 4쿼터 승부처까지 코트에 남습니다.',
+    c1Summary: 'DEF +2, PHY +1 · 감독 신뢰도 +8',
+    c1Stats: { def: 2, phy: 1 },
+    c1Trust: 8,
+    c1Draft: 4,
+    c2Label: '위크사이드 헬프 블록 타이밍으로 림 장악력 과시',
+    c2Desc: '압도적인 블록 존재감으로 상대의 페인트존 진입 자체를 억제합니다.',
+    c2Summary: 'DEF +2, REB +1 · 스카우트 주가 +5',
+    c2Stats: { def: 2, reb: 1 },
+    c2Trust: 5,
+    c2Draft: 5,
+  },
 ];
 
-const PRO_LEAGUES: LeagueId[] = ['KBL', 'OVERSEAS', 'GLEAGUE', 'NBA'];
+const PRO_LEAGUES: LeagueId[] = [
+  'KBL',
+  'B_LEAGUE',
+  'NBL',
+  'EUROLEAGUE',
+  'GLEAGUE',
+  'NBA',
+];
 
 // 프로 무대 전용 시나리오 (고교·대학 아마추어 단계에서 원정 비행기·글로벌 음료 CF·전담 영양사 등 몰입 깨짐 원천 차단)
 const PRO_ONLY_CODES = new Set<string>([
@@ -1653,17 +2019,65 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
 
   const choices: CareerEventChoice[] = [safeOrTradeoffChoice, highRiskChoice];
 
-  // 일부 핵심 프로/특훈 시나리오에는 자금 투자형 3번째 선택지 추가
+  // 일부 핵심 프로/특훈 시나리오에는 자금 투자형 및 능력치·특성·관계도 전용 3번째 선택지 추가
   if (isProScenario && (s.category === 'LOAD_MANAGEMENT' || s.category === 'OFF_COURT_BRAND')) {
     choices.push({
       label: '사비를 투자해 전문 컨설턴트·트레이너를 개인 초빙한다 (-$15K)',
-      description: '보유 현금을 과감히 투자해 리스크 없이 확실한 컨디션과 기량 보너스를 챙겨요.',
+      description: '보유 현금을 과감히 투자해 리스크 없이 피지컬과 기량 보너스를 확보합니다.',
       riskTier: 'BALANCED',
       cashDelta: -15000,
-      effectSummary: '가용 자산 -$15K · PHY +2, 신뢰도 +6, 주가 +5 확정',
+      effectSummary: '가용 자산 -$15K · PHY +2 · 감독 신뢰 +6 확정',
       statChanges: { phy: 2, [c1Primary]: 1 },
       trustDelta: 6,
       draftStockDelta: 5,
+    });
+  } else if (s.category === 'TACTICAL_CLASH' || s.category === 'ROLE_ADAPTATION') {
+    choices.push({
+      label: '전술 영상 브리핑으로 코칭스태프와 맞춤 해법 합의',
+      description: '높은 패스·전술 이해도(PLY)를 바탕으로 팀 전술과 개인 강점을 동시에 살리는 방안을 도출합니다.',
+      riskTier: 'SAFE',
+      isExclusiveChoice: true,
+      requirements: {
+        minStat: { ply: 74 },
+        label: '전용 분기 · 패스(PLY) 74+',
+      },
+      effectSummary: 'PLY +2 · 감독 신뢰 +8 · 라커룸 +4 확정',
+      statChanges: { ply: 2, [c1Primary]: 1 },
+      relationshipChanges: { lockerRoom: 4 },
+      trustDelta: 8,
+      draftStockDelta: 4,
+    });
+  } else if (s.category === 'RIVAL_SHOWDOWN' || s.category === 'MEDIA_SPOTLIGHT') {
+    choices.push({
+      label: '승부처 퍼포먼스로 정면 돌파해 스포트라이트 독점',
+      description: '압박감을 즐기는 승부사 기질로 여론과 매치업 주도권을 한 번에 가져옵니다.',
+      riskTier: 'SAFE',
+      isExclusiveChoice: true,
+      requirements: {
+        requiredTrait: 'CLUTCH_PERFORMER',
+        label: "전용 분기 · 특성 '승부사' 보유",
+      },
+      effectSummary: '언론·팬심 +8 · 핵심 스탯 +2 · 감독 신뢰 +4 확정',
+      statChanges: { [c2Primary]: 2 },
+      relationshipChanges: { mediaFan: 8 },
+      trustDelta: 4,
+      draftStockDelta: 5,
+    });
+  } else if (s.category === 'LOCKER_ROOM' || s.category === 'FRONT_OFFICE') {
+    choices.push({
+      label: '베테랑급 소통으로 선수단과 구단 가교 역할 수행',
+      description: '라커룸 내부 결속력을 바탕으로 갈등을 중재하고 팀 분위기를 한 단계 끌어올립니다.',
+      riskTier: 'SAFE',
+      isExclusiveChoice: true,
+      requirements: {
+        minRelationship: { lockerRoom: 70 },
+        label: '전용 분기 · 라커룸 70+',
+      },
+      effectSummary: '라커룸 +8 · 프런트 +6 · DEF +1 · 감독 신뢰 +6 확정',
+      statChanges: { [c1Primary]: 1, def: 1 },
+      relationshipChanges: { lockerRoom: 8, frontOffice: 6 },
+      trustDelta: 6,
+      draftStockDelta: 3,
     });
   }
 
@@ -1678,6 +2092,9 @@ export const ENCOUNTER_SCENARIO_POOL: EncounterScenarioTemplate[] =
     subtitle: s.subtitle,
     description: s.description,
     allowedLeagues: PRO_ONLY_CODES.has(s.code) ? PRO_LEAGUES : undefined,
+    allowedPositions: s.allowedPositions,
+    excludedPositions: s.excludedPositions,
+    preferredPositions: s.preferredPositions,
     minAge: MIN_AGE_BY_CODE[s.code],
     preferredTags: s.tags,
     choices: enrichSeedChoices(s),
@@ -1724,14 +2141,18 @@ export function resolveEncounterChoiceOutcome(
 ): {
   result: EncounterResolutionResult;
   nextChainEvent: CareerEvent | null;
+  arcAdvance?: CareerEventChoice['arcAdvance'];
 } {
   if (!choice.successCheck || !choice.successOutcome || !choice.failureOutcome) {
     const statChanges = choice.statChanges || {};
+    const relationshipChanges: Partial<RelationshipMetrics> | undefined =
+      choice.relationshipChanges ? { ...choice.relationshipChanges } : undefined;
     const trustDelta = choice.trustDelta || 0;
     const draftStockDelta = choice.draftStockDelta || 0;
     const potentialDelta = choice.potentialDelta || 0;
     const cashDelta = choice.cashDelta || 0;
     const nextChainEvent = choice.nextChainEvent || null;
+    const arcAdvance = choice.arcAdvance;
     return {
       result: {
         eventId: event.id,
@@ -1743,13 +2164,16 @@ export function resolveEncounterChoiceOutcome(
         outcomeTier: 'GUARANTEED',
         narrative: choice.description,
         statChanges,
+        relationshipChanges,
         trustDelta,
         draftStockDelta,
         potentialDelta,
         cashDelta,
+        arcProgressNote: arcAdvance?.summary,
         chainedNextSeasonTitle: nextChainEvent?.title,
       },
       nextChainEvent,
+      arcAdvance,
     };
   }
 
@@ -1760,6 +2184,10 @@ export function resolveEncounterChoiceOutcome(
 
   const branch = succeeded ? choice.successOutcome : choice.failureOutcome;
   const statChanges: Partial<PlayerStats> = { ...(branch.statChanges || {}) };
+  const relationshipChanges: Partial<RelationshipMetrics> = {
+    ...(choice.relationshipChanges || {}),
+    ...(branch.relationshipChanges || {}),
+  };
 
   // 대성공(상위 20% 롤) 시 핵심 능력치 +1 추가 보너스
   if (isCritical) {
@@ -1772,6 +2200,11 @@ export function resolveEncounterChoiceOutcome(
   const potentialDelta = branch.potentialDelta || 0;
   const cashDelta = (branch.cashDelta || 0) + (choice.cashDelta || 0);
   const nextChainEvent = branch.nextChainEvent || null;
+  const arcAdvance = branch.arcAdvance || choice.arcAdvance;
+
+  const hasRelationship = Object.values(relationshipChanges).some(
+    (v) => typeof v === 'number' && v !== 0
+  );
 
   return {
     result: {
@@ -1790,13 +2223,16 @@ export function resolveEncounterChoiceOutcome(
         ? `대성공 · ${branch.narrative} 기대 이상의 활약으로 핵심 능력치가 추가로 +1 상승했습니다.`
         : branch.narrative,
       statChanges,
+      relationshipChanges: hasRelationship ? relationshipChanges : undefined,
       trustDelta,
       draftStockDelta,
       potentialDelta,
       cashDelta,
+      arcProgressNote: arcAdvance?.summary,
       chainedNextSeasonTitle: nextChainEvent?.title,
     },
     nextChainEvent,
+    arcAdvance,
   };
 }
 
@@ -1808,13 +2244,24 @@ export function rollCombinatorialEncounter(
     return career.pendingChainEvent;
   }
 
+  const storyArcEvent = rollStoryArcEvent(career, rng);
+  if (storyArcEvent) {
+    return storyArcEvent;
+  }
+
   const seenIds = new Set(career.seenEventIds || []);
   const recentCategories = (career.recentEventCategories || []).slice(-2);
   const contextTags = extractCareerContextTags(career);
 
-  // 0) 리그/연령 컨텍스트 적합성 필터 (고교생에게 프로 전용 이벤트 출현 원천 차단)
+  // 0) 리그/연령/포지션 컨텍스트 적합성 필터 (고교생 프로 이벤트·포지션 불일치 이벤트 원천 차단)
   const contextEligible = ENCOUNTER_SCENARIO_POOL.filter((s) => {
     if (s.allowedLeagues && !s.allowedLeagues.includes(career.league)) {
+      return false;
+    }
+    if (s.excludedPositions?.includes(career.primaryPos)) {
+      return false;
+    }
+    if (s.allowedPositions && !s.allowedPositions.includes(career.primaryPos)) {
       return false;
     }
     if (typeof s.minAge === 'number' && career.age < s.minAge) {
@@ -1844,14 +2291,21 @@ export function rollCombinatorialEncounter(
     candidates = [...basePool];
   }
 
-  // 2) 커리어 컨텍스트 태그 일치도에 따라 가중치 정렬/선택
+  // 2) 커리어 컨텍스트 태그 및 포지션 선호도에 따라 가중치 정렬/선택
   const scored = candidates.map((s) => {
     const tagMatches = (s.preferredTags || []).filter((t) =>
       contextTags.includes(t)
     ).length;
+    const primaryPosBonus = s.preferredPositions?.includes(career.primaryPos)
+      ? 1.8
+      : 0;
+    const secondaryPosBonus =
+      career.secondaryPos && s.preferredPositions?.includes(career.secondaryPos)
+        ? 0.6
+        : 0;
     return {
       scenario: s,
-      weight: 1 + tagMatches * 1.5,
+      weight: 1 + tagMatches * 1.5 + primaryPosBonus + secondaryPosBonus,
     };
   });
 

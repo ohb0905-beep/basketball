@@ -6,10 +6,18 @@ import {
   Check,
   Copy,
   Download,
+  Lock,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react';
 import { calculateEncounterSuccessChance } from '../../engine/encounterEngine';
+import { RELATIONSHIP_LABELS } from '../../engine/progressionEngine';
+import { checkEncounterChoiceUnlock } from '../../engine/storyArcEngine';
+import {
+  buildHofCompendium,
+  normalizeRecordBook,
+} from '../../engine/recordBookEngine';
 import {
   getEffectiveCashBalance,
   useCareerStore,
@@ -20,7 +28,10 @@ import {
   CareerState,
   EncounterResolutionResult,
   PlayerStats,
+  RelationshipMetrics,
+  ResetScope,
 } from '../../types/game';
+import { formatCashDelta, stripLeadingEmoji } from '../../utils/formatters';
 
 const STAT_LABEL_KO: Record<keyof PlayerStats, string> = {
   ins: '골밑',
@@ -30,14 +41,6 @@ const STAT_LABEL_KO: Record<keyof PlayerStats, string> = {
   reb: '리바운드',
   phy: '피지컬',
 };
-
-function formatCashDelta(delta: number): string {
-  const sign = delta > 0 ? '+' : '-';
-  const abs = Math.abs(delta);
-  if (abs >= 1000000) return `${sign}$${(abs / 1000000).toFixed(2)}M`;
-  if (abs >= 1000) return `${sign}$${Math.round(abs / 1000).toLocaleString()}K`;
-  return `${sign}$${abs.toLocaleString()}`;
-}
 
 export interface ModalProps {
   open: boolean;
@@ -103,7 +106,7 @@ export function Modal({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[40px] min-w-[40px] -mr-2 -mt-1 flex items-center justify-center rounded-full text-[var(--t-g500)] hover:bg-[var(--t-g100)] cursor-pointer shrink-0 t-tap"
+              className="min-h-[44px] min-w-[44px] -mr-2 -mt-1 flex items-center justify-center rounded-full text-[var(--t-g500)] hover:bg-[var(--t-g100)] cursor-pointer shrink-0 t-tap"
               aria-label="닫기"
             >
               <X className="w-5 h-5" />
@@ -193,11 +196,13 @@ export function CareerEventModal({
           <div className="px-6 pt-4 sm:pt-6 pb-6 pb-safe overflow-y-auto space-y-5">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2 text-[12px] font-semibold">
-                <span className="text-[var(--t-accent-ink)]">
-                  {event.subtitle || '분기점'}
+                <span className="text-[var(--t-accent-ink)] truncate">
+                  {event.arcTitle
+                    ? `${event.arcTitle} · ${event.subtitle}`
+                    : event.subtitle || '분기점'}
                 </span>
                 {career && (
-                  <span className="text-[var(--t-g500)] tabular-nums">
+                  <span className="text-[var(--t-g500)] tabular-nums shrink-0">
                     자산 {formatCashDelta(currentCash).replace('+', '')}
                   </span>
                 )}
@@ -235,6 +240,13 @@ export function CareerEventModal({
             ) : (
               <div className="space-y-2.5">
                 {event.choices.map((choice, idx) => {
+                  const unlockStatus = checkEncounterChoiceUnlock(career, choice);
+                  const isExclusive = Boolean(
+                    choice.isExclusiveChoice ||
+                      choice.requirements ||
+                      choice.requiredTrait
+                  );
+                  const isLockedByReq = !unlockStatus.unlocked;
                   const successChancePct =
                     career && choice.successCheck
                       ? calculateEncounterSuccessChance(career, choice)
@@ -244,38 +256,55 @@ export function CareerEventModal({
                       ? Math.abs(choice.cashDelta)
                       : 0;
                   const cannotAfford = costUsd > 0 && currentCash < costUsd;
+                  const isDisabled = cannotAfford || isLockedByReq;
 
-                  const metaLabel =
-                    choice.riskTier === 'HIGH_RISK' || choice.successCheck
-                      ? successChancePct !== null
-                        ? `성공률 ${successChancePct}%`
-                        : '도전'
-                      : choice.riskTier === 'BALANCED'
-                      ? '트레이드오프'
-                      : '확정';
+                  const metaLabel = isLockedByReq
+                    ? '잠금'
+                    : isExclusive
+                    ? '전용 분기'
+                    : choice.riskTier === 'HIGH_RISK' || choice.successCheck
+                    ? successChancePct !== null
+                      ? `성공률 ${successChancePct}%`
+                      : '도전'
+                    : choice.riskTier === 'BALANCED'
+                    ? '트레이드오프'
+                    : '확정';
 
-                  const metaColor =
-                    choice.riskTier === 'HIGH_RISK' || choice.successCheck
-                      ? 'text-[var(--t-accent-ink)]'
-                      : choice.riskTier === 'BALANCED'
-                      ? 'text-[var(--t-gold)]'
-                      : 'text-[var(--t-ok)]';
+                  const metaColor = isLockedByReq
+                    ? 'text-[var(--t-g400)]'
+                    : isExclusive
+                    ? 'text-[var(--t-accent-ink)]'
+                    : choice.riskTier === 'HIGH_RISK' || choice.successCheck
+                    ? 'text-[var(--t-accent-ink)]'
+                    : choice.riskTier === 'BALANCED'
+                    ? 'text-[var(--t-gold)]'
+                    : 'text-[var(--t-ok)]';
 
                   return (
                     <button
                       key={`${event.id}-choice-${idx}`}
                       type="button"
-                      disabled={cannotAfford}
+                      data-testid={
+                        isExclusive
+                          ? `encounter-exclusive-choice-${idx}`
+                          : `encounter-choice-${idx}`
+                      }
+                      disabled={isDisabled}
                       onClick={() => handleChoiceClick(choice)}
                       className={`w-full min-h-[60px] text-left p-4 rounded-2xl transition t-tap space-y-1 ${
-                        cannotAfford
-                          ? 'bg-[var(--t-g100)] opacity-45 cursor-not-allowed'
+                        isDisabled
+                          ? 'bg-[var(--t-g100)] opacity-50 cursor-not-allowed'
+                          : isExclusive
+                          ? 'bg-[var(--t-accent-soft)] ring-1 ring-[var(--t-accent)]/35 hover:ring-[var(--t-accent)] cursor-pointer'
                           : 'bg-[var(--t-g100)] hover:bg-[var(--t-accent-soft)] cursor-pointer'
                       }`}
                     >
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-[15px] font-bold text-[var(--t-g900)]">
-                          {choice.label}
+                        <span className="text-[15px] font-bold text-[var(--t-g900)] inline-flex items-center gap-1.5 min-w-0">
+                          {isLockedByReq && (
+                            <Lock className="w-3.5 h-3.5 text-[var(--t-g400)] shrink-0" />
+                          )}
+                          <span>{choice.label}</span>
                         </span>
                         <span
                           className={`text-[12px] font-bold tabular-nums shrink-0 ${metaColor}`}
@@ -283,6 +312,23 @@ export function CareerEventModal({
                           {metaLabel}
                         </span>
                       </div>
+
+                      {isExclusive && unlockStatus.requirementLabel && (
+                        <p
+                          className={`text-[12px] font-semibold ${
+                            isLockedByReq
+                              ? 'text-[var(--t-up)]'
+                              : 'text-[var(--t-accent-ink)]'
+                          }`}
+                        >
+                          {isLockedByReq
+                            ? `조건 미충족 · ${unlockStatus.missingSummary}`
+                            : `${unlockStatus.requirementLabel.replace(
+                                /^전용 분기\s*·\s*/,
+                                ''
+                              )} 충족`}
+                        </p>
+                      )}
 
                       <p className="text-[13px] text-[var(--t-g600)] leading-snug">
                         {choice.description}
@@ -339,24 +385,41 @@ export function CareerEventModal({
       ][]
     ).filter(([, val]) => typeof val === 'number' && val !== 0);
 
+    const combinedCoachDelta =
+      lastOutcome.trustDelta + (lastOutcome.relationshipChanges?.coachTrust || 0);
+
+    const otherRelEntries = (
+      Object.entries(lastOutcome.relationshipChanges || {}) as [
+        keyof RelationshipMetrics,
+        number | undefined,
+      ][]
+    ).filter(
+      ([key, val]) => key !== 'coachTrust' && typeof val === 'number' && val !== 0
+    );
+
     const deltaItems: { label: string; value: string; positive: boolean }[] = [
       ...statEntries.map(([key, val]) => ({
         label: STAT_LABEL_KO[key],
         value: (val || 0) > 0 ? `+${val}` : String(val),
         positive: (val || 0) > 0,
       })),
-      ...(lastOutcome.trustDelta !== 0
+      ...(combinedCoachDelta !== 0
         ? [
             {
               label: '감독 신뢰',
               value:
-                lastOutcome.trustDelta > 0
-                  ? `+${lastOutcome.trustDelta}`
-                  : String(lastOutcome.trustDelta),
-              positive: lastOutcome.trustDelta > 0,
+                combinedCoachDelta > 0
+                  ? `+${combinedCoachDelta}`
+                  : String(combinedCoachDelta),
+              positive: combinedCoachDelta > 0,
             },
           ]
         : []),
+      ...otherRelEntries.map(([key, val]) => ({
+        label: RELATIONSHIP_LABELS[key],
+        value: (val || 0) > 0 ? `+${val}` : String(val),
+        positive: (val || 0) > 0,
+      })),
       ...(lastOutcome.draftStockDelta !== 0
         ? [
             {
@@ -451,6 +514,17 @@ export function CareerEventModal({
               </div>
             )}
 
+            {lastOutcome.arcProgressNote && (
+              <div className="p-3.5 rounded-2xl bg-[var(--t-g100)] space-y-1">
+                <p className="text-[11px] font-bold text-[var(--t-accent-ink)]">
+                  스토리 아크
+                </p>
+                <p className="text-[13px] text-[var(--t-g800)] leading-relaxed">
+                  {lastOutcome.arcProgressNote}
+                </p>
+              </div>
+            )}
+
             {lastOutcome.chainedNextSeasonTitle && (
               <div className="p-3.5 rounded-2xl bg-[var(--t-accent-soft)] text-[13px] text-[var(--t-g800)]">
                 <span className="font-bold text-[var(--t-accent-ink)] mr-1.5">
@@ -493,7 +567,7 @@ export function ResetConfirmModal({
   return (
     <Modal
       open={open}
-      title="새 커리어를 시작할까요?"
+      title="새 커리어 시작"
       subtitle={`#${career.jerseyNumber} ${career.name} · OVR ${career.ovr}`}
       onClose={onCancel}
     >
@@ -520,6 +594,165 @@ export function ResetConfirmModal({
   );
 }
 
+function SelectiveResetPanel({
+  onComplete,
+}: {
+  onComplete?: () => void;
+}) {
+  const career = useCareerStore((s) => s.career);
+  const hofList = useCareerStore((s) => s.hofList);
+  const recordBook = useCareerStore((s) => s.recordBook);
+  const resetByScope = useCareerStore((s) => s.resetByScope);
+
+  const [scope, setScope] = useState<ResetScope>('RECORD_BOOK');
+  const [confirming, setConfirming] = useState(false);
+
+  const normalizedRecords = normalizeRecordBook(recordBook);
+  const compendium = buildHofCompendium(hofList, normalizedRecords);
+
+  const scopeOptions: {
+    id: ResetScope;
+    title: string;
+    detail: string;
+    countLabel: string;
+  }[] = [
+    {
+      id: 'RECORD_BOOK',
+      title: '역대 기록실만 초기화',
+      detail: '사용자가 경신한 리그 신기록만 역대 기본값으로 복원합니다. 명예의 전당과 진행 중 커리어는 유지됩니다.',
+      countLabel: `신기록 ${compendium.userBrokenRecordsCount}건`,
+    },
+    {
+      id: 'HALL_OF_FAME',
+      title: '명예의 전당만 초기화',
+      detail: '헌액된 은퇴 선수와 올타임 베스트 5를 비웁니다. 역대 기록실과 진행 중 커리어는 유지됩니다.',
+      countLabel: `헌액 ${hofList.length}명`,
+    },
+    {
+      id: 'ALL',
+      title: '전체 기록 초기화',
+      detail: '진행 중인 커리어, 명예의 전당, 역대 기록실 신기록을 모두 초기화합니다.',
+      countLabel: career
+        ? `커리어 1 · 헌액 ${hofList.length} · 신기록 ${compendium.userBrokenRecordsCount}`
+        : `헌액 ${hofList.length} · 신기록 ${compendium.userBrokenRecordsCount}`,
+    },
+  ];
+
+  const selectedMeta =
+    scopeOptions.find((opt) => opt.id === scope) || scopeOptions[0];
+
+  const handleConfirm = () => {
+    resetByScope(scope);
+    setConfirming(false);
+    onComplete?.();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        {scopeOptions.map((opt) => {
+          const active = scope === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              data-testid={`reset-scope-${opt.id}`}
+              onClick={() => {
+                setScope(opt.id);
+                setConfirming(false);
+              }}
+              className={`w-full min-h-[64px] p-3.5 rounded-2xl text-left flex items-start gap-3 transition cursor-pointer t-tap ${
+                active
+                  ? 'bg-[var(--t-accent-soft)] ring-1 ring-[var(--t-accent)]'
+                  : 'bg-[var(--t-g100)] hover:bg-[var(--t-g200)]/70'
+              }`}
+            >
+              <div className="pt-0.5">
+                <SelectionCheckCircle selected={active} />
+              </div>
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[14px] font-bold text-[var(--t-g900)]">
+                    {opt.title}
+                  </span>
+                  <span className="text-[12px] font-bold text-[var(--t-g600)] tabular-nums shrink-0">
+                    {opt.countLabel}
+                  </span>
+                </div>
+                <p className="text-[12px] text-[var(--t-g600)] leading-snug">
+                  {opt.detail}
+                </p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {!confirming ? (
+        <button
+          type="button"
+          data-testid="request-selective-reset-btn"
+          onClick={() => setConfirming(true)}
+          className="w-full min-h-[50px] rounded-2xl bg-[var(--t-up)] text-white text-[14px] font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer t-tap"
+        >
+          <Trash2 className="w-4 h-4" />
+          <span>{selectedMeta.title}</span>
+        </button>
+      ) : (
+        <div className="p-4 rounded-2xl bg-[var(--t-g100)] space-y-3">
+          <div className="space-y-1">
+            <p className="text-[14px] font-bold text-[var(--t-up)]">
+              정말 초기화하시겠습니까?
+            </p>
+            <p className="text-[12px] text-[var(--t-g600)] leading-relaxed">
+              대상: {selectedMeta.title} ({selectedMeta.countLabel}). 삭제된 데이터는 JSON 백업이 없으면 복구할 수 없습니다.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="t-cta-sub"
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              data-testid="confirm-selective-reset-btn"
+              onClick={handleConfirm}
+              className="w-full min-h-[48px] rounded-2xl bg-[var(--t-up)] text-white text-[14px] font-bold cursor-pointer t-tap"
+            >
+              초기화 확정
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SelectiveResetModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <Modal
+      open={open}
+      title="기록 선택 초기화"
+      subtitle="원하는 범위만 안전하게 초기화할 수 있습니다"
+      onClose={onClose}
+      testId="selective-reset-modal"
+    >
+      <SelectiveResetPanel onComplete={onClose} />
+    </Modal>
+  );
+}
+
 export function SaveAndGuideModal({
   open,
   onClose,
@@ -531,7 +764,7 @@ export function SaveAndGuideModal({
   const importSaveJson = useCareerStore((s) => s.importSaveJson);
   const showToast = useCareerStore((s) => s.showToast);
 
-  const [tab, setTab] = useState<'SAVE' | 'GUIDE'>('SAVE');
+  const [tab, setTab] = useState<'SAVE' | 'RESET' | 'GUIDE'>('SAVE');
   const [importText, setImportText] = useState('');
   const [feedback, setFeedback] = useState<{ ok: boolean; msg: string } | null>(
     null
@@ -591,7 +824,7 @@ export function SaveAndGuideModal({
   return (
     <Modal open={open} title="저장 · 가이드" onClose={onClose}>
       <div className="space-y-5">
-        <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-[var(--t-g100)] text-[13px] font-semibold">
+        <div className="grid grid-cols-3 gap-1 p-1 rounded-2xl bg-[var(--t-g100)] text-[13px] font-semibold">
           <button
             type="button"
             onClick={() => setTab('SAVE')}
@@ -605,6 +838,18 @@ export function SaveAndGuideModal({
           </button>
           <button
             type="button"
+            data-testid="save-modal-reset-tab"
+            onClick={() => setTab('RESET')}
+            className={`min-h-[40px] rounded-xl transition cursor-pointer ${
+              tab === 'RESET'
+                ? 'bg-[var(--t-card)] text-[var(--t-g900)]'
+                : 'text-[var(--t-g500)]'
+            }`}
+          >
+            기록 초기화
+          </button>
+          <button
+            type="button"
             onClick={() => setTab('GUIDE')}
             className={`min-h-[40px] rounded-xl transition cursor-pointer ${
               tab === 'GUIDE'
@@ -612,7 +857,7 @@ export function SaveAndGuideModal({
                 : 'text-[var(--t-g500)]'
             }`}
           >
-            플레이 가이드
+            가이드
           </button>
         </div>
 
@@ -691,20 +936,30 @@ export function SaveAndGuideModal({
               )}
             </div>
           </div>
+        ) : tab === 'RESET' ? (
+          <SelectiveResetPanel onComplete={onClose} />
         ) : (
           <div className="divide-y divide-[var(--t-g100)] text-[13px]">
             {[
               {
                 title: '체격과 성장 효율',
-                body: '신장과 포지션에 따라 스탯 상한과 성장 속도가 달라집니다.',
+                body: '신장과 포지션에 따라 6대 핵심 능력치 상한과 성장 속도가 달라집니다.',
               },
               {
-                title: '인카운터 판정',
-                body: '도전 선택지는 보유 능력치로 성공 확률이 결정되며 대성공 시 연쇄 이벤트가 열립니다.',
+                title: '해외 3대 프로리그 분리 운영',
+                body: '일본 B.리그(12팀·60경기), 호주 NBL(10팀·29경기·플레이인), 유로리그(20팀·38경기·파이널 포)가 각 리그의 실제 규정과 포스트시즌 포맷으로 운영됩니다.',
+              },
+              {
+                title: '관계도 · 스토리 아크 · 전용 분기',
+                body: '감독 신뢰·라커룸·프런트·언론 관계도와 6대 능력치·특성이 기준을 넘으면 인카운터에서 전용 분기가 해금됩니다.',
               },
               {
                 title: '포스트시즌 & 생중계',
                 body: '파이널 및 7차전은 실시간 중계로 진행되며, 4쿼터 ±4점 접전 시 클러치 선택이 발생합니다.',
+              },
+              {
+                title: '4년 주기 국제대회',
+                body: '아시아컵·아시안게임·FIBA 월드컵·올림픽이 4년 주기로 열립니다. 조별리그~4강은 요약으로 진행되며 결승·메달전은 실시간 중계로 펼쳐집니다. 아시안게임 금메달 또는 올림픽 메달 시 병역 특례가 부여됩니다.',
               },
               {
                 title: '자산과 통산 연봉',
@@ -738,7 +993,7 @@ export function ToastBanner() {
 
   if (!toast) return null;
 
-  const dotColor =
+  const accentBar =
     toast.tone === 'emerald'
       ? 'bg-[var(--t-ok)]'
       : toast.tone === 'rose'
@@ -753,12 +1008,12 @@ export function ToastBanner() {
       aria-live="polite"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
-      className="fixed top-[60px] left-1/2 -translate-x-1/2 z-50 w-[calc(100%-32px)] max-w-[440px] bg-[var(--t-g900)] text-[var(--t-card)] px-4 py-3 rounded-2xl shadow-lg flex items-center gap-3"
+      className="fixed top-[60px] left-1/2 -translate-x-1/2 z-50 w-[calc(100%-32px)] max-w-[440px] bg-[var(--t-g900)] text-[var(--t-card)] pl-3.5 pr-2 py-2.5 rounded-2xl shadow-lg flex items-center gap-3"
     >
-      <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
+      <span className={`w-1 h-7 rounded-full shrink-0 ${accentBar}`} />
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-semibold leading-snug truncate">
-          {toast.title.replace(/^[^\p{L}\p{N}#]+/u, '').trim()}
+          {stripLeadingEmoji(toast.title)}
         </p>
         {toast.description && (
           <p className="text-[12px] opacity-75 truncate mt-0.5">
@@ -769,7 +1024,7 @@ export function ToastBanner() {
       <button
         type="button"
         onClick={clearToast}
-        className="min-h-[32px] min-w-[32px] flex items-center justify-center opacity-70 hover:opacity-100 cursor-pointer shrink-0"
+        className="min-h-[40px] min-w-[40px] flex items-center justify-center opacity-70 hover:opacity-100 cursor-pointer shrink-0 rounded-xl"
         aria-label="알림 닫기"
       >
         <X className="w-4 h-4" />

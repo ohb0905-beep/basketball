@@ -1,22 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <circle cx="60" cy="60" r="56" fill="#FFFFFF" stroke="#002D85" stroke-width="2.5"/>
   <defs>
-    <linearGradient id="bg_HS_GYEONGBOK" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1D4ED8"/>
-      <stop offset="100%" stop-color="#090D16"/>
-    </linearGradient>
-    <linearGradient id="rim_HS_GYEONGBOK" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#FFFFFF"/>
-      <stop offset="50%" stop-color="#93C5FD"/>
-      <stop offset="100%" stop-color="#1D4ED8"/>
-    </linearGradient>
+    <path id="gbTop" d="M 18,62 A 42,42 0 1,1 102,62" />
+    <path id="gbBot" d="M 24,74 A 40,40 0 0,0 96,74" />
   </defs>
-  <path d="M100 8 L176 32 V96 C176 144 142 176 100 192 C58 176 24 144 24 96 V32 Z" fill="url(#bg_HS_GYEONGBOK)" stroke="url(#rim_HS_GYEONGBOK)" stroke-width="7"/>
-  <path d="M100 18 L164 39 V95 C164 136 135 164 100 179 C65 164 36 136 36 95 V39 Z" fill="none" stroke="#93C5FD" stroke-width="1.8" opacity="0.65"/>
-  <path d="M100 22 C112 22 120 32 115 44 C127 42 138 52 132 64 C142 70 140 84 128 88 C134 100 122 112 110 106 C106 118 94 118 90 106 C78 112 66 100 72 88 C60 84 58 70 68 64 C62 52 73 42 85 44 C80 32 88 22 100 22 Z" fill="none" stroke="#93C5FD" stroke-width="3" opacity="0.55"/>
-  <rect x="68" y="28" width="64" height="18" rx="9" fill="#090D16" fill-opacity="0.75" stroke="#93C5FD" stroke-width="1.2"/>
-  <text x="100" y="41" text-anchor="middle" fill="#93C5FD" font-family="sans-serif" font-size="11" font-weight="800" letter-spacing="1.5">EST.1921</text>
-  <text x="100" y="102" text-anchor="middle" fill="#FFFFFF" font-family="serif" font-size="44" font-weight="900" letter-spacing="3">景福</text>
-  <path d="M40 128 H160 L152 150 H48 Z" fill="#93C5FD"/>
-  <text x="100" y="143" text-anchor="middle" fill="#090D16" font-family="sans-serif" font-size="13" font-weight="900" letter-spacing="0.5">경복고등학교</text>
-  <text x="100" y="166" text-anchor="middle" fill="#FFFFFF" fill-opacity="0.85" font-family="sans-serif" font-size="8.5" font-weight="700" letter-spacing="1.2">BASKETBALL CLUB</text>
+  <text fill="#002D85" font-family="sans-serif" font-size="8.2" font-weight="800" letter-spacing="0.8">
+    <textPath href="#gbTop" startOffset="50%" text-anchor="middle">KYUNGBOCK HIGH SCHOOL</textPath>
+  </text>
+  <!-- Left & Right laurel arcs -->
+  <g fill="none" stroke="#002D85" stroke-width="2.2" stroke-linecap="round">
+    <path d="M 18 62 C 18 82, 29 96, 45 102"/>
+    <path d="M 102 62 C 102 82, 91 96, 75 102"/>
+  </g>
+  <g fill="#002D85">
+    <ellipse cx="16" cy="66" rx="3.2" ry="1.6" transform="rotate(-25 16 66)"/>
+    <ellipse cx="19" cy="75" rx="3.2" ry="1.6" transform="rotate(-10 19 75)"/>
+    <ellipse cx="24" cy="84" rx="3.2" ry="1.6" transform="rotate(15 24 84)"/>
+    <ellipse cx="31" cy="92" rx="3.2" ry="1.6" transform="rotate(30 31 92)"/>
+    <ellipse cx="104" cy="66" rx="3.2" ry="1.6" transform="rotate(25 104 66)"/>
+    <ellipse cx="101" cy="75" rx="3.2" ry="1.6" transform="rotate(10 101 75)"/>
+    <ellipse cx="96" cy="84" rx="3.2" ry="1.6" transform="rotate(-15 96 84)"/>
+    <ellipse cx="89" cy="92" rx="3.2" ry="1.6" transform="rotate(-30 89 92)"/>
+  </g>
+  <!-- Twin horizontal bars (=) flanking center 福 -->
+  <g fill="#002D85">
+    <rect x="24" y="55" width="11" height="3.2" rx="1"/>
+    <rect x="24" y="62" width="11" height="3.2" rx="1"/>
+    <rect x="85" y="55" width="11" height="3.2" rx="1"/>
+    <rect x="85" y="62" width="11" height="3.2" rx="1"/>
+  </g>
+  <!-- Bold geometric 福 (Gyeongbok emblem center) -->
+  <text x="60" y="73" text-anchor="middle" fill="#002D85" font-family="serif" font-size="40" font-weight="900">福</text>
+  <text x="60" y="93" text-anchor="middle" fill="#002D85" font-family="sans-serif" font-size="10.5" font-weight="900" letter-spacing="1">1921</text>
+  <text x="60" y="106" text-anchor="middle" fill="#002D85" font-family="serif" font-size="8.5" font-weight="800" letter-spacing="1.2">景福高等學校</text>
 </svg>

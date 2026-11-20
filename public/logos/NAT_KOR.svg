@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 120" width="180" height="120" role="img" aria-label="대한민국 국기 (태극기)">
+  <rect x="0.75" y="0.75" width="178.5" height="118.5" rx="6" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+
+  <!-- 태극 (공식 3:2 비율, 대각선 33.69도 회전) -->
+  <g transform="translate(90,60) rotate(33.6901)">
+    <circle cx="0" cy="0" r="30" fill="#0047A0"/>
+    <path d="M -30 0 A 30 30 0 0 1 30 0 Z" fill="#CD2E3A"/>
+    <circle cx="-15" cy="0" r="15" fill="#CD2E3A"/>
+    <circle cx="15" cy="0" r="15" fill="#0047A0"/>
+
+    <!-- 좌상단: 건 (☰) -->
+    <g fill="#000000">
+      <rect x="-50" y="-15" width="5" height="30"/>
+      <rect x="-57.5" y="-15" width="5" height="30"/>
+      <rect x="-65" y="-15" width="5" height="30"/>
+    </g>
+
+    <!-- 우하단: 곤 (☷) -->
+    <g fill="#000000">
+      <rect x="45" y="-15" width="5" height="13.75"/>
+      <rect x="45" y="1.25" width="5" height="13.75"/>
+      <rect x="52.5" y="-15" width="5" height="13.75"/>
+      <rect x="52.5" y="1.25" width="5" height="13.75"/>
+      <rect x="60" y="-15" width="5" height="13.75"/>
+      <rect x="60" y="1.25" width="5" height="13.75"/>
+    </g>
+  </g>
+
+  <!-- 우상단 감 (☵) & 좌하단 리 (☲) -->
+  <g transform="translate(90,60) rotate(-33.6901)" fill="#000000">
+    <!-- 우상단: 감 (☵: 끊어짐-이어짐-끊어짐) -->
+    <rect x="45" y="-15" width="5" height="13.75"/>
+    <rect x="45" y="1.25" width="5" height="13.75"/>
+    <rect x="52.5" y="-15" width="5" height="30"/>
+    <rect x="60" y="-15" width="5" height="13.75"/>
+    <rect x="60" y="1.25" width="5" height="13.75"/>
+
+    <!-- 좌하단: 리 (☲: 이어짐-끊어짐-이어짐) -->
+    <rect x="-50" y="-15" width="5" height="30"/>
+    <rect x="-57.5" y="-15" width="5" height="13.75"/>
+    <rect x="-57.5" y="1.25" width="5" height="13.75"/>
+    <rect x="-65" y="-15" width="5" height="30"/>
+  </g>
+</svg>
