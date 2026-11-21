@@ -208,6 +208,32 @@ for (let run = 0; run < CAREERS; run++) {
       incomplete++;
       continue;
     }
+    // 마지막 시즌 직후 바로 은퇴 화면으로 전환되면 루프 본문에서 처리되지 않을 수 있어 보정합니다.
+    const finalLogs: any[] = final.seasonLogs || [];
+    if (finalLogs.length > seenSeasonCount) {
+      for (let i = seenSeasonCount; i < finalLogs.length; i++) {
+        const log = finalLogs[i];
+        const settlement = final.pendingSeasonSettlement;
+        const justFinalized = i === finalLogs.length - 1 && final.age > log.age;
+        const afterOvr = Number.isFinite(settlement?.nextOvr)
+          ? settlement.nextOvr
+          : justFinalized ? final.ovr : log.ovr;
+        const afterPotential = Number.isFinite(settlement?.nextPotential)
+          ? settlement.nextPotential
+          : justFinalized ? final.potential : final.potential;
+        seasonPoints.push({
+          run, age: log.age, year: log.year, league: log.league, pos,
+          growthDna: final.growthDna || 'STANDARD', initialPotential,
+          ovrAtSeasonStart: log.ovr, ovrAfterSeason: afterOvr,
+          potentialAfterSeason: afterPotential, deltaOvr: round(afterOvr - log.ovr),
+          gp: log.gp, mpg: log.mpg, ppg: log.ppg,
+          injuredGamesMissed: log.injuredGamesMissed || 0,
+          injurySeverity: log.injurySeverity || 'NONE',
+          wonMvp: Boolean(log.wonMvp), allStarSelected: Boolean(log.allStarSelected),
+          wonChampionship: Boolean(log.wonChampionship),
+        });
+      }
+    }
     const ownPoints = seasonPoints.filter((p) => p.run === run);
     const peakPoint = ownPoints.reduce<SeasonPoint | null>((best, p) =>
       !best || p.ovrAtSeasonStart > best.ovrAtSeasonStart ? p : best, null);
