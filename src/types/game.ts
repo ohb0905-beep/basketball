@@ -515,6 +515,8 @@ export interface LeagueAwardSummary {
   allLeague3rd: number;
 }
 
+export type InjurySeverity = 'NONE' | 'MINOR' | 'MODERATE' | 'MAJOR';
+
 export interface SeasonBoxScore {
   seasonNumber: number;
   year: number;
@@ -529,6 +531,9 @@ export interface SeasonBoxScore {
   ovr: number;
   gp: number;
   injuredGamesMissed: number;
+  injurySeverity?: InjurySeverity;
+  injuryLabel?: string;
+  injuryPermanentPhyPenalty?: number;
   mpg: number;
   ppg: number;
   rpg: number;
@@ -780,6 +785,179 @@ export interface LegacyEvaluation {
   honoredTeamAllStars: number;
 }
 
+export interface TeamStintSummary {
+  id: string;
+  teamId: string;
+  teamName: string;
+  teamShortName: string;
+  league: LeagueId;
+  leagueShortName: string;
+  primaryColor: string;
+  secondaryColor: string;
+  logoUrl?: string;
+  startYear: number;
+  endYear: number;
+  seasons: number;
+  gp: number;
+  avgPpg: number;
+  avgRpg: number;
+  avgApg: number;
+  peakOvr: number;
+  championships: number;
+  mvps: number;
+  finalsMvps: number;
+  allStars: number;
+  isMilitaryTeam?: boolean;
+}
+
+export interface RetrospectiveSeasonPoint {
+  seasonNumber: number;
+  year: number;
+  age: number;
+  league: LeagueId;
+  leagueShortName: string;
+  teamId: string;
+  teamName: string;
+  teamShortName: string;
+  role: string;
+  ovr: number;
+  gp: number;
+  mpg: number;
+  ppg: number;
+  rpg: number;
+  apg: number;
+  spg: number;
+  bpg: number;
+  fgPct: number;
+  tpPct: number;
+  wins: number;
+  losses: number;
+  teamRank: number;
+  totalLeagueTeams: number;
+  playoffResult: string;
+  wonChampionship: boolean;
+  wonMvp: boolean;
+  wonFinalsMvp: boolean;
+  wonDpoy: boolean;
+  wonSixthMan: boolean;
+  wonMip: boolean;
+  wonRookieOfYear: boolean;
+  allStarSelected: boolean;
+  allLeagueTeam: AllLeagueTier;
+  singleGameHighPts: number;
+  headline: string;
+}
+
+export interface ChampionshipRecord {
+  id: string;
+  year: number;
+  age: number;
+  titleLabel: string;
+  leagueOrTournament: string;
+  teamName: string;
+  teamId?: string;
+  league?: LeagueId;
+  primaryColor: string;
+  secondaryColor: string;
+  logoUrl?: string;
+  isInternational: boolean;
+  wonFinalsMvp: boolean;
+  statSummary: string;
+}
+
+export interface TrophyCabinetEntry {
+  year: number;
+  leagueShortName: string;
+  teamName: string;
+  note?: string;
+}
+
+export interface TrophyCabinetItem {
+  id: string;
+  label: string;
+  count: number;
+  accent: 'gold' | 'accent' | 'ok' | 'neutral';
+  entries: TrophyCabinetEntry[];
+}
+
+export interface RetrospectiveBrokenRecord {
+  league: LeagueId;
+  leagueShortName: string;
+  label: string;
+  formattedValue: string;
+  year: number;
+  teamName: string;
+}
+
+export interface JerseyCeremonySummary {
+  jerseyRetired: boolean;
+  honoredTeam: TeamInfo;
+  honoredTeamSeasons: number;
+  honoredTeamPoints: number;
+  honoredTeamChamps: number;
+  honoredTeamMvps: number;
+  honoredTeamAllStars: number;
+  tributeMessage: string;
+}
+
+export interface CareerRetrospective {
+  version: number;
+  isFallback?: boolean;
+  playerName: string;
+  jerseyNumber: string;
+  heightCm: number;
+  primaryPos: Position;
+  secondaryPos: Position | null;
+  growthDna?: GrowthDna;
+  playstyle?: PlaystyleArchetype;
+  traits: PlayerTraitId[];
+  startYear: number;
+  endYear: number;
+  finalAge: number;
+  seasonsPlayed: number;
+  retirementReason: RetirementReason;
+  retirementReasonLabel: string;
+  openingStatement: string;
+  legacyTierId: LegacyTierId;
+  legacyTitle: string;
+  legacyScore: number;
+  epitaph: string;
+  careerEarnings: number;
+  peakOvr: number;
+  totals: {
+    gp: number;
+    points: number;
+    rebounds: number;
+    assists: number;
+    steals: number;
+    blocks: number;
+    championships: number;
+    mvps: number;
+    finalsMvps: number;
+    allStars: number;
+    nbaGp: number;
+    nbaPoints: number;
+    nbaChampionships: number;
+    nbaMvps: number;
+  };
+  averages: {
+    ppg: number;
+    rpg: number;
+    apg: number;
+    spg: number;
+    bpg: number;
+  };
+  careerHighs: CareerHighs;
+  stints: TeamStintSummary[];
+  seasons: RetrospectiveSeasonPoint[];
+  peakSeason: RetrospectiveSeasonPoint | null;
+  championships: ChampionshipRecord[];
+  bestPlayoffNote: string | null;
+  trophies: TrophyCabinetItem[];
+  brokenRecords: RetrospectiveBrokenRecord[];
+  jerseyCeremony: JerseyCeremonySummary;
+}
+
 export interface HallOfFameEntry {
   id: string;
   inductedAt: string;
@@ -836,6 +1014,7 @@ export interface HallOfFameEntry {
   };
   careerHighPts: number;
   epitaph: string;
+  retrospective?: CareerRetrospective;
 }
 
 export interface CombineState {
@@ -886,6 +1065,7 @@ export interface CareerState {
   prospectStars?: number; // 고교 졸업 시 산출된 유망주 등급 (1~5성)
   trainingFocus: TrainingFocus;
   lastCampYear?: number;
+  campAgingShield?: boolean;
   tradeRequestedThisYear?: boolean;
   activePersonalCare?: PersonalCareId[];
   purchasedPersonalCareCount?: number;
@@ -934,6 +1114,7 @@ export interface CareerState {
   careerHighs: CareerHighs;
   totals: {
     gp: number;
+    minutes?: number;
     points: number;
     rebounds: number;
     assists: number;

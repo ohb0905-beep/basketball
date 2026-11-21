@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ChevronRight, Lock, RotateCcw, X, Zap } from 'lucide-react';
 import {
   LEAGUE_BALANCE_META,
+  canUseProTradeSystem,
   isPersonalCareAllowedInLeague,
 } from '../../config/balanceConfig';
 import { LEAGUE_CONFIG } from '../../data/leagues';
@@ -56,12 +57,12 @@ const PERSONAL_CARE_ITEMS: {
 }[] = [
   {
     id: 'BIOMECH_SKILL_LAB',
-    effect: '성장 +15% · 노쇠화 완화',
+    effect: '성장 +15% · 노쇠화 -15% 완화',
     title: '바이오메카닉스 스킬 랩',
   },
   {
     id: 'REHAB_LOAD_MGMT',
-    effect: '부상률 -70% · 로드 매니지먼트',
+    effect: '부상률 -48% · 결장 기간 단축',
     title: '전담 재활 · 로드 매니지먼트',
   },
   {
@@ -919,8 +920,14 @@ export function SeasonTab() {
         </section>
       )}
 
-      {/* 역할 보장 위반 시 긴급 트레이드 요청 행 */}
-      {career.brokenRolePromise && (
+      {/* 역할 보장 위반 시 긴급 트레이드 요청 행 (프로 비군인 계약 전용) */}
+      {career.brokenRolePromise &&
+        canUseProTradeSystem({
+          league: career.league,
+          contractType: career.contractType,
+          isMilitaryTeam: career.team.isMilitaryTeam,
+          teamId: career.team.id,
+        }) && (
         <section className="t-card flex items-center justify-between gap-3">
           <div className="min-w-0">
             <span className="block text-[14px] font-bold text-[var(--t-up)]">
@@ -1190,9 +1197,28 @@ export function SeasonTab() {
                   label: '출전 경기',
                   val:
                     lastSeason.injuredGamesMissed > 0
-                      ? `${lastSeason.gp}G (결장 ${lastSeason.injuredGamesMissed}G)`
+                      ? `${lastSeason.gp}G (${
+                          lastSeason.injurySeverity === 'MAJOR'
+                            ? '장기 중상'
+                            : lastSeason.injurySeverity === 'MODERATE'
+                            ? '중등도 부상'
+                            : '경미한 부상'
+                        }${lastSeason.injuryLabel ? ` · ${lastSeason.injuryLabel}` : ''} ${
+                          lastSeason.injuredGamesMissed
+                        }G 결장)`
                       : `${lastSeason.gp}G`,
                 },
+                ...(lastSeason.injuryPermanentPhyPenalty &&
+                lastSeason.injuryPermanentPhyPenalty > 0
+                  ? [
+                      {
+                        label: '중상 후유증',
+                        val: `PHY -${lastSeason.injuryPermanentPhyPenalty}${
+                          lastSeason.age >= 34 ? ', DEF -1' : ''
+                        } 영구 저하`,
+                      },
+                    ]
+                  : []),
                 { label: '평균 출전', val: `${lastSeason.mpg.toFixed(1)}분` },
                 {
                   label: '스틸 / 블록',

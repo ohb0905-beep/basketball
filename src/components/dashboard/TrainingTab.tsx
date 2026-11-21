@@ -8,6 +8,8 @@ import {
   getEffectiveRelationships,
   getEffectiveStoryArcs,
 } from '../../engine/progressionEngine';
+import { getAgingPhaseInfo } from '../../engine/retirementEngine';
+import { computeCareerMinutes } from '../../engine/seasonSimulator';
 import {
   analyzePositionFit,
   calculateBiomechanicalProfile,
@@ -128,6 +130,13 @@ export function TrainingTab() {
   const specialCamps = getSpecialCampOptions(career);
   const campDoneThisYear = career.lastCampYear === career.seasonYear;
   const cash = getEffectiveCashBalance(career);
+  const careerMinutes = computeCareerMinutes(career);
+  const agingPhase = getAgingPhaseInfo(
+    career.age,
+    career.growthDna,
+    careerMinutes
+  );
+  const isVeteranCampMode = career.age >= 31;
   const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
 
   return (
@@ -140,13 +149,26 @@ export function TrainingTab() {
               능력치
             </h2>
             <p className="text-[12px] text-[var(--t-g500)] mt-0.5 truncate">
-              {dnaInfo.label} · 전성기 {dnaInfo.peakAgeRange[0]}~{dnaInfo.peakAgeRange[1]}세
+              {dnaInfo.label} · {agingPhase.label} · 누적 {careerMinutes.toLocaleString()}분
             </p>
           </div>
           <span className="text-[12px] font-semibold text-[var(--t-g500)] tabular-nums shrink-0">
             잠재력 {career.potential}
           </span>
         </div>
+
+        {(career.campAgingShield || agingPhase.phaseId === 'VETERAN_MANAGE' || agingPhase.phaseId === 'DECLINE') && (
+          <div className="px-3.5 py-2.5 rounded-2xl bg-[var(--t-g100)] flex items-center justify-between gap-2 text-[12px]">
+            <span className="text-[var(--t-g700)] leading-snug">
+              {agingPhase.description}
+            </span>
+            {career.campAgingShield && (
+              <span className="font-bold text-[var(--t-ok)] shrink-0">
+                노쇠화 방어 활성
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="space-y-3">
           {STAT_META.map((item) => {
@@ -353,10 +375,17 @@ export function TrainingTab() {
       {/* 3. 특별 훈련 캠프 */}
       <section className="t-card space-y-3">
         <div className="flex items-baseline justify-between gap-2">
-          <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-            특별 캠프
-          </h2>
-          <span className="text-[13px] font-semibold text-[var(--t-ok)] tabular-nums">
+          <div className="min-w-0">
+            <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
+              {isVeteranCampMode ? '베테랑 특별 캠프' : '특별 캠프'}
+            </h2>
+            {isVeteranCampMode && (
+              <p className="text-[12px] text-[var(--t-g500)] mt-0.5">
+                31세+ 기량 유지 · 노쇠화 방어 모드
+              </p>
+            )}
+          </div>
+          <span className="text-[13px] font-semibold text-[var(--t-ok)] tabular-nums shrink-0">
             {campDoneThisYear ? '이번 시즌 수료' : `자산 ${formatCurrencyDetailed(cash)}`}
           </span>
         </div>

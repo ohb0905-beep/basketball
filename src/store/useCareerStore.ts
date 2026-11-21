@@ -8,6 +8,7 @@ import {
   ECONOMY_CONFIG,
   INTERNATIONAL_TOURNAMENT_CONFIG,
   LEAGUE_BALANCE_META,
+  canUseProTradeSystem,
   clampNum,
   getPersonalCareCostFromConfig,
   isPersonalCareAllowedInLeague,
@@ -68,12 +69,14 @@ import {
 } from '../engine/retirementEngine';
 import {
   calculateRoleAndMpg,
+  computeCareerMinutes,
   generateDraftRivals,
   getContractDefaultSalary,
   getSangmuDischargeContractType,
   simulateSeason,
 } from '../engine/seasonSimulator';
 import {
+  applyAgeAdjustedEventStatChanges,
   applySpecialCampProgram,
   calculateOvr,
   canSwitchToPosition,
@@ -283,6 +286,7 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
     contractYearsLeft: nextContractYearsLeft,
     annualSalary: nextAnnualSalary,
     activePersonalCare: [],
+    campAgingShield: false,
     twoWaySeasonsUsed: nextTwoWaySeasonsUsed,
     draftPedigreeSeasonsLeft: nextPedigreeSeasonsLeft,
     brokenRolePromise: settledBrokenPromise,
@@ -682,9 +686,12 @@ interface CareerStoreState {
   espnApiConnected: boolean;
   toast: ToastMessage | null;
   lastEncounterOutcome: EncounterResolutionResult | null;
+  hofRetrospectiveId: string | null;
 
   // Actions
   setView: (view: ViewState) => void;
+  openHofRetrospective: (entryId: string) => void;
+  closeHofRetrospective: () => void;
   showToast: (title: string, description?: string, tone?: ToastMessage['tone']) => void;
   clearToast: () => void;
   dismissEncounterOutcome: () => void;
@@ -763,8 +770,11 @@ export const useCareerStore = create<CareerStoreState>()(
       espnApiConnected: false,
       toast: null,
       lastEncounterOutcome: null,
+      hofRetrospectiveId: null,
 
-      setView: (view) => set({ view }),
+      setView: (view) => set({ view, hofRetrospectiveId: null }),
+      openHofRetrospective: (entryId) => set({ hofRetrospectiveId: entryId }),
+      closeHofRetrospective: () => set({ hofRetrospectiveId: null }),
 
       showToast: (title, description, tone = 'orange') => {
         const id = `TOAST_${Date.now()}`;
@@ -1316,6 +1326,7 @@ export const useCareerStore = create<CareerStoreState>()(
           ovr: nextOvr,
         });
 
+        const isVeteranCamp = career.age >= 31;
         set({
           career: {
             ...career,
@@ -1324,8 +1335,12 @@ export const useCareerStore = create<CareerStoreState>()(
             peakOvr: Math.max(career.peakOvr, nextOvr),
             potential: result.nextPotential,
             cashBalance: Math.max(0, currentCash - result.costUsd),
-            draftStock: Math.min(100, career.draftStock + 4),
+            draftStock: isVeteranCamp
+              ? career.draftStock
+              : Math.min(100, career.draftStock + 4),
             lastCampYear: career.seasonYear,
+            campAgingShield:
+              result.grantsAgingShield || Boolean(career.campAgingShield),
             badges: nextBadges,
             role,
             milestones: [
@@ -1334,13 +1349,21 @@ export const useCareerStore = create<CareerStoreState>()(
                 id: `MS_CAMP_${Date.now()}`,
                 year: career.seasonYear,
                 age: career.age,
-                title: `비시즌 특별 캠프 수료 (${
-                  campType === 'LEGEND_SKILL_CAMP'
-                    ? '엘리트 스킬 캠프'
-                    : campType === 'BULK_UP'
-                    ? '벌크업 신체 개조'
-                    : '린매스업 신체 개조'
-                })`,
+                title: isVeteranCamp
+                  ? `베테랑 컨디셔닝 캠프 수료 (${
+                      campType === 'LEGEND_SKILL_CAMP'
+                        ? '기량 유지·노쇠화 방어'
+                        : campType === 'BULK_UP'
+                        ? '코어 밸런스 조정'
+                        : '체중 감량·기동 유지'
+                    })`
+                  : `비시즌 특별 캠프 수료 (${
+                      campType === 'LEGEND_SKILL_CAMP'
+                        ? '엘리트 스킬 캠프'
+                        : campType === 'BULK_UP'
+                        ? '벌크업 신체 개조'
+                        : '린매스업 신체 개조'
+                    })`,
                 description: result.summary,
                 type: 'SPECIAL',
                 teamName: career.team.name,
@@ -1349,7 +1372,7 @@ export const useCareerStore = create<CareerStoreState>()(
           },
           toast: {
             id: `TOAST_${Date.now()}`,
-            title: '특별 훈련 캠프 수료',
+            title: isVeteranCamp ? '베테랑 캠프 수료' : '특별 훈련 캠프 수료',
             description: result.summary,
             tone: 'emerald',
           },
@@ -1549,6 +1572,17 @@ export const useCareerStore = create<CareerStoreState>()(
         const { career } = get();
         if (!career) return;
 
+        if (
+          !canUseProTradeSystem({
+            league: career.league,
+            contractType: career.contractType,
+            isMilitaryTeam: career.team.isMilitaryTeam,
+            teamId: career.team.id,
+          })
+        ) {
+          return;
+        }
+
         if (career.tradeRequestedThisYear) {
           get().showToast(
             '트레이드 요청 완료 상태',
@@ -1686,9 +1720,11 @@ export const useCareerStore = create<CareerStoreState>()(
 
         const isNba = career.league === 'NBA';
         const isPro = LEAGUE_BALANCE_META[career.league].isPro;
+        const seasonMinutesPlayed = Math.round(bs.gp * bs.mpg);
         const nextTotals = {
           ...career.totals,
           gp: career.totals.gp + bs.gp,
+          minutes: computeCareerMinutes(career) + seasonMinutesPlayed,
           points: career.totals.points + seasonPts,
           rebounds: career.totals.rebounds + seasonReb,
           assists: career.totals.assists + seasonAst,
@@ -1801,8 +1837,24 @@ export const useCareerStore = create<CareerStoreState>()(
             year: bs.year,
             age: bs.age,
             title: `단일 경기 ${bs.singleGameHighPts}득점 기록`,
-            description: `${bs.leagueName} 코트에서 폭발적인 득점력을 선보였습니다.`,
+            description: `${bs.leagueName} 경기에서 한 경기 ${bs.singleGameHighPts}득점을 올리며 팀 공격을 이끌었습니다.`,
             type: 'RECORD',
+            teamName: bs.teamName,
+          });
+        }
+        if (bs.injurySeverity === 'MAJOR') {
+          newMilestones.push({
+            id: `MS_MAJOR_INJ_${bs.year}`,
+            year: bs.year,
+            age: bs.age,
+            title: `장기 중상 (${bs.injuryLabel || '중상'}) · ${bs.injuredGamesMissed}경기 결장`,
+            description:
+              bs.injuryPermanentPhyPenalty && bs.injuryPermanentPhyPenalty > 0
+                ? `시즌 중 장기 결장을 겪었으며 30대 이후 중상 후유증(PHY -${bs.injuryPermanentPhyPenalty}${
+                    bs.age >= 34 ? ', DEF -1' : ''
+                  })이 남았습니다.`
+                : `시즌 중 ${bs.injuredGamesMissed}경기에 결장하며 긴 재활을 거쳤습니다.`,
+            type: 'INJURY',
             teamName: bs.teamName,
           });
         }
@@ -2414,11 +2466,16 @@ export const useCareerStore = create<CareerStoreState>()(
           choice
         );
 
+        const ageAdjusted = applyAgeAdjustedEventStatChanges(
+          career.age,
+          career.stats,
+          outcome.statChanges
+        );
         const rawStats: PlayerStats = { ...career.stats };
         for (const k of Object.keys(
-          outcome.statChanges
+          ageAdjusted.adjustedChanges
         ) as (keyof PlayerStats)[]) {
-          const diff = outcome.statChanges[k] || 0;
+          const diff = ageAdjusted.adjustedChanges[k] || 0;
           rawStats[k] = clampStat(rawStats[k] + diff);
         }
 
@@ -2430,19 +2487,29 @@ export const useCareerStore = create<CareerStoreState>()(
           nextPrimary
         );
         const nextOvr = calculateOvr(nextStats, nextPrimary, career.heightCm);
+        const effectivePotentialDelta =
+          career.age >= 31
+            ? Math.min(0, outcome.potentialDelta)
+            : outcome.potentialDelta;
         const nextPotential = Math.min(
           98,
-          Math.max(60, career.potential + outcome.potentialDelta)
+          Math.max(60, career.potential + effectivePotentialDelta)
         );
         let nextTrust = Math.max(
           10,
-          Math.min(100, career.coachTrust + outcome.trustDelta)
+          Math.min(
+            100,
+            career.coachTrust + outcome.trustDelta + ageAdjusted.convertedTrustBonus
+          )
         );
         const nextStock = Math.max(
           10,
           Math.min(100, career.draftStock + outcome.draftStockDelta)
         );
         const nextCashBalance = Math.max(0, currentCash + outcome.cashDelta);
+        const nextCampAgingShield = Boolean(
+          career.campAgingShield || ageAdjusted.grantedAgingShield
+        );
         const nextMilitaryExempt =
           career.militaryExempt || Boolean(choice.grantMilitaryExemption);
         const nextMilestones = [...career.milestones];
@@ -2524,7 +2591,17 @@ export const useCareerStore = create<CareerStoreState>()(
         }
 
         // 시즌 중반 트레이드 데드라인 구단 협상 판정 (무조건 즉시 이적 폐지 → 시장 가치·약속 위반·계약 기간 기반 협상)
-        let finalOutcome = outcome;
+        const veteranNote =
+          ageAdjusted.suppressedPhysicalCount > 0
+            ? ' (베테랑 구간 보정: 신체 스탯 상승 대신 차기 시즌 노쇠화 방어 버프 및 코칭스태프 신뢰도 +2로 전환)'
+            : '';
+        let finalOutcome: EncounterResolutionResult = {
+          ...outcome,
+          narrative: `${outcome.narrative}${veteranNote}`,
+          statChanges: ageAdjusted.adjustedChanges,
+          potentialDelta: effectivePotentialDelta,
+          trustDelta: outcome.trustDelta + ageAdjusted.convertedTrustBonus,
+        };
         let nextSeasonsOnTeam = career.seasonsOnCurrentTeam ?? 0;
         let midTradeResult: 'NONE' | 'ACCEPTED' | 'REJECTED' = 'NONE';
         const isMidSeasonTradeAttempt = Boolean(
@@ -2829,6 +2906,7 @@ export const useCareerStore = create<CareerStoreState>()(
           coachTrust: nextTrust,
           draftStock: nextStock,
           cashBalance: nextCashBalance,
+          campAgingShield: nextCampAgingShield,
           relationships: nextRelationships,
           storyArcs: nextStoryArcs,
           league: nextLeague,
@@ -3578,7 +3656,12 @@ export const useCareerStore = create<CareerStoreState>()(
         const reason = career.retirementReason || 'VOLUNTARY_HONOR';
         const evaluation =
           career.legacyEvaluation || evaluateCareerLegacy(career);
-        const newEntry = buildHallOfFameEntry(career, reason, evaluation);
+        const newEntry = buildHallOfFameEntry(
+          career,
+          reason,
+          evaluation,
+          recordBook
+        );
 
         const updatedHof = [newEntry, ...hofList].sort(
           (a, b) => b.legacyScore - a.legacyScore
@@ -3594,12 +3677,13 @@ export const useCareerStore = create<CareerStoreState>()(
           recordBook: syncedRecordBook,
           lastPersonalCareIds: [],
           career: null,
+          hofRetrospectiveId: null,
           view: 'HOME',
           toast: {
             id: `TOAST_${Date.now()}`,
             title: `#${newEntry.jerseyNumber} ${newEntry.name} 명예의 전당 헌액`,
             description:
-              '홈 화면의 올타임 베스트 5와 명예의 전당 도감에서 확인할 수 있습니다.',
+              '명예의 전당에서 언제든 커리어 회고 다큐멘터리를 다시 감상할 수 있습니다.',
             tone: 'amber',
           },
         });

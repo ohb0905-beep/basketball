@@ -1,4 +1,5 @@
 import {
+  ContractType,
   InternationalTournamentType,
   LeagueId,
   LiveTacticId,
@@ -138,6 +139,19 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
   },
 };
 
+export function canUseProTradeSystem(params: {
+  league: LeagueId;
+  contractType?: ContractType;
+  isMilitaryTeam?: boolean;
+  teamId?: string;
+}): boolean {
+  if (!LEAGUE_BALANCE_META[params.league]?.isPro) return false;
+  if (params.contractType === 'MILITARY_SERVICE') return false;
+  if (params.isMilitaryTeam) return false;
+  if (params.teamId === 'KBL_SANGMU') return false;
+  return true;
+}
+
 export const ECONOMY_CONFIG = {
   amateurInitialScholarshipUsd: 20000,
   amateurAnnualStipendUsd: 8000,
@@ -158,7 +172,7 @@ export const ECONOMY_CONFIG = {
         HIGH_SCHOOL: 8000,
       } as Record<LeagueId, number>,
       growthMultiplier: 1.15,
-      agingReductionFactor: 0.78,
+      agingReductionFactor: 0.85,
     },
     REHAB_LOAD_MGMT: {
       proOnly: false,
@@ -173,8 +187,8 @@ export const ECONOMY_CONFIG = {
         U_LEAGUE: 6000,
         HIGH_SCHOOL: 6000,
       } as Record<LeagueId, number>,
-      injuryRiskMultiplier: 0.3,
-      injuryGamesMultiplier: 0.35,
+      injuryRiskMultiplier: 0.52,
+      injuryGamesMultiplier: 0.55,
     },
     SIGNATURE_SNEAKER_MARKETING: {
       proOnly: true, // 고교·대학 아마추어는 글로벌 시그니처 스니커즈 런칭 불가
@@ -375,13 +389,55 @@ export const ROLE_MPG_CONFIG = {
   injury: {
     phyReference: 72,
     phySlope: 0.0075,
-    minBaseRisk: 0.018,
+    minBaseRisk: 0.02,
     mpgReference: 28.0,
-    mpgSlope: 0.014,
-    ironmanDnaMult: 0.45,
-    ironStaminaMult: 0.4,
+    mpgSlope: 0.015,
+    ageRiskStart: 30,
+    ageRiskPerYear: 0.013,
+    age35ExtraPerYear: 0.01,
+    mileageRiskReference: 20000,
+    mileageRiskPer10k: 0.045,
+    mileageRiskCap: 0.16,
+    ironmanDnaMult: 0.52,
+    ironStaminaMult: 0.5,
     glassBodyMult: 1.65,
-    maxMissRatio: 0.28,
+    maxMissRatio: 0.68,
+    tiers: {
+      minor: { minRatio: 0.04, maxRatio: 0.12 },
+      moderate: { minRatio: 0.15, maxRatio: 0.3 },
+      major: {
+        minRatio: 0.38,
+        maxRatio: 0.68,
+        baseShare: 0.08,
+        age30SharePerYear: 0.014,
+        glassBodyShareBonus: 0.08,
+        lowPhyShareBonus: 0.06,
+        highMileageShareBonus: 0.04,
+        rehabShareReduction: 0.05,
+        majorRehabGamesMult: 0.82,
+      },
+    },
+    majorAftermath: {
+      minAge: 30,
+      phyDrop30to33: 2,
+      phyDrop34Plus: 3,
+      secondaryDrop34Plus: 1,
+    },
+  },
+  veteranLoadMgmt: {
+    startAge: 33,
+    age33to34: { maxMpg: 35.0, maxHealthyRatio: 0.92 },
+    age35to36: { maxMpg: 32.8, maxHealthyRatio: 0.87 },
+    age37Plus: { maxMpg: 30.2, maxHealthyRatio: 0.81 },
+    ironmanMpgBonus: 1.5,
+    ironmanGpRatioBonus: 0.03,
+  },
+  positionFgBase: {
+    C: { base: 53.0, stretchBigBase: 48.0, min: 38.0, max: 68.0 },
+    PF: { base: 48.5, stretchBigBase: 46.5, min: 35.0, max: 62.0 },
+    SF: { base: 45.5, stretchBigBase: 45.5, min: 33.0, max: 57.0 },
+    SG: { base: 44.0, stretchBigBase: 44.0, min: 32.0, max: 55.0 },
+    PG: { base: 43.5, stretchBigBase: 43.5, min: 32.0, max: 54.0 },
   },
   ppg: {
     softCapStart: 25.0,
@@ -478,10 +534,13 @@ export const MILITARY_SERVICE_CONFIG = {
 
 export const AGING_RETIREMENT_CONFIG = {
   baseOnsetAge: 30,
+  minCombinedMultFloor: 0.58,
+  campAgingShieldFactor: 0.75,
   mileageReferenceMinutes: 18000,
-  mileageScaleDivisor: 14000,
+  mileageScaleDivisor: 10000,
+  mileageHighSeverityMaxBonus: 0.22,
   phyReference: 72,
-  phySlopePerPoint: 0.014,
+  phySlopePerPoint: 0.011,
   voluntaryRetireAge: 31,
   voluntaryRetireSeasons: 10,
   farewellTourMinAge: 34,

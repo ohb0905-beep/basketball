@@ -6,6 +6,7 @@ import {
   LegacyEvaluation,
   LegacyTierId,
   PlayerStats,
+  RecordBookState,
   RetirementReason,
   StatDelta,
   TeamInfo,
@@ -18,6 +19,7 @@ import {
 } from '../config/balanceConfig';
 import { getTeamById } from '../data/teams';
 import { LEAGUE_CONFIG } from '../data/leagues';
+import { buildCareerRetrospective } from './retrospectiveEngine';
 
 const PRO_LEAGUES: LeagueId[] = [
   'NBA',
@@ -32,13 +34,78 @@ export interface AgingCurveOptions {
   growthDna?: GrowthDna;
   careerMinutes?: number;
   hasBiomechLab?: boolean;
+  hasCampAgingShield?: boolean;
   veteranReinvented?: boolean;
 }
 
+export interface AgingPhaseInfo {
+  phaseId: 'GROWTH' | 'PRIME' | 'VETERAN_MANAGE' | 'DECLINE';
+  label: string;
+  description: string;
+}
+
+export function getAgingPhaseInfo(
+  age: number,
+  growthDna: GrowthDna = 'STANDARD',
+  careerMinutes: number = 0
+): AgingPhaseInfo {
+  const maxGrowthAge =
+    growthDna === 'LATE_BLOOMER'
+      ? 28
+      : growthDna === 'EARLY_BLOOMER'
+      ? 25
+      : growthDna === 'IRONMAN'
+      ? 27
+      : 26;
+  const dnaOnsetOffset =
+    growthDna === 'IRONMAN'
+      ? 1.2
+      : growthDna === 'LATE_BLOOMER'
+      ? 0.6
+      : growthDna === 'EARLY_BLOOMER'
+      ? -1.2
+      : 0;
+  const mileageOffset = clampNum(
+    (AGING_RETIREMENT_CONFIG.mileageReferenceMinutes - careerMinutes) /
+      AGING_RETIREMENT_CONFIG.mileageScaleDivisor,
+    -1.8,
+    1.0
+  );
+  const onsetAge =
+    AGING_RETIREMENT_CONFIG.baseOnsetAge + dnaOnsetOffset + mileageOffset;
+
+  if (age <= maxGrowthAge) {
+    return {
+      phaseId: 'GROWTH',
+      label: '성장기',
+      description: '훈련과 실전 경험으로 기량이 빠르게 상승하는 구간입니다.',
+    };
+  }
+  if (age < onsetAge) {
+    return {
+      phaseId: 'PRIME',
+      label: '전성기',
+      description: '커리어 최정점 기량을 유지하는 피크 구간입니다.',
+    };
+  }
+  if (age - onsetAge <= 2.2) {
+    return {
+      phaseId: 'VETERAN_MANAGE',
+      label: '베테랑 관리기',
+      description: '운동능력 둔화가 시작되어 기술·컨디션 관리가 중요해집니다.',
+    };
+  }
+  return {
+    phaseId: 'DECLINE',
+    label: '노쇠기',
+    description: '누적 피로와 연령으로 신체 능력 하락이 가속되는 구간입니다.',
+  };
+}
+
 /**
- * 4-1. 개체별 차등 에이징 커브 (성장 곡선 DNA + 통산 출전 마일리지 + 피지컬 관리 상태 + 베테랑 플레이스타일 진화 반영)
- * - 고정 나이 구간 일괄 하락 대신, 선수의 DNA(철강왕/대기만성/표준/조숙형), 누적 마일리지, PHY 수치,
- *   퍼스널 케어(바이오메카닉스 랩) 및 32세+ 플레이 스타일 진화(Re-invention) 여부에 따라 노쇠화가 유기적으로 달라짐
+ * 4-1. 현실 NBA 평균형 에이징 커브 (28~31세 정점, 32세+ 가속 하락)
+ * - 성장 DNA, 실제 누적 출전 마일리지, PHY 관리, 바이오메카닉스 랩, 31세+ 캠프 방어 버프 반영
+ * - 곱연산 방어 배율 하한선(0.58x)으로 무적화 차단, 신체(PHY/DEF/INS/REB) vs 기술(OUT/PLY) 이원화 하락
  */
 export function applyAgingCurve(
   age: number,
@@ -46,51 +113,63 @@ export function applyAgingCurve(
   rng: () => number = Math.random,
   options?: AgingCurveOptions
 ): { nextStats: PlayerStats; delta: StatDelta } {
-  const randInt = (min: number, max: number) =>
-    Math.floor(rng() * (max - min + 1)) + min;
   const clamp = (v: number) => Math.max(35, Math.min(99, Math.round(v)));
 
   const dna: GrowthDna = options?.growthDna || 'STANDARD';
   const careerMinutes = options?.careerMinutes ?? 15000;
   const hasBiomechLab = Boolean(options?.hasBiomechLab);
+  const hasCampAgingShield = Boolean(options?.hasCampAgingShield);
   const veteranReinvented = Boolean(options?.veteranReinvented);
 
   // DNA별 노쇠화 시작 나이 오프셋 및 하락 배율
   const dnaOnsetOffset =
     dna === 'IRONMAN'
-      ? 2
+      ? 1.2
       : dna === 'LATE_BLOOMER'
-      ? 1
+      ? 0.6
       : dna === 'EARLY_BLOOMER'
-      ? -1
+      ? -1.2
       : 0;
   const dnaSeverityMult =
     dna === 'IRONMAN'
-      ? 0.68
+      ? 0.78
       : dna === 'LATE_BLOOMER'
-      ? 0.85
+      ? 0.9
       : dna === 'EARLY_BLOOMER'
-      ? 1.15
+      ? 1.18
       : 1.0;
 
-  // 통산 누적 출전 시간(마일리지) 연속 오프셋 (18,000분 기준, 많을수록 조기 노쇠화)
+  // 실제 통산 누적 출전 시간(마일리지) 연속 오프셋 (18,000분 기준, 많을수록 조기 노쇠화 + 하락 가속)
   const mileageOffset = clampNum(
     (AGING_RETIREMENT_CONFIG.mileageReferenceMinutes - careerMinutes) /
       AGING_RETIREMENT_CONFIG.mileageScaleDivisor,
     -1.8,
-    1.4
+    1.0
   );
+  const mileageSeverityMult =
+    careerMinutes > AGING_RETIREMENT_CONFIG.mileageReferenceMinutes
+      ? 1.0 +
+        clampNum(
+          (careerMinutes - AGING_RETIREMENT_CONFIG.mileageReferenceMinutes) /
+            45000,
+          0,
+          AGING_RETIREMENT_CONFIG.mileageHighSeverityMaxBonus
+        )
+      : 1.0;
 
-  // 피지컬(PHY) 자기관리 연속 보정 (PHY 72 기준, 높을수록 노쇠화 완충)
+  // 피지컬(PHY) 자기관리 연속 보정 (PHY 72 기준, 높을수록 노쇠화 소폭 완충)
   const phyConditionBonus = clampNum(
     1.0 +
       (AGING_RETIREMENT_CONFIG.phyReference - prev.phy) *
         AGING_RETIREMENT_CONFIG.phySlopePerPoint,
-    0.72,
-    1.32
+    0.82,
+    1.28
   );
   const biomechCareBonus = hasBiomechLab
     ? ECONOMY_CONFIG.personalCare.BIOMECH_SKILL_LAB.agingReductionFactor
+    : 1.0;
+  const campShieldBonus = hasCampAgingShield
+    ? AGING_RETIREMENT_CONFIG.campAgingShieldFactor
     : 1.0;
 
   // 개인별 실질 노쇠화 진행 연차 (연속 실수)
@@ -102,65 +181,101 @@ export function applyAgingCurve(
   const delta: StatDelta = { ins: 0, out: 0, ply: 0, def: 0, reb: 0, phy: 0 };
 
   if (agingYears < 0) {
-    // 아직 개인 노쇠화 시작 전: 기량 유지 및 노련미(PLY) 소폭 상승 가능
-    if (rng() < 0.5 && prev.ply < 99) {
+    // 개인 노쇠화 시작 전(전성기 후반): 기량 유지, 만 30세 이하에서만 노련미(PLY) 제한적 보정
+    if (age <= 30 && rng() < 0.35 && prev.ply < 95) {
       nextStats.ply = clamp(prev.ply + 1);
       delta.ply = nextStats.ply - prev.ply;
     }
     return { nextStats, delta };
   }
 
-  const combinedMult = dnaSeverityMult * phyConditionBonus * biomechCareBonus;
-  // 연속 노쇠화 강도 곡선 (0년차: 1.0 → 3년차: ~1.9 → 6년차: ~2.9 → 8년차+: ~3.8)
-  const continuousSeverity = 1.0 + Math.pow(agingYears, 1.15) * 0.28;
+  // 곱연산 방어 배율 하한선(0.58x) 강제: 풀 관리+철강왕 조합도 세월을 완전히 멈출 수 없음
+  const combinedMult = Math.max(
+    AGING_RETIREMENT_CONFIG.minCombinedMultFloor,
+    dnaSeverityMult *
+      phyConditionBonus *
+      biomechCareBonus *
+      campShieldBonus *
+      mileageSeverityMult
+  );
 
-  if (agingYears <= 2.2) {
-    // 초기 베테랑기: 운동능력(PHY) 소폭 감소, 노련미(PLY) 및 진화 시 OUT 보정
-    const rawPhyDrop = Math.max(
-      1,
-      Math.round((0.8 + rng() * 1.1) * continuousSeverity * combinedMult)
-    );
-    const plyBoost = veteranReinvented ? 1 : rng() < 0.7 ? 1 : 0;
-    const outBoost = veteranReinvented && rng() < 0.65 ? 1 : 0;
-    nextStats.phy = clamp(prev.phy - rawPhyDrop);
-    nextStats.ply = clamp(prev.ply + plyBoost);
-    nextStats.out = clamp(prev.out + outBoost);
-    delta.phy = nextStats.phy - prev.phy;
-    delta.ply = nextStats.ply - prev.ply;
-    delta.out = nextStats.out - prev.out;
-  } else if (agingYears <= 5.5) {
-    // 중기 노쇠화 구간: 연속 강도 곡선 기반 운동능력/공수 기동력 감소 (베테랑 스타일 진화 시 외곽슛·패스 보호)
+  if (agingYears <= 2.0) {
+    // 1단계 초기 노쇠기 (대략 30~32세): 운동능력(PHY/DEF/INS) 완만 하락, 기술(OUT/PLY) 유지 (순 OVR 역상승 차단)
+    const earlyScale = 1.0 + agingYears * 0.22;
     const phyDrop = Math.max(
       1,
-      Math.round((1.15 + rng() * 0.95) * continuousSeverity * combinedMult)
+      Math.round((1.15 + rng() * 0.95) * earlyScale * combinedMult)
+    );
+    const defDrop = Math.max(
+      agingYears >= 0.8 ? 1 : 0,
+      Math.round((0.55 + rng() * 0.75) * earlyScale * combinedMult)
+    );
+    const insDrop = Math.max(
+      agingYears >= 1.1 ? 1 : 0,
+      Math.round((0.5 + rng() * 0.7) * earlyScale * combinedMult)
+    );
+    const rebDrop =
+      agingYears >= 1.0
+        ? Math.round((0.4 + rng() * 0.65) * earlyScale * combinedMult)
+        : 0;
+
+    nextStats.phy = clamp(prev.phy - phyDrop);
+    nextStats.def = clamp(prev.def - defDrop);
+    nextStats.ins = clamp(prev.ins - insDrop);
+    nextStats.reb = clamp(prev.reb - rebDrop);
+
+    delta.phy = nextStats.phy - prev.phy;
+    delta.def = nextStats.def - prev.def;
+    delta.ins = nextStats.ins - prev.ins;
+    delta.reb = nextStats.reb - prev.reb;
+  } else if (agingYears <= 5.0) {
+    // 2단계 가속 하락기 (대략 32~35세): 운동능력·공수 기동력 본격 하락, 기술(OUT/PLY)은 소폭 하락 또는 진화 방어
+    const continuousSeverity = 1.0 + Math.pow(agingYears, 1.18) * 0.26;
+    const phyDrop = Math.max(
+      2,
+      Math.round((1.45 + rng() * 0.95) * continuousSeverity * combinedMult)
     );
     const insDrop = Math.max(
       1,
-      Math.round((0.75 + rng() * 0.75) * continuousSeverity * combinedMult)
+      Math.round((1.05 + rng() * 0.85) * continuousSeverity * combinedMult)
     );
     const defDrop = veteranReinvented
       ? Math.max(
-          0,
-          Math.round((0.45 + rng() * 0.55) * continuousSeverity * combinedMult * 0.7)
+          1,
+          Math.round(
+            (0.75 + rng() * 0.65) * continuousSeverity * combinedMult * 0.85
+          )
         )
       : Math.max(
           1,
-          Math.round((0.75 + rng() * 0.75) * continuousSeverity * combinedMult)
+          Math.round((1.05 + rng() * 0.85) * continuousSeverity * combinedMult)
         );
     const rebDrop = Math.max(
       1,
-      Math.round((0.7 + rng() * 0.75) * continuousSeverity * combinedMult)
+      Math.round((0.95 + rng() * 0.8) * continuousSeverity * combinedMult)
     );
-    const outDrop = veteranReinvented ? 0 : rng() < 0.42 * combinedMult ? 1 : 0;
+    const outDrop = veteranReinvented
+      ? agingYears > 3.5 && rng() < 0.35 * combinedMult
+        ? 1
+        : 0
+      : Math.max(
+          0,
+          Math.round(
+            (0.45 + rng() * 0.55) * continuousSeverity * combinedMult * 0.68
+          )
+        );
+    const plyDrop = veteranReinvented
+      ? 0
+      : agingYears > 3.2 && rng() < 0.5 * combinedMult
+      ? 1
+      : 0;
 
     nextStats.phy = clamp(prev.phy - phyDrop);
     nextStats.ins = clamp(prev.ins - insDrop);
     nextStats.def = clamp(prev.def - defDrop);
     nextStats.reb = clamp(prev.reb - rebDrop);
     nextStats.out = clamp(prev.out - outDrop);
-    if (veteranReinvented && rng() < 0.45 && nextStats.ply < 99) {
-      nextStats.ply = clamp(prev.ply + 1);
-    }
+    nextStats.ply = clamp(prev.ply - plyDrop);
 
     delta.phy = nextStats.phy - prev.phy;
     delta.ins = nextStats.ins - prev.ins;
@@ -169,15 +284,35 @@ export function applyAgingCurve(
     delta.out = nextStats.out - prev.out;
     delta.ply = nextStats.ply - prev.ply;
   } else {
-    // 황혼기 노쇠화 구간: 전 영역 하락 (베테랑 스타일 진화 시 OUT/PLY 방어)
-    const keys: (keyof PlayerStats)[] = ['ins', 'out', 'ply', 'def', 'reb', 'phy'];
-    for (const k of keys) {
-      const isSkillStat = k === 'out' || k === 'ply';
-      const mult = veteranReinvented && isSkillStat ? combinedMult * 0.35 : combinedMult;
+    // 3단계 황혼기 (대략 35~40세+): 신체 능력 급격 하락, 기술 스탯도 완만 하락 (베테랑 진화 시 OUT/PLY 방어)
+    const twilightSeverity =
+      1.0 + Math.pow(Math.max(1, agingYears - 3.5), 1.15) * 0.28;
+    const athleticKeys: (keyof PlayerStats)[] = ['phy', 'ins', 'def', 'reb'];
+    for (const k of athleticKeys) {
+      const base = k === 'phy' ? 2.0 : 1.55;
       const drop = Math.max(
-        veteranReinvented && isSkillStat ? 0 : 2,
-        Math.round(randInt(2, 5) * mult)
+        2,
+        Math.round((base + rng() * 1.35) * twilightSeverity * combinedMult)
       );
+      nextStats[k] = clamp(prev[k] - drop);
+      delta[k] = nextStats[k] - prev[k];
+    }
+
+    const skillKeys: (keyof PlayerStats)[] = ['out', 'ply'];
+    for (const k of skillKeys) {
+      const drop = veteranReinvented
+        ? Math.max(
+            0,
+            Math.round(
+              (0.6 + rng() * 0.7) * twilightSeverity * combinedMult * 0.55
+            )
+          )
+        : Math.max(
+            1,
+            Math.round(
+              (1.1 + rng() * 0.9) * twilightSeverity * combinedMult * 0.72
+            )
+          );
       nextStats[k] = clamp(prev[k] - drop);
       delta[k] = nextStats[k] - prev[k];
     }
@@ -495,7 +630,8 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
 export function buildHallOfFameEntry(
   career: CareerState,
   reason: RetirementReason,
-  evaluation: LegacyEvaluation
+  evaluation: LegacyEvaluation,
+  recordBook?: RecordBookState | null
 ): HallOfFameEntry {
   const gp = Math.max(1, career.totals.gp);
   const nbaFinalsMvps = career.seasonLogs.filter(
@@ -510,6 +646,12 @@ export function buildHallOfFameEntry(
   const kblFinalsMvps = career.seasonLogs.filter(
     (l) => l.league === 'KBL' && l.wonFinalsMvp
   ).length;
+  const retrospective = buildCareerRetrospective(
+    career,
+    reason,
+    evaluation,
+    recordBook
+  );
   return {
     id: `HOF_${career.id}_${Date.now()}`,
     inductedAt: new Date().toISOString(),
@@ -564,5 +706,6 @@ export function buildHallOfFameEntry(
     },
     careerHighPts: career.careerHighs.points,
     epitaph: evaluation.summaryComment,
+    retrospective,
   };
 }

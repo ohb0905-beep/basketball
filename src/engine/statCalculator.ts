@@ -311,7 +311,7 @@ export function canSwitchToPosition(
       allowed: false,
       reason: `${currentPrimary}에서는 인접 포지션(${ADJACENT_POSITIONS[currentPrimary]
         .filter((p) => p !== currentPrimary)
-        .join(', ')}) 또는 해금된 부포지션으로만 전향할 수 있어요.`,
+        .join(', ')}) 또는 해금된 부포지션으로만 전향할 수 있습니다.`,
     };
   }
 
@@ -326,7 +326,7 @@ export function canSwitchToPosition(
     const [minH, maxH] = POSITION_ARCHETYPES[targetPos].recommendedHeightRange;
     return {
       allowed: false,
-      reason: `신장 ${heightCm}cm는 ${targetPos} 포지션의 생체역학적 권장 범위(${minH}~${maxH}cm)와 물리적 부하 차이가 너무 커서 전향할 수 없어요.`,
+      reason: `신장 ${heightCm}cm는 ${targetPos} 포지션 권장 신장 범위(${minH}~${maxH}cm)와 체격 조건 차이가 커 전향할 수 없습니다.`,
     };
   }
 
@@ -528,6 +528,7 @@ export function evaluateAcquiredTraits(
 
 /**
  * 비시즌 특별 훈련 캠프 & 신체 개조(Offseason Camp) 비용 및 효과 계산
+ * - 만 31세+: 스탯 무한 우상향 차단 → 기량 유지 · 노쇠화 방어 모드로 전환
  */
 export function getSpecialCampOptions(career: CareerState): {
   id: SpecialCampType;
@@ -535,6 +536,7 @@ export function getSpecialCampOptions(career: CareerState): {
   subtitle: string;
   costUsd: number;
   effectText: string;
+  isVeteranMode?: boolean;
 }[] {
   const baseUnit =
     career.league === 'NBA'
@@ -547,6 +549,41 @@ export function getSpecialCampOptions(career: CareerState): {
       ? 45000
       : 15000;
 
+  if (career.age >= 31) {
+    return [
+      {
+        id: 'LEGEND_SKILL_CAMP',
+        title: '베테랑 컨디셔닝 · 스킬 유지 캠프',
+        subtitle:
+          '노쇠화 속도를 늦추는 회복·스킬 유지 프로그램입니다. 차기 시즌 에이징 하락폭을 방어하고 기술 완성도를 지킵니다.',
+        costUsd: baseUnit,
+        effectText:
+          career.age <= 36
+            ? '차기 시즌 노쇠화 -25% 방어 · 기술(OUT/PLY) 유지(+1, 92 미만)'
+            : '차기 시즌 노쇠화 -25% 방어 · 베테랑 기량 유지',
+        isVeteranMode: true,
+      },
+      {
+        id: 'BULK_UP',
+        title: '베테랑 코어 밸런스 조정 (벌크)',
+        subtitle:
+          '순 능력치 증가 없이 골밑·리바운드 비중으로 체형 밸런스를 미세 조정합니다.',
+        costUsd: Math.round(baseUnit * 0.85),
+        effectText: 'INS +1, REB +1 · PLY -1, OUT -1 (제로섬 조정)',
+        isVeteranMode: true,
+      },
+      {
+        id: 'LEAN_MASS',
+        title: '베테랑 체중 감량 · 기동 유지 (린)',
+        subtitle:
+          '관절 부담을 줄이고 외곽·수비 밸런스로 체형을 미세 조정합니다.',
+        costUsd: Math.round(baseUnit * 0.85),
+        effectText: 'OUT +1, DEF +1 · REB -1, INS -1 (제로섬 조정)',
+        isVeteranMode: true,
+      },
+    ];
+  }
+
   return [
     {
       id: 'LEGEND_SKILL_CAMP',
@@ -555,6 +592,7 @@ export function getSpecialCampOptions(career: CareerState): {
         '은퇴 올스타 출신 트레이너와 비공개 워크아웃을 진행해 주력 기술을 다듬고 잠재력 확장을 노립니다.',
       costUsd: baseUnit,
       effectText: '중점 능력치 +2~3 · 프로 잠재력(POT) +1 기회 · 스카우트 평가 +4',
+      isVeteranMode: false,
     },
     {
       id: 'BULK_UP',
@@ -563,6 +601,7 @@ export function getSpecialCampOptions(career: CareerState): {
         '체중과 근력을 증량해 페인트존 몸싸움과 리바운드 경합력을 끌어올립니다. 포워드·빅맨 전환에 유리합니다.',
       costUsd: Math.round(baseUnit * 0.85),
       effectText: 'INS +2, REB +2, PHY +1 · PLY -1, OUT -1',
+      isVeteranMode: false,
     },
     {
       id: 'LEAN_MASS',
@@ -571,6 +610,7 @@ export function getSpecialCampOptions(career: CareerState): {
         '체지방을 줄여 퍼스트 스텝과 외곽 슈팅 밸런스를 높입니다. 가드·윙 포지션 소화에 유리합니다.',
       costUsd: Math.round(baseUnit * 0.85),
       effectText: 'PLY +2, OUT +2, DEF +1 · REB -1, INS -1',
+      isVeteranMode: false,
     },
   ];
 }
@@ -584,6 +624,7 @@ export function applySpecialCampProgram(
   nextPotential: number;
   costUsd: number;
   summary: string;
+  grantsAgingShield: boolean;
 } {
   const options = getSpecialCampOptions(career);
   const chosen = options.find((o) => o.id === campType) || options[0];
@@ -591,11 +632,64 @@ export function applySpecialCampProgram(
   let nextStats: PlayerStats = { ...career.stats };
   let nextPotential = career.potential;
   let summary = '';
+  let grantsAgingShield = false;
 
   const isAmateur =
     career.league === 'HIGH_SCHOOL' ||
     career.league === 'U_LEAGUE' ||
     career.league === 'NCAA';
+
+  // 만 31세+ 베테랑 구간: 스탯 무한 우상향 차단 → 기량 유지 · 노쇠화 방어 전환
+  if (career.age >= 31) {
+    if (campType === 'LEGEND_SKILL_CAMP') {
+      grantsAgingShield = true;
+      const targetSkillKey: 'out' | 'ply' =
+        career.trainingFocus === 'PLAYMAKING'
+          ? 'ply'
+          : career.trainingFocus === 'OUTSIDE_SHOOTING'
+          ? 'out'
+          : career.stats.out <= career.stats.ply
+          ? 'out'
+          : 'ply';
+      const skillLabel = targetSkillKey === 'out' ? '외곽 슈팅(OUT)' : '패스·시야(PLY)';
+
+      if (career.age <= 36 && nextStats[targetSkillKey] < 92) {
+        nextStats[targetSkillKey] = clamp(nextStats[targetSkillKey] + 1);
+        summary = `베테랑 컨디셔닝 캠프 수료: 차기 시즌 노쇠화 하락 방어(-25%) 버프 획득 및 ${skillLabel} +1 유지 보강을 완료했습니다.`;
+      } else {
+        summary =
+          '베테랑 컨디셔닝 캠프 수료: 차기 시즌 노쇠화 하락 방어(-25%) 버프를 확보하며 최상의 컨디션 유지에 집중했습니다.';
+      }
+    } else if (campType === 'BULK_UP') {
+      nextStats.ins = clamp(nextStats.ins + 1);
+      nextStats.reb = clamp(nextStats.reb + 1);
+      nextStats.ply = clamp(nextStats.ply - 1);
+      nextStats.out = clamp(nextStats.out - 1);
+      summary =
+        '베테랑 코어 밸런스 조정 완료: 골밑(INS +1)·리바운드(REB +1) 비중을 높이고 외곽·패스(OUT -1, PLY -1)를 재분배했습니다.';
+    } else {
+      nextStats.out = clamp(nextStats.out + 1);
+      nextStats.def = clamp(nextStats.def + 1);
+      nextStats.reb = clamp(nextStats.reb - 1);
+      nextStats.ins = clamp(nextStats.ins - 1);
+      summary =
+        '베테랑 체중 감량 · 기동 유지 완료: 외곽(OUT +1)·수비(DEF +1) 밸런스를 다듬고 골밑(INS -1, REB -1) 부하를 줄였습니다.';
+    }
+
+    nextStats = enforceBiomechanicalCaps(
+      nextStats,
+      career.heightCm,
+      career.primaryPos
+    );
+
+    return {
+      nextStats,
+      nextPotential,
+      costUsd: chosen.costUsd,
+      summary,
+      grantsAgingShield,
+    };
+  }
 
   if (campType === 'LEGEND_SKILL_CAMP') {
     const focus = career.trainingFocus;
@@ -656,6 +750,95 @@ export function applySpecialCampProgram(
     nextPotential,
     costUsd: chosen.costUsd,
     summary,
+    grantsAgingShield,
+  };
+}
+
+const PHYSICAL_STAT_KEYS: ReadonlySet<keyof PlayerStats> = new Set([
+  'phy',
+  'ins',
+  'def',
+  'reb',
+]);
+
+/**
+ * 만 31세+ 랜덤 인카운터 / 스토리 아크 스탯 보상 연령 보정 필터
+ * - 30세 이하: 모든 스탯 변화 100% 반영
+ * - 31~33세: 양수 상승 항목당 최대 +1 제한 (신체 스탯 85+는 상승 대신 기량 유지 버프/신뢰도로 전환)
+ * - 34세+: 신체 계열(PHY/INS/DEF/REB) 양수 상승 차단 → 노쇠화 방어 버프·신뢰도로 전환, 기술(OUT/PLY)만 90 미만일 때 최대 +1
+ * - 음수 패널티(부상·슬럼프 등)는 연령 무관 100% 적용
+ */
+export function applyAgeAdjustedEventStatChanges(
+  age: number,
+  prevStats: PlayerStats,
+  rawChanges: Partial<PlayerStats>
+): {
+  adjustedChanges: Partial<PlayerStats>;
+  suppressedPhysicalCount: number;
+  convertedTrustBonus: number;
+  grantedAgingShield: boolean;
+} {
+  if (age <= 30) {
+    return {
+      adjustedChanges: { ...rawChanges },
+      suppressedPhysicalCount: 0,
+      convertedTrustBonus: 0,
+      grantedAgingShield: false,
+    };
+  }
+
+  const adjustedChanges: Partial<PlayerStats> = {};
+  let suppressedPhysicalCount = 0;
+  let dampedAnyPositive = false;
+
+  for (const key of Object.keys(rawChanges) as (keyof PlayerStats)[]) {
+    const rawDiff = rawChanges[key] || 0;
+    if (rawDiff === 0) continue;
+
+    // 음수 패널티는 나이 무관 100% 적용
+    if (rawDiff < 0) {
+      adjustedChanges[key] = rawDiff;
+      continue;
+    }
+
+    const isPhysical = PHYSICAL_STAT_KEYS.has(key);
+
+    if (age >= 34) {
+      if (isPhysical) {
+        suppressedPhysicalCount += 1;
+        dampedAnyPositive = true;
+      } else {
+        // 기술 스탯(OUT/PLY)은 90 미만일 때만 최대 +1 허용
+        if (prevStats[key] < 90) {
+          adjustedChanges[key] = 1;
+          if (rawDiff > 1) dampedAnyPositive = true;
+        } else {
+          dampedAnyPositive = true;
+        }
+      }
+    } else {
+      // 31 ~ 33세: 항목당 최대 +1, 신체 스탯 85 이상은 유지 버프로 전환
+      if (isPhysical && prevStats[key] >= 85) {
+        suppressedPhysicalCount += 1;
+        dampedAnyPositive = true;
+      } else if (!isPhysical && prevStats[key] >= 94) {
+        dampedAnyPositive = true;
+      } else {
+        adjustedChanges[key] = 1;
+        if (rawDiff > 1) dampedAnyPositive = true;
+      }
+    }
+  }
+
+  const grantedAgingShield = suppressedPhysicalCount > 0;
+  const convertedTrustBonus =
+    suppressedPhysicalCount > 0 ? 2 : dampedAnyPositive ? 1 : 0;
+
+  return {
+    adjustedChanges,
+    suppressedPhysicalCount,
+    convertedTrustBonus,
+    grantedAgingShield,
   };
 }
 
@@ -676,27 +859,27 @@ export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
         id: 'EARLY_BLOOMER',
         label: '조숙형',
         badge: '조숙형 성장',
-        description: '10대 후반~20대 초반 성장 속도가 빠르지만, 30대 진입 이후 기량 하락이 다소 빠르게 찾아옵니다.',
+        description: '10대 후반~20대 초반 성장 속도가 빠르지만, 30대 진입 전후로 에이징 커브가 다소 빠르게 찾아옵니다.',
         peakAgeRange: [24, 27],
-        agingOnsetOffset: -1,
+        agingOnsetOffset: -1.2,
       };
     case 'LATE_BLOOMER':
       return {
         id: 'LATE_BLOOMER',
         label: '대기만성형',
         badge: '대기만성형',
-        description: '초기 성장은 완만하지만 20대 중후반부터 30세 전후까지 꾸준히 기량이 올라갑니다.',
-        peakAgeRange: [27, 31],
-        agingOnsetOffset: 1,
+        description: '초기 성장은 완만하지만 20대 중후반부터 30~31세 정점까지 꾸준히 기량이 올라갑니다.',
+        peakAgeRange: [28, 31],
+        agingOnsetOffset: 0.6,
       };
     case 'IRONMAN':
       return {
         id: 'IRONMAN',
         label: '내구도 특화형',
         badge: '고내구도형',
-        description: '잔부상 발생 확률이 낮고 30대 중반까지 신체 능력 하락 폭이 완만하게 유지됩니다.',
-        peakAgeRange: [26, 32],
-        agingOnsetOffset: 2,
+        description: '부상 위험이 낮고 30대 초반 이후에도 신체 능력 하락 폭이 완만하게 유지됩니다.',
+        peakAgeRange: [28, 31],
+        agingOnsetOffset: 1.2,
       };
     case 'STANDARD':
     default:
@@ -704,8 +887,8 @@ export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
         id: 'STANDARD',
         label: '표준 균형형',
         badge: '표준 성장형',
-        description: '20대 중반에 전성기에 도달하고 30대 초반부터 완만한 에이징 커브를 따릅니다.',
-        peakAgeRange: [26, 29],
+        description: '20대 후반~30세에 전성기 정점을 찍고 32세부터 현실적인 에이징 커브를 따릅니다.',
+        peakAgeRange: [27, 30],
         agingOnsetOffset: 0,
       };
   }

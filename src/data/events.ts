@@ -2,6 +2,7 @@ import {
   DRAFT_SCOUTING_CONFIG,
   INTERNATIONAL_TOURNAMENT_CONFIG,
   MILITARY_SERVICE_CONFIG,
+  canUseProTradeSystem,
   getInternationalTournamentByYear,
 } from '../config/balanceConfig';
 import {
@@ -510,9 +511,9 @@ export function createAgentRetirementAdviceEvent(
     if (sameLeagueDecline && peakSameLeaguePpg > 0) {
       reasonText = `동일 리그 내에서 최근 종합 능력치(OVR -${twoYearOvrDrop})와 평균 득점(${peakSameLeaguePpg.toFixed(
         1
-      )}점 → ${lastSameLeaguePpg.toFixed(1)}점)이 뚜렷하게 하락하며 베테랑의 기로에 섰어요.`;
+      )}점 → ${lastSameLeaguePpg.toFixed(1)}점)이 뚜렷하게 하락하며 베테랑의 기로에 섰습니다.`;
     } else {
-      reasonText = `어느덧 만 ${career.age}세 고령 베테랑 구간에 접어들며 체력과 기량 유지가 쉽지 않은 시점이 찾아왔어요.`;
+      reasonText = `어느덧 만 ${career.age}세 고령 베테랑 구간에 접어들며 체력과 기량 유지가 쉽지 않은 시점이 찾아왔습니다.`;
     }
   }
 
@@ -549,12 +550,12 @@ export function rollMidSeasonCrossroadsEvent(
   career: CareerState,
   rng: () => number = Math.random
 ): CareerEvent {
-  const isProLeague =
-    career.league === 'NBA' ||
-    career.league === 'KBL' ||
-    career.league === 'B_LEAGUE' ||
-    career.league === 'NBL' ||
-    career.league === 'EUROLEAGUE';
+  const canTriggerTradeRumor = canUseProTradeSystem({
+    league: career.league,
+    contractType: career.contractType,
+    isMilitaryTeam: career.team.isMilitaryTeam,
+    teamId: career.team.id,
+  });
   const isAceOrStarter =
     career.role.includes('에이스') || career.role.includes('스타터');
 
@@ -570,7 +571,7 @@ export function rollMidSeasonCrossroadsEvent(
     seasonsOnTeam >= rumorCfg.minSeasonsOnTeam;
 
   let tradeRumorChance = 0;
-  if (isProLeague && passesTradeCooldown && passesTeamTenure) {
+  if (canTriggerTradeRumor && passesTradeCooldown && passesTeamTenure) {
     if (career.brokenRolePromise) {
       tradeRumorChance = rumorCfg.brokenPromiseProb;
     } else if (career.team.direction === 'REBUILDING') {
@@ -677,7 +678,7 @@ export function rollMidSeasonCrossroadsEvent(
       title: '올스타 브레이크 집중 교정 캠프',
       subtitle: '정규시즌 반환점 · 체력 회복 vs 약점 보완',
       description:
-        '올스타 브레이크로 5일간의 휴식기가 주어졌습니다. 후반기 순위 싸움을 앞두고 시간을 어떻게 보낼까요?',
+        '올스타 브레이크로 5일간의 휴식기가 주어졌습니다. 후반기 순위 싸움을 앞두고 시간을 어떻게 활용하시겠습니까?',
       category: 'MID_SEASON_CROSSROADS',
       choices: [
         {
@@ -722,7 +723,7 @@ export function rollMidSeasonCrossroadsEvent(
       title: '후반기 연패 위기 · 라커룸 미팅',
       subtitle: '정규시즌 반환점 · 팀 케미스트리와 리더십',
       description:
-        '후반기 진입 직전 3연패에 빠지며 라커룸 분위기가 무거워졌습니다. 팀의 핵심 선수로서 어떤 대응을 택할까요?',
+        '후반기 진입 직전 3연패에 빠지며 라커룸 분위기가 무거워졌습니다. 팀의 핵심 선수로서 어떤 대응을 택하시겠습니까?',
       category: 'MID_SEASON_CROSSROADS',
       choices: [
         {

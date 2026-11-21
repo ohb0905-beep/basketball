@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ChevronRight, Trash2 } from 'lucide-react';
+import { ChevronRight, Play, Trash2 } from 'lucide-react';
 import { LEAGUE_CONFIG } from '../../data/leagues';
 import {
   buildHofCompendium,
@@ -41,6 +41,7 @@ const COMPENDIUM_LEAGUES: LeagueId[] = [
 export function BestFiveCourt() {
   const hofList = useCareerStore((s) => s.hofList);
   const recordBook = useCareerStore((s) => s.recordBook);
+  const openHofRetrospective = useCareerStore((s) => s.openHofRetrospective);
   const [selectedEntry, setSelectedEntry] = useState<HallOfFameEntry | null>(null);
   const [compendiumTab, setCompendiumTab] = useState<'TIERS' | 'RECORDS'>('TIERS');
   const [selectedRecordLeague, setSelectedRecordLeague] = useState<LeagueId>('NBA');
@@ -558,6 +559,20 @@ export function BestFiveCourt() {
             <p className="text-[13px] text-[var(--t-g600)] leading-relaxed">
               {selectedEntry.epitaph}
             </p>
+
+            <button
+              type="button"
+              data-testid="open-hof-retrospective-btn"
+              onClick={() => {
+                const entryId = selectedEntry.id;
+                setSelectedEntry(null);
+                openHofRetrospective(entryId);
+              }}
+              className="t-cta gap-2"
+            >
+              <Play className="w-4 h-4 fill-current" />
+              <span>커리어 회고 다시 보기</span>
+            </button>
           </div>
         )}
       </Modal>

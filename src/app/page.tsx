@@ -30,12 +30,20 @@ const DASHBOARD_TABS = [
 export default function BenchToMvpApp() {
   const view = useCareerStore((s) => s.view);
   const career = useCareerStore((s) => s.career);
+  const hofList = useCareerStore((s) => s.hofList);
+  const hofRetrospectiveId = useCareerStore((s) => s.hofRetrospectiveId);
   const lastEncounterOutcome = useCareerStore((s) => s.lastEncounterOutcome);
   const setView = useCareerStore((s) => s.setView);
+  const closeHofRetrospective = useCareerStore((s) => s.closeHofRetrospective);
   const resolveEventChoice = useCareerStore((s) => s.resolveEventChoice);
   const dismissEncounterOutcome = useCareerStore((s) => s.dismissEncounterOutcome);
   const startNewCareer = useCareerStore((s) => s.startNewCareer);
   const resetActiveCareer = useCareerStore((s) => s.resetActiveCareer);
+
+  const replayHofEntry =
+    hofRetrospectiveId
+      ? hofList.find((entry) => entry.id === hofRetrospectiveId) || null
+      : null;
 
   const [activeTab, setActiveTab] = useState<'SEASON' | 'TRAINING' | 'HISTORY'>('SEASON');
   const [showResetModal, setShowResetModal] = useState(false);
@@ -88,17 +96,27 @@ export default function BenchToMvpApp() {
     activeTab === 'SEASON' &&
     hasSeasonBottomDock(career);
 
+  const isWideHeader =
+    isWideDashboard || view === 'RETIREMENT' || Boolean(replayHofEntry);
+
   return (
     <div className="min-h-screen bg-[var(--t-bg)] text-[var(--t-g900)] flex flex-col">
       <Header
-        wide={isWideDashboard}
+        wide={isWideHeader}
         onRequestResetModal={() => setShowResetModal(true)}
         onRequestSaveGuideModal={() => setShowSaveGuideModal(true)}
       />
 
       <main className="flex-1 w-full">
-        {view === 'HOME' && (
+        {view === 'HOME' && !replayHofEntry && (
           <HeroSection onRequestResetModal={() => setShowResetModal(true)} />
+        )}
+
+        {view === 'HOME' && replayHofEntry && (
+          <RetirementCeremony
+            replayEntry={replayHofEntry}
+            onCloseReplay={closeHofRetrospective}
+          />
         )}
 
         {view === 'CREATE' && <PlayerCreator />}

@@ -113,7 +113,7 @@ export const HIGH_SCHOOL_TEAMS: TeamInfo[] = [
     primaryColor: '#065F46',
     secondaryColor: '#6EE7B7',
     logoUrl: '/logos/HS_JEONJU.svg',
-    prestigeDesc: '호남권을 대표하는 농구 명문으로 폭발적인 가드진을 배출해 왔습니다.',
+    prestigeDesc: '호남권을 대표하는 농구 명문으로 빠른 템포의 가드진을 꾸준히 배출해 왔습니다.',
   },
   {
     id: 'HS_MURYONG',
@@ -257,7 +257,7 @@ export const HIGH_SCHOOL_TEAMS: TeamInfo[] = [
     primaryColor: '#881337',
     secondaryColor: '#FDA4AF',
     logoUrl: '/logos/HS_PAICHAI.png',
-    prestigeDesc: '깊은 역사와 전통을 바탕으로 폭발적인 외곽 화력을 보여주는 학교입니다.',
+    prestigeDesc: '깊은 역사와 전통을 바탕으로 정확한 외곽 슈팅을 구사하는 학교입니다.',
   },
   {
     id: 'HS_MYONGJI',
@@ -293,7 +293,7 @@ export const HIGH_SCHOOL_TEAMS: TeamInfo[] = [
     primaryColor: '#1E40AF',
     secondaryColor: '#60A5FA',
     logoUrl: '/logos/HS_BUSAN_JUNGANG.svg',
-    prestigeDesc: '부산 농구의 자존심으로 기적 같은 전국대회 신화를 써 내려간 명문교입니다.',
+    prestigeDesc: '부산 농구를 대표하는 학교로 전국대회에서 숱한 우승 기록을 남긴 명문교입니다.',
   },
   {
     id: 'HS_SHINHEUNG',
@@ -443,7 +443,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
     primaryColor: '#8B0029',
     secondaryColor: '#F87171',
     logoUrl: '/logos/UNI_KOREA.svg',
-    prestigeDesc: '압도적인 높이와 피지컬, 투지로 U-리그 왕좌를 지키는 전통의 라이벌입니다.',
+    prestigeDesc: '높이와 피지컬, 강한 수비 조직력을 앞세워 U-리그 정상권을 지키는 전통의 강호입니다.',
   },
   {
     id: 'UNI_CHUNGANG',
@@ -455,7 +455,7 @@ export const U_LEAGUE_TEAMS: TeamInfo[] = [
     primaryColor: '#1D4ED8',
     secondaryColor: '#93C5FD',
     logoUrl: '/logos/UNI_CHUNGANG.png',
-    prestigeDesc: '52연승 신화를 썼던 대학 농구의 살아있는 전설이자 프로 배출의 산실입니다.',
+    prestigeDesc: '52연승 기록을 남기며 수많은 프로 선수를 배출해 온 대학 농구 명문입니다.',
   },
   {
     id: 'UNI_KYUNGHEE',
@@ -791,7 +791,7 @@ export const B_LEAGUE_TEAMS: TeamInfo[] = [
     primaryColor: '#18181B',
     secondaryColor: '#94A3B8',
     logoUrl: '/logos/BL_ALTIRI.png',
-    prestigeDesc: '압도적 B2 우승으로 승격해 치바 더비를 형성한 신흥 자본 구단입니다.',
+    prestigeDesc: 'B2 우승으로 승격해 치바 더비를 형성한 신흥 투자 구단입니다.',
   },
   {
     id: 'BL_KAWASAKI',
@@ -896,7 +896,7 @@ export const B_LEAGUE_TEAMS: TeamInfo[] = [
     primaryColor: '#141418',
     secondaryColor: '#D4AF37',
     logoUrl: '/logos/BL_RYUKYU.png',
-    prestigeDesc: '오키나와 아레나의 압도적 열기와 강력한 리바운드 장악력을 갖춘 서부 최강팀입니다.',
+    prestigeDesc: '오키나와 아레나의 열띤 홈 응원과 탄탄한 리바운드 장악력을 갖춘 서부 강팀입니다.',
   },
   {
     id: 'BL_SANEN',
@@ -1256,7 +1256,7 @@ export const EUROLEAGUE_TEAMS: TeamInfo[] = [
     primaryColor: '#C8102E',
     secondaryColor: '#D4AF37',
     logoUrl: '/logos/EL_MONACO.png',
-    prestigeDesc: '폭발적인 운동능력과 NBA급 스코어러들로 무장한 프랑스 최강 컨텐더입니다.',
+    prestigeDesc: '뛰어난 운동능력과 NBA 경력 스코어러들로 구성된 프랑스 정상급 컨텐더입니다.',
   },
   {
     id: 'EL_EFES',
@@ -1476,7 +1476,7 @@ export const GLEAGUE_TEAMS: TeamInfo[] = [
     espnId: '17',
     espnAbbr: 'RAP',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/nba-development/500/rap.png',
-    prestigeDesc: '토론토 산하 구단으로 언드래프티 신화를 가장 많이 배출한 육성 명가입니다.',
+    prestigeDesc: '토론토 산하 구단으로 언드래프티 유망주를 NBA 로테이션으로 키워낸 육성 명가입니다.',
   },
   {
     id: 'GL_OSCEOLA',
@@ -2060,7 +2060,7 @@ export const NCAA_TEAMS: TeamInfo[] = [
     espnAbbr: 'BAY',
     espnId: '239',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/ncaa/500/239.png',
-    prestigeDesc: '폭발적인 가드진과 외곽 3점 화력으로 전국 챔피언에 오른 신흥 명문입니다.',
+    prestigeDesc: '기동력 있는 가드진과 외곽 3점 화력으로 전국 챔피언에 오른 신흥 명문입니다.',
   },
   {
     id: 'NCAA_MSU',
@@ -2158,7 +2158,7 @@ export const NCAA_TEAMS: TeamInfo[] = [
     espnAbbr: 'AUB',
     espnId: '2',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/ncaa/500/2.png',
-    prestigeDesc: '폭발적인 트랜지션 3점과 블록슛으로 코트를 지배하는 SEC 강팀입니다.',
+    prestigeDesc: '빠른 트랜지션 3점과 림 보호 능력으로 경기를 풀어가는 SEC 강팀입니다.',
   },
   {
     id: 'NCAA_ALABAMA',
@@ -2270,7 +2270,7 @@ export const NCAA_TEAMS: TeamInfo[] = [
     espnAbbr: 'ARK',
     espnId: '8',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/ncaa/500/8.png',
-    prestigeDesc: '폭발적인 트랜지션과 운동능력 중심의 SEC 대표 토너먼트 강호입니다.',
+    prestigeDesc: '빠른 공수 전환과 운동능력 중심의 SEC 대표 토너먼트 강호입니다.',
   },
   {
     id: 'NCAA_STJOHNS',
@@ -2523,7 +2523,7 @@ export const NBA_TEAMS: TeamInfo[] = [
     conference: 'EAST',
     division: 'Southeast',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/nba/500/orl.png',
-    prestigeDesc: '거대한 신장과 압도적인 수비력을 갖춘 영건들이 이끄는 신흥 강호입니다.',
+    prestigeDesc: '장신 라인업과 탄탄한 수비 조직력을 갖춘 젊은 선수들이 이끄는 신흥 강호입니다.',
   },
   {
     id: 'NBA_MIA',
@@ -2539,7 +2539,7 @@ export const NBA_TEAMS: TeamInfo[] = [
     conference: 'EAST',
     division: 'Southeast',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/nba/500/mia.png',
-    prestigeDesc: '강인한 체력과 규율의 히트 컬처로 언드래프티 신화를 만들어내는 구단입니다.',
+    prestigeDesc: '강인한 체력과 규율의 히트 컬처로 언드래프티 선수들을 주축으로 키워내는 구단입니다.',
   },
   {
     id: 'NBA_ATL',
@@ -2637,7 +2637,7 @@ export const NBA_TEAMS: TeamInfo[] = [
     conference: 'WEST',
     division: 'Northwest',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/nba/500/min.png',
-    prestigeDesc: '리그 최강의 질식 수비와 폭발적인 에이스를 앞세운 서부 최상위 컨텐더입니다.',
+    prestigeDesc: '리그 최상위권 수비 조직력과 핵심 에이스를 앞세운 서부 최상위 컨텐더입니다.',
   },
   {
     id: 'NBA_UTA',
@@ -2701,7 +2701,7 @@ export const NBA_TEAMS: TeamInfo[] = [
     conference: 'WEST',
     division: 'Southwest',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/nba/500/mem.png',
-    prestigeDesc: '그릿 앤 그라인드 정신과 폭발적인 운동능력을 겸비한 서부의 복병입니다.',
+    prestigeDesc: '그릿 앤 그라인드 정신과 높은 운동능력을 겸비한 서부의 복병입니다.',
   },
   {
     id: 'NBA_NOP',
@@ -2733,7 +2733,7 @@ export const NBA_TEAMS: TeamInfo[] = [
     conference: 'WEST',
     division: 'Southwest',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/nba/500/hou.png',
-    prestigeDesc: '폭발적인 유망주 코어와 베테랑이 조화를 이루며 플레이오프를 노리는 팀입니다.',
+    prestigeDesc: '젊은 유망주 코어와 베테랑이 조화를 이루며 플레이오프를 노리는 팀입니다.',
   },
   {
     id: 'NBA_SAS',
@@ -3003,7 +3003,7 @@ export const GLOBAL_NATIONAL_TEAMS: TeamInfo[] = [
     primaryColor: '#1E3A8A',
     secondaryColor: '#EF4444',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/countries/500/fra.png',
-    prestigeDesc: '압도적인 윙스팬과 림 프로텍팅을 앞세워 올림픽 결승을 다투는 유럽 강국입니다.',
+    prestigeDesc: '긴 윙스팬과 탄탄한 림 프로텍팅을 앞세워 올림픽 결승을 다투는 유럽 강국입니다.',
   },
   {
     id: 'NAT_GER',
@@ -3051,7 +3051,7 @@ export const GLOBAL_NATIONAL_TEAMS: TeamInfo[] = [
     primaryColor: '#0369A1',
     secondaryColor: '#F8FAFC',
     logoUrl: 'https://a.espncdn.com/i/teamlogos/countries/500/gre.png',
-    prestigeDesc: '폭발적인 트랜지션과 페인트존 돌파력이 돋보이는 남유럽 강호입니다.',
+    prestigeDesc: '빠른 트랜지션과 페인트존 돌파력이 돋보이는 남유럽 강호입니다.',
   },
   {
     id: 'NAT_SLO',

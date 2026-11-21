@@ -1,6 +1,8 @@
+import { canUseProTradeSystem } from '../config/balanceConfig';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import { getTeamById, SANGMU_TEAM } from '../data/teams';
 import {
+  CareerRetrospective,
   CareerState,
   ContractType,
   HallOfFameEntry,
@@ -133,6 +135,34 @@ function normalizeLegacyEvaluation(
   };
 }
 
+function normalizeRetrospective(
+  retro?: CareerRetrospective | null
+): CareerRetrospective | null {
+  if (!retro) return null;
+  return {
+    ...retro,
+    championships: (retro.championships || []).map((champ) => {
+      if (champ.isInternational || champ.logoUrl === '/logos/kor_flag.svg') {
+        return {
+          ...champ,
+          isInternational: true,
+          teamId: 'KOR_NAT_TEAM',
+          logoUrl: '/logos/NAT_KOR.svg',
+          primaryColor: '#0047a0',
+          secondaryColor: '#cd2e3a',
+        };
+      }
+      return champ;
+    }),
+    jerseyCeremony: retro.jerseyCeremony
+      ? {
+          ...retro.jerseyCeremony,
+          honoredTeam: normalizeTeamInfo(retro.jerseyCeremony.honoredTeam),
+        }
+      : retro.jerseyCeremony,
+  };
+}
+
 export function normalizeHofList(
   hofList?: HallOfFameEntry[] | null
 ): HallOfFameEntry[] {
@@ -142,6 +172,7 @@ export function normalizeHofList(
     legacyTitle: cleanLegacyTitle(entry.legacyTitle),
     legacyEmoji: '',
     iconicTeam: normalizeTeamInfo(entry.iconicTeam),
+    retrospective: normalizeRetrospective(entry.retrospective) ?? undefined,
   }));
 }
 
@@ -214,10 +245,27 @@ export function normalizeCareerSave(
       )
     : (career.badges || []).map((b) => stripLeadingEmoji(b));
 
+  const allowProTrade = canUseProTradeSystem({
+    league: migratedLeague,
+    contractType: migratedContract,
+    isMilitaryTeam: normalizedTeam.isMilitaryTeam,
+    teamId: normalizedTeam.id,
+  });
+
+  const normalizedSettlement = cleanedSettlement
+    ? {
+        ...cleanedSettlement,
+        brokenRolePromise: allowProTrade
+          ? Boolean(cleanedSettlement.brokenRolePromise)
+          : false,
+      }
+    : null;
+
   return {
     ...(cleanCareerRest as CareerState),
     league: migratedLeague,
     contractType: migratedContract,
+    brokenRolePromise: allowProTrade ? Boolean(career.brokenRolePromise) : false,
     playstyle: reconciledPlaystyle,
     seasonPhase: isStuckAfterOffseasonSelection
       ? 'REGULAR_SEASON'
@@ -229,7 +277,7 @@ export function normalizeCareerSave(
     badges: reconciledBadges,
     relationships: hydratedRelationships,
     storyArcs: hydratedStoryArcs,
-    pendingSeasonSettlement: cleanedSettlement,
+    pendingSeasonSettlement: normalizedSettlement,
     currentStandings: (career.currentStandings || []).map((entry) => ({
       ...entry,
       team: normalizeTeamInfo(entry.team),

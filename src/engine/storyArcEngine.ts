@@ -561,7 +561,7 @@ function buildRivalDestinyArcEvent(
       },
       {
         label: '올스타 무대 공동 지배 후 리그 1인자 위상 확정',
-        description: '최정상급 기량과 팬덤 지지를 코트 위에서 직접 증명하며 라이벌리 논쟁을 종결합니다.',
+        description: '최정상급 기량과 팬 지지를 코트 위에서 직접 증명하며 라이벌리 구도에서 우위를 굳힙니다.',
         effectSummary: 'INS +1 · OUT +1 · 언론·팬심 +12 · 프런트 +8 확정',
         riskTier: 'SAFE',
         isExclusiveChoice: true,

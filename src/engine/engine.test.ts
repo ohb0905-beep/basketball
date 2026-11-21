@@ -23,6 +23,7 @@ import {
 import {
   PLAYER_TRAIT_META,
   analyzePositionFit,
+  applyAgeAdjustedEventStatChanges,
   applySpecialCampProgram,
   calculateBiomechanicalProfile,
   calculateHeightMismatchPenalty,
@@ -53,6 +54,7 @@ import {
   calculateRecentEfficiencyMomentum,
   calculateTeamContractOfferSalary,
   checkPotentialBreakthrough,
+  computeCareerMinutes,
   generateDraftRivals,
   getAwardsByLeague,
   getLeagueBaselineTeamRating,
@@ -64,6 +66,7 @@ import {
 import {
   calculateOffseasonTradeAcceptProb,
   calculateProjectedNbaPick,
+  createInitialCombineState,
   determineTeamRolePromise,
   evaluateHighSchoolProspect,
   evaluateTeamScouting,
@@ -80,7 +83,16 @@ import {
   buildHallOfFameEntry,
   checkRetirementEligibility,
   evaluateCareerLegacy,
+  getAgingPhaseInfo,
 } from './retirementEngine';
+import {
+  buildCareerRetrospective,
+  buildChampionshipChronicle,
+  buildFallbackRetrospectiveFromHof,
+  buildTeamStints,
+  buildTrophyCabinet,
+  selectPeakSeason,
+} from './retrospectiveEngine';
 import {
   buildStoryArcEventById,
   checkEncounterChoiceUnlock,
@@ -113,6 +125,7 @@ import {
 } from './playoffEngine';
 import {
   INTERNATIONAL_TOURNAMENT_CONFIG,
+  canUseProTradeSystem,
   getInternationalTournamentByYear,
   isPersonalCareAllowedInLeague,
 } from '../config/balanceConfig';
@@ -641,6 +654,7 @@ test('6. Potential Breakthrough (Pro-Only), Player Traits, Special Camp & Proced
 
   const campRes = applySpecialCampProgram(
     createBaseCareer({
+      age: 24,
       ovr: 75,
       potential: 80,
       stats: { ins: 75, out: 75, ply: 75, def: 75, reb: 75, phy: 75 },
@@ -3811,6 +3825,681 @@ test('47. Contract Header & Existing-Contract Offer Formatters', () => {
   );
   assert.equal(formatSalaryOffer(450000, 2), '$450K · 2년');
 });
+
+test('48. Retirement Retrospective Builder: Team Stints, Peak Season, Championship Chronicle & Trophy Cabinet', () => {
+  const bos = NBA_TEAMS[0];
+  const lal = NBA_TEAMS[1];
+  const kbl = KBL_TEAMS[0];
+  const hs = HIGH_SCHOOL_TEAMS[0];
+
+  const logs = [
+    createSeasonLog({
+      seasonNumber: 1, year: 2026, age: 16, league: 'HIGH_SCHOOL', leagueName: '한국 고교농구',
+      teamId: hs.id, teamName: hs.name, teamShortName: hs.shortName, ovr: 58, gp: 24,
+      ppg: 20.0, rpg: 6.0, apg: 4.0, wonChampionship: true, wonMvp: false, wonFinalsMvp: false, allStarSelected: false,
+    }),
+    createSeasonLog({
+      seasonNumber: 2, year: 2027, age: 17, league: 'KBL', leagueName: 'KBL',
+      teamId: kbl.id, teamName: kbl.name, teamShortName: kbl.shortName, ovr: 74, gp: 54,
+      ppg: 17.5, rpg: 5.0, apg: 4.5, wonChampionship: false, wonMvp: false, wonFinalsMvp: false, wonRookieOfYear: true, allStarSelected: true,
+    }),
+    createSeasonLog({
+      seasonNumber: 3, year: 2028, age: 18, league: 'NBA', leagueName: 'NBA',
+      teamId: bos.id, teamName: bos.name, teamShortName: bos.shortName, ovr: 86, gp: 80,
+      ppg: 22.0, rpg: 6.0, apg: 6.0, wonChampionship: false, wonMvp: false, wonFinalsMvp: false, allStarSelected: true,
+    }),
+    createSeasonLog({
+      seasonNumber: 4, year: 2029, age: 19, league: 'NBA', leagueName: 'NBA',
+      teamId: bos.id, teamName: bos.name, teamShortName: bos.shortName, ovr: 95, gp: 82,
+      ppg: 31.4, rpg: 8.2, apg: 7.5, wonChampionship: true, wonMvp: true, wonFinalsMvp: true, allStarSelected: true, allLeagueTeam: 1,
+    }),
+    createSeasonLog({
+      seasonNumber: 5, year: 2030, age: 20, league: 'NBA', leagueName: 'NBA',
+      teamId: lal.id, teamName: lal.name, teamShortName: lal.shortName, ovr: 92, gp: 78,
+      ppg: 26.0, rpg: 7.0, apg: 6.5, wonChampionship: false, wonMvp: false, wonFinalsMvp: false, allStarSelected: true,
+    }),
+    createSeasonLog({
+      seasonNumber: 6, year: 2031, age: 21, league: 'NBA', leagueName: 'NBA',
+      teamId: bos.id, teamName: bos.name, teamShortName: bos.shortName, ovr: 91, gp: 76,
+      ppg: 24.5, rpg: 6.8, apg: 6.2, wonChampionship: true, wonMvp: false, wonFinalsMvp: true, allStarSelected: true,
+    }),
+  ];
+
+  const stints = buildTeamStints(logs);
+  assert.equal(stints.length, 5, 'Returning to a former team after playing elsewhere must create a distinct stint');
+  assert.equal(stints[2].teamId, bos.id);
+  assert.equal(stints[2].seasons, 2);
+  assert.equal(stints[2].startYear, 2028);
+  assert.equal(stints[2].endYear, 2029);
+  assert.equal(stints[4].teamId, bos.id);
+  assert.equal(stints[4].seasons, 1);
+
+  const retroCareer = createBaseCareer({
+    id: 'RETRO_TEST',
+    name: '김레전드',
+    jerseyNumber: '7',
+    age: 38,
+    seasonsPlayed: 6,
+    league: 'NBA',
+    team: bos,
+    seasonLogs: logs,
+    internationalHistory: [
+      {
+        id: 'INTL_AG_2030',
+        year: 2030,
+        age: 20,
+        tournamentType: 'ASIAN_GAMES',
+        tournamentName: '아시안게임',
+        result: 'GOLD',
+        avgPts: 26.5,
+        avgReb: 7.0,
+        avgAst: 6.0,
+        wonMvp: true,
+        grantedMilitaryExemption: true,
+        matches: [],
+        summaryHeadline: '아시안게임 금메달',
+      },
+    ],
+  });
+
+  const evalLegacy = evaluateCareerLegacy(retroCareer);
+  const recordBook = createInitialRecordBook();
+  recordBook.NBA[0] = {
+    ...recordBook.NBA[0],
+    holderName: retroCareer.name,
+    playerId: retroCareer.id,
+    teamName: bos.name,
+    year: 2029,
+    value: 45000,
+    isUserRecord: true,
+  };
+
+  const retro = buildCareerRetrospective(retroCareer, 'LEGEND_FAREWELL_TOUR', evalLegacy, recordBook);
+  assert.equal(retro.peakSeason?.year, 2029, 'Peak season must select the dominant 2029 NBA MVP/FMVP championship season');
+  assert.equal(retro.championships.length, 4, 'Championship chronicle must include HS + 2 NBA titles + 1 Asian Games GOLD');
+  assert.ok(retro.championships.some((c) => c.isInternational && c.year === 2030));
+  assert.ok(retro.trophies.some((t) => t.id === 'CHAMPIONSHIP' && t.count === 3));
+  assert.ok(retro.trophies.some((t) => t.id === 'FINALS_MVP' && t.count === 2));
+  assert.ok(retro.trophies.some((t) => t.id === 'INTL_MEDAL' && t.count === 1));
+  assert.ok(retro.trophies.some((t) => t.id === 'LEAGUE_RECORD' && t.count === 1));
+  assert.equal(retro.brokenRecords.length, 1);
+
+  const noChampChronicle = buildChampionshipChronicle([
+    createSeasonLog({ wonChampionship: false, playoffResult: '컨퍼런스 결승 탈락', wins: 52, losses: 30 }),
+  ]);
+  assert.equal(noChampChronicle.championships.length, 0);
+  assert.ok(noChampChronicle.bestPlayoffNote?.includes('컨퍼런스 결승 탈락'));
+
+  assert.ok(buildTrophyCabinet(logs).length >= 5);
+  assert.equal(selectPeakSeason([]), null);
+});
+
+test('49. HallOfFameEntry Persists Retrospective & Legacy HOF Entry Fallback Compatibility', () => {
+  const bos = NBA_TEAMS[0];
+  const franchiseLogs = Array.from({ length: 10 }, (_, idx) =>
+    createSeasonLog({
+      seasonNumber: idx + 1,
+      year: 2028 + idx,
+      age: 20 + idx,
+      league: 'NBA',
+      leagueName: 'NBA',
+      teamId: bos.id,
+      teamName: bos.name,
+      teamShortName: bos.shortName,
+      ovr: 94,
+      gp: 80,
+      ppg: 27.5,
+      rpg: 7.2,
+      apg: 6.8,
+      wonChampionship: idx < 3,
+      wonMvp: idx < 3,
+      wonFinalsMvp: idx < 2,
+      allStarSelected: true,
+    })
+  );
+
+  const legendCareer = createBaseCareer({
+    id: 'HOF_RETRO_LEGEND',
+    name: '이영구',
+    jerseyNumber: '24',
+    age: 37,
+    seasonsPlayed: 10,
+    league: 'NBA',
+    team: bos,
+    seasonLogs: franchiseLogs,
+  });
+  const evaluation = evaluateCareerLegacy(legendCareer);
+  assert.equal(evaluation.jerseyRetired, true, '10-season Boston legend must earn jersey retirement');
+
+  const hofEntry = buildHallOfFameEntry(legendCareer, 'VOLUNTARY_HONOR', evaluation);
+  assert.ok(hofEntry.retrospective, 'Newly inducted HallOfFameEntry must include serialized retrospective snapshot');
+  assert.equal(hofEntry.retrospective?.jerseyCeremony.jerseyRetired, true);
+  assert.equal(hofEntry.retrospective?.stints.length, 1);
+  assert.equal(hofEntry.retrospective?.seasons.length, 10);
+
+  const legacyHofWithoutRetro = { ...hofEntry, retrospective: undefined };
+  const fallback = buildFallbackRetrospectiveFromHof(legacyHofWithoutRetro);
+  assert.equal(fallback.isFallback, true);
+  assert.equal(fallback.playerName, '이영구');
+  assert.equal(fallback.jerseyCeremony.jerseyRetired, true);
+  assert.equal(fallback.stints.length, 1);
+  assert.ok(fallback.trophies.length > 0);
+});
+
+test('50. Realistic NBA Aging Curve: 28-31 Peak, 32+ Accelerating Decline, No Defense-Stack Immortality', () => {
+  const midRng = () => 0.5;
+  const peakStats = { ins: 91, out: 92, ply: 90, def: 88, reb: 76, phy: 90 };
+  const peakOvr = calculateOvr(peakStats, 'SG', 198);
+
+  // 1) Standard NBA star ages 30 -> 39 with realistic cumulative mileage
+  let stdStats = { ...peakStats };
+  const stdOvrByAge: Record<number, number> = {};
+  let stdMinutes = 20000;
+  for (let age = 30; age <= 39; age++) {
+    const res = applyAgingCurve(age, stdStats, midRng, {
+      growthDna: 'STANDARD',
+      careerMinutes: stdMinutes,
+      hasBiomechLab: false,
+      hasCampAgingShield: false,
+      veteranReinvented: false,
+    });
+    stdStats = res.nextStats;
+    stdOvrByAge[age] = calculateOvr(stdStats, 'SG', 198);
+    stdMinutes += 2500;
+  }
+
+  assert.ok(
+    stdOvrByAge[31] <= peakOvr,
+    `Age 31 OVR (${stdOvrByAge[31]}) must not inflate above peak (${peakOvr})`
+  );
+  assert.ok(
+    stdOvrByAge[34] < stdOvrByAge[31],
+    `Age 34 OVR (${stdOvrByAge[34]}) must clearly decline from age 31 (${stdOvrByAge[31]})`
+  );
+  assert.ok(
+    stdOvrByAge[38] <= stdOvrByAge[34] - 6,
+    `Late-30s decline must accelerate: age 34 (${stdOvrByAge[34]}) -> age 38 (${stdOvrByAge[38]})`
+  );
+  assert.ok(
+    stdStats.phy < stdStats.out,
+    `Physical athleticism (PHY ${stdStats.phy}) must decline faster than shooting skill (OUT ${stdStats.out})`
+  );
+
+  // 2) Max-defense Ironman (IRONMAN + Biomech Lab + Camp Shield) still declines realistically due to 0.58x floor
+  let ironStats = { ...peakStats };
+  let ironMinutes = 20000;
+  for (let age = 30; age <= 39; age++) {
+    const res = applyAgingCurve(age, ironStats, midRng, {
+      growthDna: 'IRONMAN',
+      careerMinutes: ironMinutes,
+      hasBiomechLab: true,
+      hasCampAgingShield: true,
+      veteranReinvented: true,
+    });
+    ironStats = res.nextStats;
+    ironMinutes += 2500;
+  }
+  const ironOvr39 = calculateOvr(ironStats, 'SG', 198);
+  assert.ok(
+    ironOvr39 > stdOvrByAge[39],
+    `Full-managed Ironman at 39 (${ironOvr39}) should age better than unmanaged Standard (${stdOvrByAge[39]})`
+  );
+  assert.ok(
+    ironOvr39 <= peakOvr - 8,
+    `Even max-defense Ironman must meaningfully decline by 39 (peak ${peakOvr} -> age 39 ${ironOvr39})`
+  );
+
+  // 3) Aging phase classifier matches progression stages
+  assert.equal(getAgingPhaseInfo(22, 'STANDARD', 3000).phaseId, 'GROWTH');
+  assert.equal(getAgingPhaseInfo(28, 'STANDARD', 14000).phaseId, 'PRIME');
+  assert.equal(getAgingPhaseInfo(31, 'STANDARD', 21000).phaseId, 'VETERAN_MANAGE');
+  assert.equal(getAgingPhaseInfo(35, 'STANDARD', 32000).phaseId, 'DECLINE');
+});
+
+test('51. Age 31+ Special Camps & Random Encounters Transition to Maintenance & Aging Defense', () => {
+  const vet35 = createBaseCareer({
+    age: 35,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 86,
+    potential: 92,
+    trainingFocus: 'PHYSICAL_CONDITIONING',
+    stats: { ins: 84, out: 87, ply: 86, def: 82, reb: 75, phy: 78 },
+  });
+
+  // 1) 31+ Special Camp options show veteran maintenance mode
+  const campOpts = getSpecialCampOptions(vet35);
+  assert.equal(campOpts[0].isVeteranMode, true);
+  assert.ok(campOpts[0].effectText.includes('노쇠화'));
+
+  // 2) LEGEND_SKILL_CAMP at 35 grants aging shield, zero potential gain, zero PHY gain
+  const skillCamp = applySpecialCampProgram(vet35, 'LEGEND_SKILL_CAMP', () => 0.1);
+  assert.equal(skillCamp.grantsAgingShield, true);
+  assert.equal(skillCamp.nextPotential, vet35.potential, 'Age 31+ camp must never raise potential');
+  assert.equal(skillCamp.nextStats.phy, vet35.stats.phy, 'Age 31+ camp must not boost PHY');
+  assert.equal(skillCamp.nextStats.ins, vet35.stats.ins, 'Age 31+ camp must not boost INS');
+
+  // 3) BULK_UP at 35 is zero-sum (+1/+1 vs -1/-1) instead of net +3
+  const bulkCamp = applySpecialCampProgram(vet35, 'BULK_UP', () => 0.5);
+  const prevSum = Object.values(vet35.stats).reduce((a, b) => a + b, 0);
+  const nextSum = Object.values(bulkCamp.nextStats).reduce((a, b) => a + b, 0);
+  assert.equal(nextSum, prevSum, 'Age 31+ BULK_UP must be a zero-sum body rebalance');
+
+  // 4) Random Encounter stat filter at age 35 suppresses physical boosts & converts to shield/trust, preserves penalties
+  const eventAdj = applyAgeAdjustedEventStatChanges(35, vet35.stats, {
+    phy: 2,
+    ins: 2,
+    out: 2,
+    def: -2,
+  });
+  assert.equal(eventAdj.adjustedChanges.phy, undefined, 'Age 34+ event must suppress positive PHY gain');
+  assert.equal(eventAdj.adjustedChanges.ins, undefined, 'Age 34+ event must suppress positive INS gain');
+  assert.equal(eventAdj.adjustedChanges.out, 1, 'Age 34+ event caps skill stat (<90) to +1');
+  assert.equal(eventAdj.adjustedChanges.def, -2, 'Negative stat penalties must always apply in full');
+  assert.equal(eventAdj.grantedAgingShield, true);
+  assert.ok(eventAdj.convertedTrustBonus >= 2);
+});
+
+test('52. Exact Career Minutes Tracking & Heavy-Mileage Aging / Injury Penalty', () => {
+  // Identical GP (800G), completely different MPG (38 MPG iron-starter vs 16 MPG bench)
+  const heavyLogs = Array.from({ length: 10 }, (_, idx) =>
+    createSeasonLog({
+      seasonNumber: idx + 1,
+      year: 2026 + idx,
+      age: 21 + idx,
+      gp: 80,
+      mpg: 38.0,
+    })
+  );
+  const lightLogs = Array.from({ length: 10 }, (_, idx) =>
+    createSeasonLog({
+      seasonNumber: idx + 1,
+      year: 2026 + idx,
+      age: 21 + idx,
+      gp: 80,
+      mpg: 16.0,
+    })
+  );
+
+  const heavyMinutes = computeCareerMinutes({ seasonLogs: heavyLogs });
+  const lightMinutes = computeCareerMinutes({ seasonLogs: lightLogs });
+  assert.equal(heavyMinutes, 30400);
+  assert.equal(lightMinutes, 12800);
+  assert.ok(heavyMinutes > lightMinutes * 2);
+
+  // Heavy mileage causes steeper decline at age 33 than low mileage with identical stats/DNA
+  const stats = { ins: 86, out: 86, ply: 84, def: 84, reb: 78, phy: 84 };
+  const heavyAging = applyAgingCurve(33, stats, () => 0.5, {
+    growthDna: 'STANDARD',
+    careerMinutes: heavyMinutes,
+  });
+  const lightAging = applyAgingCurve(33, stats, () => 0.5, {
+    growthDna: 'STANDARD',
+    careerMinutes: lightMinutes,
+  });
+  const heavySum = Object.values(heavyAging.nextStats).reduce((a, b) => a + b, 0);
+  const lightSum = Object.values(lightAging.nextStats).reduce((a, b) => a + b, 0);
+  assert.ok(
+    heavySum < lightSum,
+    `Heavy-mileage starter (sum ${heavySum}) must experience harsher aging than light-mileage vet (sum ${lightSum})`
+  );
+});
+
+test('53. Realistic 3-Tier Injuries (30+ Major PHY Aftermath), Position FG%, and Veteran Load Management', () => {
+  // 1) 30+ Major Injury triggers long absence (>=38% games) AND permanent PHY aftermath
+  const vet35InjuryCareer = createBaseCareer({
+    age: 35,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 86,
+    stats: { ins: 84, out: 86, ply: 84, def: 82, reb: 76, phy: 74 },
+    totals: {
+      gp: 900,
+      minutes: 31000,
+      points: 18000,
+      rebounds: 4500,
+      assists: 4000,
+      steals: 1000,
+      blocks: 400,
+      nbaGp: 900,
+      nbaPoints: 18000,
+      championships: 1,
+      nbaChampionships: 1,
+      mvps: 0,
+      nbaMvps: 0,
+      finalsMvps: 0,
+      dpoys: 0,
+      sixthManAwards: 0,
+      mips: 0,
+      allLeagueSelections: 3,
+      allStars: 5,
+      nbaAllStars: 5,
+    },
+  });
+
+  // Deterministic RNG sequence forcing injury trigger (0.01) -> MAJOR tier (0.01) -> label (0.0) -> mid-range miss (0.5)
+  const majorRngSeq = [0.5, 0.5, 0.01, 0.01, 0.0, 0.5, 0.5, 0.5];
+  let idx = 0;
+  const majorRole = calculateRoleAndMpg(vet35InjuryCareer, () => {
+    const v = majorRngSeq[Math.min(idx, majorRngSeq.length - 1)];
+    idx += 1;
+    return v;
+  });
+  assert.equal(majorRole.injurySeverity, 'MAJOR');
+  assert.ok(majorRole.injuredGamesMissed >= 28, `Major NBA injury must miss >=28G, got ${majorRole.injuredGamesMissed}`);
+  assert.equal(majorRole.injuryPermanentPhyPenalty, 3, 'Age 34+ major injury must apply permanent PHY -3 aftermath');
+  assert.ok(majorRole.injuryLabel && majorRole.injuryLabel.length > 0);
+
+  // Full season sim applies the permanent PHY penalty and records aftermath in narrative
+  let simIdx = 0;
+  const majorSim = simulateSeason(vet35InjuryCareer, () => {
+    const v = majorRngSeq[Math.min(simIdx, majorRngSeq.length - 1)];
+    simIdx += 1;
+    return v;
+  });
+  assert.equal(majorSim.boxScore.injurySeverity, 'MAJOR');
+  assert.equal(majorSim.boxScore.injuryPermanentPhyPenalty, 3);
+  assert.ok(
+    majorSim.boxScore.narrativeLog.some((line) => line.includes('중상 후유증')),
+    'Season narrative must explicitly log 30+ major injury aftermath'
+  );
+  assert.ok(
+    majorSim.nextStats.phy <= vet35InjuryCareer.stats.phy - 5,
+    `Major injury aftermath + aging must noticeably reduce PHY (${vet35InjuryCareer.stats.phy} -> ${majorSim.nextStats.phy})`
+  );
+
+  // 2) Veteran Load Management caps MPG and healthy GP for age 37+ stars
+  const vet38Star = createBaseCareer({
+    age: 38,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 92,
+    coachTrust: 90,
+    growthDna: 'STANDARD',
+    traits: ['CLUTCH_PERFORMER'],
+    stats: { ins: 88, out: 92, ply: 90, def: 84, reb: 76, phy: 82 },
+  });
+  // High rng (0.95) avoids injury so we measure healthy load-management caps
+  const vet38Role = calculateRoleAndMpg(vet38Star, () => 0.95);
+  assert.equal(vet38Role.veteranLoadManaged, true);
+  assert.ok(vet38Role.mpg <= 30.5, `Age 38 standard star MPG must be load-managed (<=30.5), got ${vet38Role.mpg}`);
+  assert.ok(vet38Role.gp <= 67, `Age 38 standard star healthy GP must be load-managed (<=67/82), got ${vet38Role.gp}`);
+
+  const vet38Ironman = calculateRoleAndMpg(
+    { ...vet38Star, growthDna: 'IRONMAN', traits: ['IRON_STAMINA'] },
+    () => 0.95
+  );
+  assert.ok(
+    vet38Ironman.mpg > vet38Role.mpg && vet38Ironman.mpg <= 32.0,
+    `Age 38 Ironman should receive modest +1.5 MPG allowance (${vet38Ironman.mpg}) while still load-managed`
+  );
+
+  // 3) Position-based FG%: Traditional Center shoots significantly higher FG% than Point Guard with same offensive ratings
+  const centerCareer = createBaseCareer({
+    age: 26,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    primaryPos: 'C',
+    heightCm: 213,
+    playstyle: 'RIM_PROTECTOR',
+    ovr: 86,
+    stats: { ins: 86, out: 80, ply: 74, def: 86, reb: 90, phy: 84 },
+  });
+  const pgCareer = createBaseCareer({
+    age: 26,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    primaryPos: 'PG',
+    heightCm: 191,
+    playstyle: 'PLAYMAKER',
+    ovr: 86,
+    stats: { ins: 86, out: 80, ply: 88, def: 80, reb: 64, phy: 84 },
+  });
+  const cSim = simulateSeason(centerCareer, () => 0.85);
+  const pgSim = simulateSeason(pgCareer, () => 0.85);
+  assert.ok(
+    cSim.boxScore.fgPct >= pgSim.boxScore.fgPct + 6.0,
+    `Center FG% (${cSim.boxScore.fgPct}%) must realistically exceed PG FG% (${pgSim.boxScore.fgPct}%) by >=6%p`
+  );
+  assert.ok(cSim.boxScore.fgPct >= 52.0, `Elite Center FG% should be >=52%, got ${cSim.boxScore.fgPct}%`);
+});
+
+test('54. Retirement Championship Chronicle Uses Official Taegeukgi Asset & Repairs Legacy HOF Saves', () => {
+  const intlHistory = [
+    {
+      year: 2030,
+      age: 24,
+      tournamentType: 'ASIAN_GAMES' as const,
+      tournamentName: '아시안게임',
+      result: 'GOLD' as const,
+      resultLabel: '금메달',
+      wonMvp: true,
+      avgPts: 22.4,
+      avgReb: 5.2,
+      avgAst: 6.8,
+      militaryExemptionEarned: true,
+    },
+  ];
+  const { championships } = buildChampionshipChronicle([], intlHistory);
+  assert.equal(championships.length, 1);
+  assert.equal(championships[0].isInternational, true);
+  assert.equal(championships[0].teamId, 'KOR_NAT_TEAM');
+  assert.equal(championships[0].logoUrl, '/logos/NAT_KOR.svg');
+
+  const flagAssetPath = path.resolve(process.cwd(), 'public/logos/NAT_KOR.svg');
+  assert.ok(fs.existsSync(flagAssetPath), 'public/logos/NAT_KOR.svg must exist');
+
+  // Legacy HOF save with nonexistent /logos/kor_flag.svg and missing teamId is auto-repaired on migration
+  const careerForHof = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    internationalHistory: intlHistory,
+    seasonLogs: [createSeasonLog({ league: 'NBA', wonChampionship: true })],
+  });
+  const legacyEval = evaluateCareerLegacy(careerForHof);
+  const retro = buildCareerRetrospective(careerForHof, 'VOLUNTARY_HONOR', legacyEval);
+  const brokenLegacyRetro = {
+    ...retro,
+    championships: retro.championships.map((c) =>
+      c.isInternational
+        ? { ...c, teamId: undefined, logoUrl: '/logos/kor_flag.svg' }
+        : c
+    ),
+  };
+  const hofEntry = buildHallOfFameEntry(careerForHof, 'VOLUNTARY_HONOR', legacyEval);
+  hofEntry.retrospective = brokenLegacyRetro;
+
+  const migrated = migratePersistedPayload({
+    career: careerForHof,
+    hofList: [hofEntry],
+    skipRecordSync: true,
+  });
+
+  const repairedHofChamp = migrated.hofList[0].retrospective?.championships.find(
+    (c) => c.isInternational
+  );
+  assert.ok(repairedHofChamp);
+  assert.equal(repairedHofChamp.teamId, 'KOR_NAT_TEAM');
+  assert.equal(repairedHofChamp.logoUrl, '/logos/NAT_KOR.svg');
+});
+
+test('55. Amateur Leagues (High School, U-League, NCAA) & Military Service (Sangmu) Block Broken Role Promise & Trade Requests', () => {
+  assert.equal(canUseProTradeSystem({ league: 'HIGH_SCHOOL', contractType: 'AMATEUR' }), false);
+  assert.equal(canUseProTradeSystem({ league: 'U_LEAGUE', contractType: 'AMATEUR' }), false);
+  assert.equal(canUseProTradeSystem({ league: 'NCAA', contractType: 'AMATEUR' }), false);
+  assert.equal(
+    canUseProTradeSystem({
+      league: 'KBL',
+      contractType: 'MILITARY_SERVICE',
+      isMilitaryTeam: true,
+      teamId: SANGMU_TEAM.id,
+    }),
+    false
+  );
+  assert.equal(
+    canUseProTradeSystem({
+      league: 'KBL',
+      contractType: 'KBL_CONTRACT',
+      isMilitaryTeam: false,
+      teamId: KBL_TEAMS[0].id,
+    }),
+    true
+  );
+
+  // Even with ACE_FIRST_OPTION promise and very low OVR/trust (low MPG), HS/College/Sangmu must never set brokenRolePromise
+  const nonProCases = [
+    createBaseCareer({
+      age: 17,
+      league: 'HIGH_SCHOOL',
+      team: HIGH_SCHOOL_TEAMS[0],
+      contractType: 'AMATEUR',
+      promisedRole: 'ACE_FIRST_OPTION',
+      coachTrust: 15,
+      ovr: 46,
+      stats: { ins: 46, out: 46, ply: 46, def: 46, reb: 46, phy: 46 },
+    }),
+    createBaseCareer({
+      age: 20,
+      league: 'U_LEAGUE',
+      team: U_LEAGUE_TEAMS[0],
+      contractType: 'AMATEUR',
+      promisedRole: 'STARTER_GUARANTEE',
+      coachTrust: 15,
+      ovr: 52,
+      stats: { ins: 52, out: 52, ply: 52, def: 52, reb: 52, phy: 52 },
+    }),
+    createBaseCareer({
+      age: 20,
+      league: 'NCAA',
+      team: NCAA_TEAMS[0],
+      contractType: 'AMATEUR',
+      promisedRole: 'STARTER_GUARANTEE',
+      coachTrust: 15,
+      ovr: 56,
+      stats: { ins: 56, out: 56, ply: 56, def: 56, reb: 56, phy: 56 },
+    }),
+    createBaseCareer({
+      age: 26,
+      league: 'KBL',
+      team: SANGMU_TEAM,
+      contractType: 'MILITARY_SERVICE',
+      promisedRole: 'ACE_FIRST_OPTION',
+      coachTrust: 15,
+      ovr: 60,
+      stats: { ins: 60, out: 60, ply: 60, def: 60, reb: 60, phy: 60 },
+      seasonsOnCurrentTeam: 3,
+      brokenRolePromise: true,
+    }),
+  ];
+
+  for (const c of nonProCases) {
+    const sim = simulateSeason(c, () => 0.8);
+    assert.equal(
+      sim.brokenRolePromise,
+      false,
+      `${c.league}/${c.contractType} must never trigger brokenRolePromise`
+    );
+    assert.ok(
+      !sim.boxScore.narrativeLog.some((line) => line.includes('트레이드 요청')),
+      `${c.league}/${c.contractType} narrative must never suggest trade request`
+    );
+
+    // Mid-season crossroads must never trigger trade deadline rumor for amateur or Sangmu
+    const midEvt = rollMidSeasonCrossroadsEvent(
+      { ...c, seasonsOnCurrentTeam: 4, brokenRolePromise: true },
+      () => 0.01
+    );
+    assert.ok(
+      !midEvt.id.startsWith('EVT_MID_TRADE_DEADLINE'),
+      `${c.league}/${c.contractType} must never trigger mid-season trade deadline rumor`
+    );
+
+    // Save migration auto-clears any stale brokenRolePromise saved in amateur or Sangmu
+    const migrated = migratePersistedPayload({
+      career: { ...c, brokenRolePromise: true },
+      skipRecordSync: true,
+    });
+    assert.equal(
+      migrated.career?.brokenRolePromise,
+      false,
+      `${c.league}/${c.contractType} save migration must clear stale brokenRolePromise`
+    );
+  }
+});
+
+test('56. Unified Sports-Documentary Korean Tone (합니다체) & Zero AI Clichés / Biomechanical Jargon', () => {
+  const informalRe = /(해요|했어요|돼요|있어요|없어요|이에요|예요|거머쥐었어요|마셨어요|올렸어요|봐요|섰어요|찾아왔어요|보낼까요|택할까요|돌파되었어요|확장되었어요)/;
+  const bannedJargonOrClicheRe = /(생체역학|물리적 부하|논란을 종결|마진이 폭등|브루클린 그린룸|과감한 승부수가 완벽하게|살아있는 전설|불꽃 튀는|빛을 발할)/;
+
+  // 1) All encounter scenarios & chain followups
+  for (const tpl of ENCOUNTER_SCENARIO_POOL) {
+    const texts: string[] = [tpl.title, tpl.subtitle, tpl.description];
+    for (const ch of tpl.choices) {
+      texts.push(ch.label, ch.description);
+      if (ch.successOutcome?.narrative) texts.push(ch.successOutcome.narrative);
+      if (ch.failureOutcome?.narrative) texts.push(ch.failureOutcome.narrative);
+      const chains = [
+        ch.nextChainEvent,
+        ch.successOutcome?.nextChainEvent,
+        ch.failureOutcome?.nextChainEvent,
+      ].filter(Boolean);
+      for (const ce of chains) {
+        if (!ce) continue;
+        texts.push(ce.title, ce.subtitle, ce.description);
+        for (const cch of ce.choices) {
+          texts.push(cch.label, cch.description);
+          if (cch.successOutcome?.narrative) texts.push(cch.successOutcome.narrative);
+          if (cch.failureOutcome?.narrative) texts.push(cch.failureOutcome.narrative);
+        }
+      }
+    }
+    for (const t of texts) {
+      assert.ok(!informalRe.test(t), `Informal Korean found in ${tpl.id}: "${t}"`);
+      assert.ok(!bannedJargonOrClicheRe.test(t), `Banned cliché/jargon found in ${tpl.id}: "${t}"`);
+    }
+  }
+
+  // 2) Position switch error messages
+  const nonAdj = canSwitchToPosition('PG', 'C', 190, null);
+  assert.equal(nonAdj.allowed, false);
+  assert.ok(nonAdj.reason && !informalRe.test(nonAdj.reason));
+
+  const extremeHeight = canSwitchToPosition('SF', 'PF', 170, null);
+  if (!extremeHeight.allowed && extremeHeight.reason) {
+    assert.ok(!informalRe.test(extremeHeight.reason));
+    assert.ok(!bannedJargonOrClicheRe.test(extremeHeight.reason));
+  }
+
+  // 3) NBA combine scouting reports across pick ranges
+  for (const ovr of [90, 79, 73, 60]) {
+    const combine = createInitialCombineState(
+      createBaseCareer({
+        age: 20,
+        league: 'NCAA',
+        team: NCAA_TEAMS[0],
+        ovr,
+        potential: Math.min(95, ovr + 5),
+        stats: { ins: ovr, out: ovr, ply: ovr, def: ovr, reb: ovr, phy: ovr },
+      })
+    );
+    assert.ok(!informalRe.test(combine.scoutingReport), `Informal combine copy: ${combine.scoutingReport}`);
+    assert.ok(
+      !bannedJargonOrClicheRe.test(combine.scoutingReport),
+      `Banned combine cliché: ${combine.scoutingReport}`
+    );
+  }
+
+  // 4) Team descriptions
+  for (const team of ALL_TEAMS) {
+    assert.ok(!informalRe.test(team.prestigeDesc), `Informal team copy (${team.id}): ${team.prestigeDesc}`);
+    assert.ok(
+      !bannedJargonOrClicheRe.test(team.prestigeDesc),
+      `Banned team cliché (${team.id}): ${team.prestigeDesc}`
+    );
+  }
+});
+
+
 
 
 
