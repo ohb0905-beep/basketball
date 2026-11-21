@@ -18,7 +18,7 @@ const TACTIC_OPTIONS: {
 }[] = [
   { id: 'ACE_HERO', label: '에이스 모드', effect: '득점 ↑ · 체력 소모 ↑' },
   { id: 'UNSELFISH_PASS', label: '이타적 패스', effect: '어시스트 · 팀 야투 ↑' },
-  { id: 'LOCKDOWN_DEFENSE', label: '락다운 수비', effect: '실점 억제 · 스틸 ↑' },
+  { id: 'LOCKDOWN_DEFENSE', label: '락다운 수비', effect: '실점 억제 · 스틸 ↑ · 파울 위험 ↑' },
   { id: 'PACE_CONSERVE', label: '페이스 조절', effect: '4쿼터 체력 비축' },
 ];
 

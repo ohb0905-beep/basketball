@@ -3120,6 +3120,33 @@ function generateQuarterCourtPlays(params: {
  * - 점수 차가 5점 이상이면 클러치 없이 자연스럽게 경기가 종료됩니다.
  * - 동점으로 쿼터(또는 클러치)가 끝나면 최대 3차 연장(OT)까지 진행합니다.
  */
+/**
+ * 리그 평균 능력치(모든 스탯 = LDR) 선수가 중립 전술·표준 체력으로 한 쿼터를 뛸 때의 기대 기여도.
+ * simulateLiveQuarter 의 선수 득점/야투/어시스트/스틸·블록 산식의 기댓값과 같은 형태로 계산합니다.
+ */
+export function getReplacementLevelQuarterImpact(
+  ldr: number,
+  minutesFactor: number,
+  isOvertime: boolean
+): { lift: number; stocks: number } {
+  const fga = (isOvertime ? 2.6 : 4.8) * minutesFactor * (0.84 + (2 * ldr) / 225);
+  const fgProb =
+    clamp(0.44, 0.24, 0.72) * LIVE_GAME_CONFIG.replacementStaminaFactor;
+  const threeShare = ldr >= 56 ? clamp((ldr - 42) / 105, 0.12, 0.55) : 0;
+  const fieldPts = fga * fgProb * ((1 - threeShare) * 2 + threeShare * 0.85 * 3);
+  const ftProb = clamp(0.62 + (ldr - 50) * 0.006, 0.55, 0.93);
+  const ftPts = 0.28 * minutesFactor * 2 * ftProb;
+  const ast =
+    (0.7 + (ldr / 100) * 2.7) * minutesFactor * (isOvertime ? 0.55 : 1.0);
+  const stocks =
+    clamp((ldr / 100) * 0.42 * minutesFactor, 0.03, 0.62) +
+    clamp((ldr / 100) * 0.36 * minutesFactor, 0.02, 0.52);
+  return {
+    lift: fieldPts + ftPts - fga * 0.85 + ast * 1.35,
+    stocks,
+  };
+}
+
 export function simulateLiveQuarter(
   liveGame: LiveGameState,
   career: CareerState,
@@ -3337,36 +3364,46 @@ export function simulateLiveQuarter(
     ? leagueMeta.liveOvertimeBasePts
     : leagueMeta.liveOppQuarterBasePts;
 
-  const teamRatingOffset = (teamRating - ldr) * 0.22;
+  // 두 팀 평균 전력이 리그 LDR보다 높을수록 경기 템포(양 팀 득점)가 함께 올라갑니다. (한쪽에만 주지 않음)
+  const paceRatingOffset =
+    ((teamRating + liveGame.opponentTeam.rating) / 2 - ldr) * 0.22;
+
+  // [대칭 보정] 선수 기여도는 '같은 역할·출전 비중을 맡은 리그 평균 선수'의 기대 기여도 대비 차이로만 반영합니다.
+  // 상대 팀에도 리그 평균 수준의 선수가 같은 역할을 수행한다고 보는 것과 같아,
+  // 평균 선수는 승패에 중립적이고 실력이 리그 평균을 넘어설수록 팀 승률이 올라갑니다.
+  const replacement = getReplacementLevelQuarterImpact(
+    ldr,
+    roleMinutesFactor * foulTroubleMinutesMult,
+    isOvertime
+  );
   const playerCourtLift = isAlreadyFouledOut
-    ? -1.5
-    : qPts - qFga * 0.85 + qAst * 1.35;
+    ? -LIVE_GAME_CONFIG.fouledOutLiftPenalty
+    : qPts - qFga * 0.85 + qAst * 1.35 - replacement.lift;
   const myQScore = Math.max(
     isOvertime ? 4 : 11,
     isAlreadyFouledOut ? 0 : qPts + (qAst > 0 ? 2 : 0),
     Math.round(
       baseTeamQuarterPts +
-        teamRatingOffset +
-        playerCourtLift * 0.65 +
+        paceRatingOffset +
+        playerCourtLift * LIVE_GAME_CONFIG.playerImpactWeight +
         (rng() - 0.5) * 8.5
     )
   );
 
   const oppAdvantage = (liveGame.opponentTeam.rating - teamRating) * 0.24;
   const defSuppression = isAlreadyFouledOut
-    ? -1.2
-    : (mod.defBonus +
-        (stats.def - ldr) * 0.08 +
-        (qStl + qBlk) * 1.35 -
-        bio.perimeterDefPenalty * 0.14) *
-      roleMinutesFactor *
-      foulTroubleMinutesMult;
+    ? -LIVE_GAME_CONFIG.fouledOutDefPenalty
+    : mod.defBonus * roleMinutesFactor * foulTroubleMinutesMult +
+      (stats.def - ldr) * 0.08 * roleMinutesFactor * foulTroubleMinutesMult +
+      (qStl + qBlk - replacement.stocks) * 1.35 -
+      bio.perimeterDefPenalty * 0.14 * roleMinutesFactor * foulTroubleMinutesMult;
   let oppQScore = Math.max(
     isOvertime ? 4 : 11,
     Math.round(
       baseOppQuarterPts +
+        paceRatingOffset +
         oppAdvantage -
-        defSuppression * 0.6 +
+        defSuppression * LIVE_GAME_CONFIG.defImpactWeight +
         (rng() - 0.5) * 8.5
     )
   );
