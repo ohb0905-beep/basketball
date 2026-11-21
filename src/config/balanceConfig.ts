@@ -322,9 +322,27 @@ export function getInternationalTournamentByYear(
   return 'OLYMPICS';
 }
 
+/**
+ * 선수 성장 곡선 (seasonSimulator.calculateSeasonStatGrowth)
+ */
+export const GROWTH_CONFIG = {
+  highOvrWallStart: 80, // 이 OVR부터 성장 감쇠 시작 (기존 76)
+  highOvrWallSlope: 0.03, // OVR 1당 성장률 감소폭 (기존 0.038)
+  proStageGrowthBoost: 1.3, // 프로 리그 소속 시 성장 가속 배율
+  minPtFactor: 0.72, // 출전시간 성장 계수 하한 (기존 0.48 — 벤치 선수 성장 정체 완화)
+  primeGrowthChance: 0.5, // 전성기(성장기 이후~전성기 종료) 능력치별 +1 확률
+  primeGrowthChanceWithLab: 0.68, // 바이오메카닉스 스킬 랩 사용 시
+};
+
 export const LIVE_GAME_CONFIG = {
   clutchMaxPointGap: 4, // 실제 ±4점 이내 접전일 때만 클러치 마지막 1포제션 자연 발동
   maxOvertimePeriods: 3, // 최대 3차 연장(3OT)
+  // [대칭 보정] 선수 기여도는 리그 평균 선수(스탯 = LDR) 기대 기여도 대비 차이로 반영
+  playerImpactWeight: 0.65, // 공격 기여도(평균 대비) → 팀 쿼터 득점 환산 계수
+  defImpactWeight: 0.6, // 수비 기여도(평균 대비) → 상대 쿼터 득점 억제 계수
+  replacementStaminaFactor: 0.95, // 리그 평균 선수의 기준 체력 효율 (이보다 지치면 손해)
+  fouledOutLiftPenalty: 1.5, // 5/6반칙 퇴장 후 쿼터당 공격 손실
+  fouledOutDefPenalty: 1.2, // 5/6반칙 퇴장 후 쿼터당 수비 손실
   asianGamesLdr: 67,
   asianGamesFoulLimit: 5,
   clutchProbMin: 0.2,
@@ -332,9 +350,9 @@ export const LIVE_GAME_CONFIG = {
   tacticMods: {
     ACE_HERO: {
       usageMult: 1.38,
-      fgBonus: -0.018,
-      defBonus: -1.4,
-      astBonus: 0.75,
+      fgBonus: 0.01,
+      defBonus: 0,
+      astBonus: 0.85,
       staminaDrain: 23,
       foulRisk: 0.24,
       label: '에이스 모드 (공격 주도)',
@@ -342,16 +360,16 @@ export const LIVE_GAME_CONFIG = {
     LOCKDOWN_DEFENSE: {
       usageMult: 0.86,
       fgBonus: 0.01,
-      defBonus: 4.2,
+      defBonus: 1.8,
       astBonus: 0.95,
-      staminaDrain: 20,
-      foulRisk: 0.38,
+      staminaDrain: 22,
+      foulRisk: 0.42,
       label: '질식 수비 (상대 에이스 봉쇄)',
     },
     UNSELFISH_PASS: {
       usageMult: 1.0,
       fgBonus: 0.032,
-      defBonus: 1.2,
+      defBonus: -0.4,
       astBonus: 1.42,
       staminaDrain: 15,
       foulRisk: 0.17,
@@ -359,8 +377,8 @@ export const LIVE_GAME_CONFIG = {
     },
     PACE_CONSERVE: {
       usageMult: 0.74,
-      fgBonus: 0.018,
-      defBonus: 0.6,
+      fgBonus: 0.03,
+      defBonus: 1.0,
       astBonus: 0.9,
       staminaDrain: 8,
       foulRisk: 0.1,
@@ -401,6 +419,7 @@ export const ROLE_MPG_CONFIG = {
     ironmanDnaMult: 0.52,
     ironStaminaMult: 0.5,
     glassBodyMult: 1.65,
+    glassBodyRehabRetention: 0.5, // 재활 관리 시 유리몸 페널티 잔존 비율 (0 = 완전 제거, 1 = 그대로)
     maxMissRatio: 0.68,
     tiers: {
       minor: { minRatio: 0.04, maxRatio: 0.12 },
@@ -440,14 +459,26 @@ export const ROLE_MPG_CONFIG = {
     PG: { base: 43.5, stretchBigBase: 43.5, min: 32.0, max: 54.0 },
   },
   ppg: {
-    softCapStart: 25.0,
-    softCapSlope: 0.35,
+    softCapStart: 26.0,
+    softCapSlope: 0.48,
     minPpg: 1.2,
     maxPpg: 34.5,
   },
 };
 
 export const AWARD_VOTING_CONFIG = {
+  // MVP 레이스 NPC 스타의 리그별 득점 보정 (주인공이 리그 LDR 대비 얼마나 앞서 출발하는지 반영)
+  npcMvpPpgOffsetByLeague: {
+    HIGH_SCHOOL: 6.5,
+    U_LEAGUE: 6.5,
+    NCAA: 2.0,
+    KBL: 5.0,
+    B_LEAGUE: 2.0,
+    NBL: 1.0,
+    EUROLEAGUE: 0,
+    GLEAGUE: 3.0,
+    NBA: -4.0,
+  } as Record<LeagueId, number>,
   npcMvpPoolSize: 9, // 라이벌 외 9명의 리그 스타 후보 생성 (총 10~12명 풀에서 공정한 TOP 5 선발)
   npcRoyPoolSize: 8, // 신인왕 후보 풀 9~11명
   // 단일 통합 평가 가중치 (개인 스탯 + 팀 성적을 투표 단계에서 통합 반영 — 투표 1위 = 무조건 MVP 수상)

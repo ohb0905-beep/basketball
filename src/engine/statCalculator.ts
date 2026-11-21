@@ -452,7 +452,7 @@ export function rollInitialPotential(
 ): number {
   const u1 = rng();
   const u2 = rng();
-  const baseSpectrum = 68 + Math.round((u1 * 0.65 + u2 * 0.35) * 26);
+  const baseSpectrum = 70 + Math.round((u1 * 0.65 + u2 * 0.35) * 26);
 
   const dnaBonus =
     growthDna === 'LATE_BLOOMER' ? 2 : growthDna === 'EARLY_BLOOMER' ? 1 : 0;
@@ -1103,6 +1103,18 @@ export function rollPlayerDnaAndPlaystyle(
 /**
  * 캐릭터 생성 전 미리보기용 기준 능력치 및 예상 OVR 범위 산출
  */
+/**
+ * 포지션별 초기 OVR 편차 보정 (모든 능력치에 동일하게 차감 → 포지션 고유 능력치 구성은 유지)
+ * 보정 전 평균 초기 OVR: PG 56.9 · SG 55.9 · SF 55.5 · PF 57.0 · C 60.6
+ */
+export const STARTING_POSITION_BASELINE_ADJUSTMENT: Record<Position, number> = {
+  PG: 1,
+  SG: 0,
+  SF: 0,
+  PF: 1,
+  C: 4,
+};
+
 export function getPreviewStatsAndOvrRange(
   pos: Position,
   heightCm: number
@@ -1115,13 +1127,14 @@ export function getPreviewStatsAndOvrRange(
   const { statModifiers } = getHeightModifiers(heightCm);
   const clamp = (v: number) => Math.max(35, Math.min(82, Math.round(v)));
 
+  const adj = STARTING_POSITION_BASELINE_ADJUSTMENT[pos];
   const rawBaseline: PlayerStats = {
-    ins: clamp(base.ins + statModifiers.ins),
-    out: clamp(base.out + statModifiers.out),
-    ply: clamp(base.ply + statModifiers.ply),
-    def: clamp(base.def + statModifiers.def),
-    reb: clamp(base.reb + statModifiers.reb),
-    phy: clamp(base.phy + statModifiers.phy),
+    ins: clamp(base.ins + statModifiers.ins - adj),
+    out: clamp(base.out + statModifiers.out - adj),
+    ply: clamp(base.ply + statModifiers.ply - adj),
+    def: clamp(base.def + statModifiers.def - adj),
+    reb: clamp(base.reb + statModifiers.reb - adj),
+    phy: clamp(base.phy + statModifiers.phy - adj),
   };
 
   const baselineStats = enforceBiomechanicalCaps(rawBaseline, heightCm, pos);
@@ -1148,13 +1161,15 @@ export function createInitialStats(
   const randStatVariance = () => Math.floor(rng() * 10) - 4;
   const clamp = (v: number) => Math.max(36, Math.min(72, Math.round(v)));
 
+  const adj = STARTING_POSITION_BASELINE_ADJUSTMENT[pos];
+
   const rawStats: PlayerStats = {
-    ins: clamp(base.ins + statModifiers.ins + talentOffset + randStatVariance()),
-    out: clamp(base.out + statModifiers.out + talentOffset + randStatVariance()),
-    ply: clamp(base.ply + statModifiers.ply + talentOffset + randStatVariance()),
-    def: clamp(base.def + statModifiers.def + talentOffset + randStatVariance()),
-    reb: clamp(base.reb + statModifiers.reb + talentOffset + randStatVariance()),
-    phy: clamp(base.phy + statModifiers.phy + talentOffset + randStatVariance()),
+    ins: clamp(base.ins + statModifiers.ins + talentOffset + randStatVariance() - adj),
+    out: clamp(base.out + statModifiers.out + talentOffset + randStatVariance() - adj),
+    ply: clamp(base.ply + statModifiers.ply + talentOffset + randStatVariance() - adj),
+    def: clamp(base.def + statModifiers.def + talentOffset + randStatVariance() - adj),
+    reb: clamp(base.reb + statModifiers.reb + talentOffset + randStatVariance() - adj),
+    phy: clamp(base.phy + statModifiers.phy + talentOffset + randStatVariance() - adj),
   };
 
   return enforceBiomechanicalCaps(rawStats, heightCm, pos);

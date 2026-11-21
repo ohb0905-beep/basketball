@@ -1,6 +1,7 @@
 import {
   AWARD_VOTING_CONFIG,
   ECONOMY_CONFIG,
+  GROWTH_CONFIG,
   LEAGUE_BALANCE_META,
   ROLE_MPG_CONFIG,
   canUseProTradeSystem,
@@ -831,8 +832,10 @@ export function calculateRoleAndMpg(
 
   let injuryMult = dna === 'IRONMAN' ? injCfg.ironmanDnaMult : 1.0;
   if (traits.includes('IRON_STAMINA')) injuryMult *= injCfg.ironStaminaMult;
-  if (traits.includes('GLASS_BODY') && !hasRehabCare) {
-    injuryMult *= injCfg.glassBodyMult;
+  // 유리몸 페널티는 재활 관리로 일부만 완화됩니다 (완전히 사라지지 않음)
+  const glassBodyRetention = hasRehabCare ? injCfg.glassBodyRehabRetention : 1.0;
+  if (traits.includes('GLASS_BODY')) {
+    injuryMult *= 1 + (injCfg.glassBodyMult - 1) * glassBodyRetention;
   }
   if (hasRehabCare) injuryMult *= rehabCfg.injuryRiskMultiplier;
 
@@ -847,8 +850,8 @@ export function calculateRoleAndMpg(
     const majorShare = clampNum(
       majorCfg.baseShare +
         (age >= 30 ? (age - 29) * majorCfg.age30SharePerYear : 0) +
-        (traits.includes('GLASS_BODY') && !hasRehabCare
-          ? majorCfg.glassBodyShareBonus
+        (traits.includes('GLASS_BODY')
+          ? majorCfg.glassBodyShareBonus * glassBodyRetention
           : 0) +
         (phy < 68 ? majorCfg.lowPhyShareBonus : 0) +
         (careerMinutes > 26000 ? majorCfg.highMileageShareBonus : 0) -
@@ -1018,16 +1021,20 @@ export function calculateSeasonStatGrowth(
 
   const maxGrowthAge =
     dna === 'LATE_BLOOMER' || isSlowStarter
-      ? 28
+      ? 29
       : dna === 'EARLY_BLOOMER'
-      ? 25
+      ? 26
       : dna === 'IRONMAN'
-      ? 27
-      : 26;
+      ? 28
+      : 27;
 
   if (career.age <= maxGrowthAge) {
     // 연속적 출전 시간 계수
-    const ptFactor = Math.max(0.48, Math.min(1.22, 0.42 + (mpg / 30) * 0.75));
+    // 벤치 선수도 팀 훈련으로 일정 수준 성장하도록 하한(minPtFactor) 보장
+    const ptFactor = Math.max(
+      GROWTH_CONFIG.minPtFactor,
+      Math.min(1.22, 0.42 + (mpg / 30) * 0.75)
+    );
     // 리그 성장 상한선과의 거리에 따른 연속 감쇠
     const capGap = leagueConfig.growthCap - career.ovr;
     const capPenalty =
@@ -1049,26 +1056,35 @@ export function calculateSeasonStatGrowth(
     // 고능력치 구간 연속 감쇠 (Diminishing Returns)
     const highOvrWall = Math.max(
       0.36,
-      Math.min(1.0, 1.0 - Math.max(0, career.ovr - 76) * 0.038)
+      Math.min(
+        1.0,
+        1.0 -
+          Math.max(0, career.ovr - GROWTH_CONFIG.highOvrWallStart) *
+            GROWTH_CONFIG.highOvrWallSlope
+      )
     );
 
     const injuryFactor = Math.max(0.62, 1.0 - injuredGamesMissed * 0.018);
 
     let ageMultiplier = 0.85;
     if (dna === 'EARLY_BLOOMER') {
-      ageMultiplier = career.age <= 21 ? 1.32 : career.age <= 24 ? 1.05 : 0.62;
+      ageMultiplier = career.age <= 21 ? 1.32 : career.age <= 24 ? 1.15 : 0.72;
     } else if (dna === 'LATE_BLOOMER' || isSlowStarter) {
-      ageMultiplier = career.age <= 21 ? 0.92 : career.age <= 26 ? 1.15 : 0.98;
+      ageMultiplier = career.age <= 21 ? 0.92 : career.age <= 26 ? 1.3 : 1.1;
     } else {
-      ageMultiplier = career.age <= 20 ? 1.12 : career.age <= 23 ? 0.96 : 0.74;
+      ageMultiplier = career.age <= 20 ? 1.12 : career.age <= 23 ? 1.0 : 1.0;
     }
 
     const careGrowthMult = hasBiomechLab
       ? ECONOMY_CONFIG.personalCare.BIOMECH_SKILL_LAB.growthMultiplier
       : 1.0;
 
+    // 프로 입단(23세 전후) 이후 성장 가속: 잠재력에 실제로 근접할 수 있도록 보정
+    const proStageBoost =
+      LEAGUE_BALANCE_META[career.league].isPro ? GROWTH_CONFIG.proStageGrowthBoost : 1.0;
     const baseGain =
       1.72 *
+      proStageBoost *
       ptFactor *
       capPenalty *
       potPenalty *
@@ -1124,11 +1140,8 @@ export function calculateSeasonStatGrowth(
 
   if (career.age <= primeEndAge) {
     const nextStats: PlayerStats = { ...prev };
-    if (
-      career.ovr < leagueConfig.growthCap &&
-      career.ovr < career.potential &&
-      rng() < (hasBiomechLab ? 0.65 : 0.48)
-    ) {
+    if (career.ovr < leagueConfig.growthCap && career.ovr < career.potential) {
+      // 전성기 미세 성장: 훈련 집중 능력치 + 무작위 보조 능력치 각각 확률적으로 +1
       const bonusKey: keyof PlayerStats =
         career.trainingFocus === 'OUTSIDE_SHOOTING'
           ? 'out'
@@ -1136,9 +1149,20 @@ export function calculateSeasonStatGrowth(
           ? 'ply'
           : career.trainingFocus === 'DEFENSE_LOCKDOWN'
           ? 'def'
+          : career.trainingFocus === 'REBOUND_POST'
+          ? 'reb'
+          : career.trainingFocus === 'PHYSICAL_CONDITIONING'
+          ? 'phy'
           : 'ins';
-      if (nextStats[bonusKey] < 99) {
-        nextStats[bonusKey] += 1;
+      const allKeys: (keyof PlayerStats)[] = ['ins', 'out', 'ply', 'def', 'reb', 'phy'];
+      const secondaryKey = allKeys[Math.floor(rng() * allKeys.length)];
+      const primeChance = hasBiomechLab
+        ? GROWTH_CONFIG.primeGrowthChanceWithLab
+        : GROWTH_CONFIG.primeGrowthChance;
+      for (const key of [bonusKey, secondaryKey]) {
+        if (rng() < primeChance && nextStats[key] < 99) {
+          nextStats[key] += 1;
+        }
       }
     }
     return applyBioCapAndAftermath(nextStats);
@@ -2304,7 +2328,11 @@ export function buildAwardRaceTop5(params: {
     const tierDrop = i * 1.15;
     const basePpg = Number(
       clampNum(
-        18.2 + ldrScale * 7.4 - tierDrop + (rng() * 2.8 - 1.4),
+        18.2 +
+          ldrScale * 7.4 +
+          AWARD_VOTING_CONFIG.npcMvpPpgOffsetByLeague[career.league] -
+          tierDrop +
+          (rng() * 2.8 - 1.4),
         10.5,
         32.8
       ).toFixed(1)
