@@ -109,7 +109,7 @@ for (let run = 0; run < CAREERS; run++) {
   const pos = POS[run % POS.length];
   try {
     S().startNewCareer({
-      name: \`GROWTH_SIM_\${run}\`,
+      name: `GROWTH_SIM_${run}`,
       jerseyNumber: '7',
       heightCm: HEIGHT[pos],
       primaryPos: pos,
@@ -356,27 +356,27 @@ const summary = {
 
 const outDir = 'balance-results';
 mkdirSync(outDir, { recursive: true });
-const stem = \`career-growth-\${CAREERS}-\${SEED}\`;
-writeFileSync(\`\${outDir}/\${stem}.json\`, JSON.stringify({ summary, careers, seasonPoints }, null, 2));
+const stem = `career-growth-${CAREERS}-${SEED}`;
+writeFileSync(`${outDir}/${stem}.json`, JSON.stringify({ summary, careers, seasonPoints }, null, 2));
 const columns = Object.keys(seasonPoints[0] || {});
 const csv = [
   columns.join(','),
   ...seasonPoints.map((row) => columns.map((key) => {
     const value = (row as any)[key];
     const text = typeof value === 'string' ? value : String(value);
-    return /[",\n]/.test(text) ? \`"\${text.replace(/"/g, '""')}"\` : text;
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   }).join(',')),
 ].join('\n');
-writeFileSync(\`\${outDir}/\${stem}-seasons.csv\`, csv);
+writeFileSync(`${outDir}/${stem}-seasons.csv`, csv);
 
-console.log(\`\\n== 커리어 성장·은퇴 분석 | seed=\${SEED} | careers=\${CAREERS}\`);
+console.log(`\\n== 커리어 성장·은퇴 분석 | seed=${SEED} | careers=${CAREERS}`);
 console.log('\\n[전체 요약]');
 console.table({
   '완료 은퇴': summary.completedRetirements,
   '미완료': summary.incompleteCareers,
   '오류': summary.errors,
   '평균 은퇴 나이': summary.avgRetirementAge,
-  '은퇴 나이 P10/P50/P90': \`\${summary.retirementAgeP10}/\${summary.retirementAgeP50}/\${summary.retirementAgeP90}\`,
+  '은퇴 나이 P10/P50/P90': `${summary.retirementAgeP10}/${summary.retirementAgeP50}/${summary.retirementAgeP90}`,
   '평균 현역 시즌': summary.avgCareerSeasons,
   '평균 최고 OVR': summary.avgPeakOvr,
   '최고 OVR 도달 평균 나이': summary.avgPeakAge,
@@ -390,4 +390,4 @@ console.log('\\n[포지션별 성장]');
 console.table(positionGroups);
 console.log('\\n[리그별 활동]');
 console.table(leagueGroups);
-console.log(\`\\n저장 완료: \${outDir}/\${stem}.json 및 \${outDir}/\${stem}-seasons.csv\`);
+console.log(`\\n저장 완료: ${outDir}/${stem}.json 및 ${outDir}/${stem}-seasons.csv`);
