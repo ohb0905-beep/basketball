@@ -236,7 +236,7 @@ for (let run = 0; run < CAREERS; run++) {
     }
     const ownPoints = seasonPoints.filter((p) => p.run === run);
     const peakPoint = ownPoints.reduce<SeasonPoint | null>((best, p) =>
-      !best || p.ovrAtSeasonStart > best.ovrAtSeasonStart ? p : best, null);
+      !best || p.ovrAfterSeason > best.ovrAfterSeason ? p : best, null);
     const proLeagues = new Set(['NBA', 'KBL', 'B_LEAGUE', 'NBL', 'EUROLEAGUE', 'GLEAGUE']);
     careers.push({
       run,
