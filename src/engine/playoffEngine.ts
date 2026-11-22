@@ -2406,6 +2406,7 @@ export function createLiveFinalGame(
   gameType: LiveGameState['gameType'],
   options?: {
     tournamentType?: InternationalTournamentType;
+    tournamentYear?: number;
     preMatches?: AsianGamesMatchLog[];
   }
 ): LiveGameState {
@@ -2413,6 +2414,9 @@ export function createLiveFinalGame(
   const tournamentType: InternationalTournamentType | undefined = isInternational
     ? options?.tournamentType ||
       (gameType === 'ASIAN_GAMES_FINAL' ? 'ASIAN_GAMES' : 'ASIA_CUP')
+    : undefined;
+  const tournamentYear: number | undefined = isInternational
+    ? options?.tournamentYear ?? career.seasonYear
     : undefined;
   const tourneyCfg = tournamentType
     ? INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType]
@@ -2442,13 +2446,19 @@ export function createLiveFinalGame(
     : career.team;
 
   const isBronzeMatch = gameType === 'INTERNATIONAL_BRONZE';
+  const displayYear = tournamentYear ?? career.seasonYear;
+  const showExemptionFinalTag =
+    !career.militaryExempt &&
+    career.militaryServiceSeasonsLeft === 0 &&
+    ((tournamentType === 'ASIAN_GAMES' && !isBronzeMatch) ||
+      tournamentType === 'OLYMPICS');
   const title = isInternational
     ? isBronzeMatch
-      ? `${career.seasonYear} ${tourneyCfg?.name || '국제대회'} 3·4위전 (동메달 결정전)`
-      : `${career.seasonYear} ${tourneyCfg?.name || '국제대회'} 결승전${
-          tournamentType === 'ASIAN_GAMES' && !career.militaryExempt
-            ? ' (병역특례 결정전)'
-            : ''
+      ? `${displayYear} ${tourneyCfg?.name || '국제대회'} 3·4위전 (동메달 결정전${
+          showExemptionFinalTag ? ' · 병역특례' : ''
+        })`
+      : `${displayYear} ${tourneyCfg?.name || '국제대회'} 결승전${
+          showExemptionFinalTag ? ' (병역특례 결정전)' : ''
         }`
     : gameType === 'CONF_FINALS_GAME7'
     ? `${LEAGUE_CONFIG[career.league].shortName} 컨퍼런스 파이널 7차전`
@@ -2467,6 +2477,7 @@ export function createLiveFinalGame(
     gameType,
     internationalTournamentType: tournamentType,
     internationalTournamentName: tourneyCfg?.name,
+    internationalTournamentYear: tournamentYear,
     internationalPreMatches: options?.preMatches,
     title,
     subtitle: `${playerTeam.name} vs ${opponentTeam.name}`,

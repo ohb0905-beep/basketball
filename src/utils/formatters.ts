@@ -1,3 +1,4 @@
+import { MILITARY_SERVICE_CONFIG } from '../config/balanceConfig';
 import { CareerState } from '../types/game';
 
 /**
@@ -112,3 +113,66 @@ export function hasSeasonBottomDock(career: CareerState | null): boolean {
   }
   return false;
 }
+
+export interface MilitaryStatusDisplay {
+  status: 'EXEMPTED' | 'COMPLETED' | 'SERVING' | 'UNFULFILLED';
+  label: string;
+  tone: 'ok' | 'accent' | 'gold' | 'muted';
+}
+
+/**
+ * 선수 현재 병역 상태 요약 (헤더·프로필 단일 기준)
+ */
+export function getMilitaryStatusDisplay(
+  career: Pick<
+    CareerState,
+    | 'militaryExempt'
+    | 'militaryServiceSeasonsLeft'
+    | 'league'
+    | 'age'
+    | 'internationalHistory'
+    | 'milestones'
+  >
+): MilitaryStatusDisplay {
+  if (career.militaryServiceSeasonsLeft > 0) {
+    return {
+      status: 'SERVING',
+      label: `상무 복무 (${career.militaryServiceSeasonsLeft}시즌)`,
+      tone: 'accent',
+    };
+  }
+  if (career.militaryExempt) {
+    const earnedByIntl = (career.internationalHistory || []).some(
+      (rec) => rec.grantedMilitaryExemption
+    );
+    const dischargedFromSangmu = (career.milestones || []).some(
+      (m) => m.id.startsWith('MS_DISCHARGE_') || m.title.includes('만기 전역')
+    );
+    if (earnedByIntl && !dischargedFromSangmu) {
+      return {
+        status: 'EXEMPTED',
+        label: '병역특례',
+        tone: 'ok',
+      };
+    }
+    return {
+      status: 'COMPLETED',
+      label: dischargedFromSangmu ? '병역필' : '병역면제',
+      tone: 'ok',
+    };
+  }
+  const enlistAge =
+    career.league === 'NBA'
+      ? MILITARY_SERVICE_CONFIG.nbaDeferredEnlistAge
+      : MILITARY_SERVICE_CONFIG.defaultEnlistAge;
+  const yearsLeft = enlistAge - career.age;
+  return {
+    status: 'UNFULFILLED',
+    label:
+      career.league === 'NBA'
+        ? `미필 (만 ${enlistAge}세)`
+        : `미필 (만 ${enlistAge}세)`,
+    tone: yearsLeft <= 2 ? 'gold' : 'muted',
+  };
+}
+

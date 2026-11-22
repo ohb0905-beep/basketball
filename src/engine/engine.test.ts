@@ -77,6 +77,7 @@ import {
 import {
   formatHeaderContractSummary,
   formatSalaryOffer,
+  getMilitaryStatusDisplay,
 } from '../utils/formatters';
 import {
   applyAgingCurve,
@@ -4498,6 +4499,212 @@ test('56. Unified Sports-Documentary Korean Tone (합니다체) & Zero AI Clich�
     );
   }
 });
+
+test('57. 국제대회 연도 정합성·아시안게임 증발 방지·입대 직전 마지막 특례 기회·병역 상태 표시 검증', () => {
+  // 1) 아시아컵 소집: 실제 개최 연도 보존 + 병역특례 비대상 안내 + 금메달 획득 시 미면제
+  const unexemptAce = createBaseCareer({
+    name: '김대표',
+    age: 23,
+    seasonYear: 2026, // 2025 시즌 종료 후 오프시즌(seasonYear가 이미 +1 된 상태)
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    ovr: 82,
+    militaryExempt: false,
+    militaryServiceSeasonsLeft: 0,
+    stats: { ins: 84, out: 84, ply: 82, def: 80, reb: 76, phy: 82 },
+  });
+
+  const asiaCupEvt = rollSeasonEvent(unexemptAce, () => 0.5, 2025);
+  assert.equal(asiaCupEvt?.id, 'EVT_INTL_ASIA_CUP_2025');
+  assert.ok(asiaCupEvt?.subtitle.includes('병역특례 비대상'));
+  assert.ok(asiaCupEvt?.description.includes('병역특례 비대상'));
+  const enterChoice = asiaCupEvt?.choices.find(
+    (c) => c.enterInternationalTournament === 'ASIA_CUP'
+  );
+  assert.equal(enterChoice?.internationalTournamentYear, 2025);
+
+  const asiaCupLive = createLiveFinalGame(
+    unexemptAce,
+    ASIAN_NATIONAL_TEAMS[0],
+    'INTERNATIONAL_FINAL',
+    { tournamentType: 'ASIA_CUP', tournamentYear: 2025 }
+  );
+  assert.equal(asiaCupLive.internationalTournamentYear, 2025);
+  assert.ok(
+    asiaCupLive.title.startsWith('2025 FIBA 아시아컵'),
+    `Expected 2025 tournament year in title, got: ${asiaCupLive.title}`
+  );
+
+  // 아시아컵 금메달은 현실 병역법상 특례 비대상
+  const finishedAsiaCupGold = skipLiveGameToEnd(
+    { ...asiaCupLive, teamScore: 98, oppScore: 68, quarter: 3 },
+    { ...unexemptAce, ovr: 95, stats: { ins: 95, out: 95, ply: 95, def: 95, reb: 90, phy: 95 } },
+    () => 0.1
+  );
+  assert.equal(finishedAsiaCupGold.finalOutcome?.medal, 'GOLD');
+  assert.equal(finishedAsiaCupGold.finalOutcome?.grantedMilitaryExemption, false);
+
+  // 2) 구버전 세이브에 2025 아시아컵이 2026년으로 잘못 기록되어 있어도 2026 아시안게임이 스킵되지 않아야 함
+  const legacyMislabeledSave = createBaseCareer({
+    ...unexemptAce,
+    age: 24,
+    seasonYear: 2027,
+    internationalHistory: [
+      {
+        id: 'INTL_ASIA_CUP_2026_LEGACY',
+        year: 2026, // 구버전 버그로 1년 밀린 아시아컵 기록
+        age: 23,
+        tournamentType: 'ASIA_CUP',
+        tournamentName: 'FIBA 아시아컵',
+        result: 'SILVER',
+        wonMvp: false,
+        grantedMilitaryExemption: false,
+        avgPts: 21.0,
+        avgReb: 5.0,
+        avgAst: 6.0,
+        matches: [],
+        summaryHeadline: '아시아컵 은메달',
+      },
+    ],
+  });
+  const agEvtAfterLegacyAsiaCup = rollSeasonEvent(legacyMislabeledSave, () => 0.5, 2026);
+  assert.equal(
+    agEvtAfterLegacyAsiaCup?.id,
+    'EVT_ASIAN_GAMES_GOLD',
+    '2026 Asian Games must NOT be skipped when 2026 record belongs to ASIA_CUP'
+  );
+  assert.ok(agEvtAfterLegacyAsiaCup?.title.startsWith('2026 아시안게임'));
+  const agChoice = agEvtAfterLegacyAsiaCup?.choices.find(
+    (c) => c.enterInternationalTournament === 'ASIAN_GAMES'
+  );
+  assert.equal(agChoice?.internationalTournamentYear, 2026);
+
+  // 동일 연도·동일 대회(2026 ASIAN_GAMES) 이미 출전 시에는 재소집 차단
+  const alreadyPlayedAg = createBaseCareer({
+    ...legacyMislabeledSave,
+    internationalHistory: [
+      {
+        id: 'INTL_ASIAN_GAMES_2026_DONE',
+        year: 2026,
+        age: 24,
+        tournamentType: 'ASIAN_GAMES',
+        tournamentName: '아시안게임 남자농구',
+        result: 'SILVER',
+        wonMvp: false,
+        grantedMilitaryExemption: false,
+        avgPts: 22.0,
+        avgReb: 5.2,
+        avgAst: 6.1,
+        matches: [],
+        summaryHeadline: '아시안게임 은메달',
+      },
+    ],
+  });
+  const agDupEvt = rollSeasonEvent(alreadyPlayedAg, () => 0.99, 2026);
+  assert.notEqual(agDupEvt?.id, 'EVT_ASIAN_GAMES_GOLD');
+
+  // 아시안게임 금메달은 병역특례 획득
+  const agLive = createLiveFinalGame(
+    legacyMislabeledSave,
+    ASIAN_NATIONAL_TEAMS[0],
+    'ASIAN_GAMES_FINAL',
+    { tournamentType: 'ASIAN_GAMES', tournamentYear: 2026 }
+  );
+  const finishedAgGold = skipLiveGameToEnd(
+    { ...agLive, teamScore: 99, oppScore: 65, quarter: 3 },
+    { ...legacyMislabeledSave, ovr: 95, stats: { ins: 95, out: 95, ply: 95, def: 95, reb: 90, phy: 95 } },
+    () => 0.1
+  );
+  assert.equal(finishedAgGold.finalOutcome?.medal, 'GOLD');
+  assert.equal(finishedAgGold.finalOutcome?.grantedMilitaryExemption, true);
+
+  // 3) 입대 직전 마지막 기회 보장: 만 26세(일반) 시즌이 2026 아시안게임 해일 때 상무 영장보다 먼저 소집
+  const kblAge26Ending2026 = createBaseCareer({
+    ...unexemptAce,
+    league: 'KBL',
+    age: 27, // 2026 시즌(만 26세) 종료 후 나이가 27세로 올라간 상태
+    seasonYear: 2027,
+    ovr: 78,
+  });
+  const lastChanceAg = rollSeasonEvent(kblAge26Ending2026, () => 0.5, 2026);
+  assert.equal(
+    lastChanceAg?.id,
+    'EVT_ASIAN_GAMES_GOLD',
+    'KBL player finishing age-26 season in Asian Games year must get last-chance callup before Sangmu'
+  );
+
+  // 반면 만 26세 시즌이 비특례 해(2025 아시아컵)라면 즉시 상무 입대 영장 발부
+  const nonExemptLastYear = rollSeasonEvent(kblAge26Ending2026, () => 0.5, 2025);
+  assert.equal(nonExemptLastYear?.id, 'EVT_SANGMU_ENLISTMENT');
+
+  // NBA 만 28세 시즌 종료(만 29세 전환) + 2028 올림픽 해 -> 올림픽 소집 우선 보장
+  const nbaAge28Ending2028 = createBaseCareer({
+    ...unexemptAce,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 29,
+    seasonYear: 2029,
+    ovr: 86,
+  });
+  const lastChanceOlympics = rollSeasonEvent(nbaAge28Ending2028, () => 0.5, 2028);
+  assert.equal(
+    lastChanceOlympics?.id,
+    'EVT_INTL_OLYMPICS_2028',
+    'NBA player finishing age-28 season in Olympics year must get last-chance callup before Sangmu'
+  );
+
+  // 4) 병역 상태 표시 헬퍼 검증
+  assert.equal(getMilitaryStatusDisplay({ ...unexemptAce, age: 25, league: 'KBL' }).tone, 'gold');
+  assert.equal(getMilitaryStatusDisplay({ ...unexemptAce, age: 25, league: 'KBL' }).label, '미필 (만 27세)');
+  assert.equal(getMilitaryStatusDisplay({ ...unexemptAce, age: 25, league: 'NBA' }).label, '미필 (만 29세)');
+  assert.equal(
+    getMilitaryStatusDisplay({ ...unexemptAce, militaryServiceSeasonsLeft: 2 }).label,
+    '상무 복무 (2시즌)'
+  );
+  assert.equal(
+    getMilitaryStatusDisplay({
+      ...unexemptAce,
+      militaryExempt: true,
+      internationalHistory: [
+        {
+          id: 'EXEMPT_1',
+          year: 2026,
+          age: 24,
+          tournamentType: 'ASIAN_GAMES',
+          tournamentName: '아시안게임 남자농구',
+          result: 'GOLD',
+          wonMvp: true,
+          grantedMilitaryExemption: true,
+          avgPts: 24,
+          avgReb: 6,
+          avgAst: 7,
+          matches: [],
+          summaryHeadline: '금메달',
+        },
+      ],
+    }).label,
+    '병역특례'
+  );
+  assert.equal(
+    getMilitaryStatusDisplay({
+      ...unexemptAce,
+      militaryExempt: true,
+      milestones: [
+        {
+          id: 'MS_DISCHARGE_2029',
+          year: 2029,
+          age: 29,
+          title: '국군체육부대 상무 만기 전역',
+          description: '전역',
+          type: 'MILITARY',
+          teamName: SANGMU_TEAM.name,
+        },
+      ],
+    }).label,
+    '병역필'
+  );
+});
+
 
 
 

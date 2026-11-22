@@ -11,6 +11,7 @@ import { CareerState } from '../../types/game';
 import {
   formatCurrencyCompact,
   formatHeaderContractSummary,
+  getMilitaryStatusDisplay,
 } from '../../utils/formatters';
 import { TeamEmblem } from '../common/TeamEmblem';
 
@@ -23,6 +24,15 @@ export function PlayerHeader({ career }: { career: CareerState }) {
   ).label;
   const traitLabels = (career.traits || []).map((tId) => getTraitInfo(tId).name);
   const cash = getEffectiveCashBalance(career);
+  const militaryStatus = getMilitaryStatusDisplay(career);
+  const militaryToneClass =
+    militaryStatus.tone === 'ok'
+      ? 'text-[var(--t-ok)]'
+      : militaryStatus.tone === 'accent'
+      ? 'text-[var(--t-accent-ink)]'
+      : militaryStatus.tone === 'gold'
+      ? 'text-[var(--t-gold)]'
+      : 'text-[var(--t-g500)]';
 
   return (
     <section className="t-card space-y-4">
@@ -62,6 +72,13 @@ export function PlayerHeader({ career }: { career: CareerState }) {
             <p className="text-[12px] text-[var(--t-g500)] truncate mt-0.5">
               {playstyleLabel}
               {traitLabels.length > 0 ? ` · ${traitLabels.join(' · ')}` : ''}
+              {' · '}
+              <span
+                data-testid="header-military-status"
+                className={`font-semibold ${militaryToneClass}`}
+              >
+                {militaryStatus.label}
+              </span>
             </p>
           </div>
         </div>

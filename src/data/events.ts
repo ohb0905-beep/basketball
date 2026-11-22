@@ -326,22 +326,24 @@ export function createInternationalCallupEvent(
   forcedType?: InternationalTournamentType
 ): CareerEvent {
   const tournamentType = forcedType || getInternationalTournamentByYear(year);
-  if (tournamentType === 'ASIAN_GAMES' && !career.militaryExempt) {
-    return ASIAN_GAMES_MILITARY_EVENT;
-  }
-
   const cfg = INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType];
-  const exemptionMaxAge = getMilitaryExemptionMaxAgeForLeague(career.league);
+  const isExemptionTournament = cfg.militaryExemptionMinMedal !== null;
   const canEarnExemption =
     !career.militaryExempt &&
-    ((tournamentType === 'ASIAN_GAMES' && career.age <= exemptionMaxAge) ||
-      (tournamentType === 'OLYMPICS' && career.age <= exemptionMaxAge));
+    career.militaryServiceSeasonsLeft === 0 &&
+    isExemptionTournament;
+  const showNonExemptionNotice =
+    !career.militaryExempt &&
+    career.militaryServiceSeasonsLeft === 0 &&
+    !isExemptionTournament;
 
   const exemptionNote =
     tournamentType === 'OLYMPICS' && canEarnExemption
       ? ' 동메달 이상 획득 시 병역특례(예술·체육요원) 자격을 얻습니다.'
       : tournamentType === 'ASIAN_GAMES' && canEarnExemption
-      ? ' 금메달 획득 시 병역특례 자격을 얻습니다.'
+      ? ' 결승에서 금메달을 획득하면 병역특례(예술·체육요원) 자격을 얻습니다.'
+      : showNonExemptionNotice
+      ? ' 이 대회는 병역특례 비대상 대회입니다(아시안게임 금메달·올림픽 동메달 이상 시 특례 부여).'
       : '';
 
   const eventId =
@@ -356,12 +358,30 @@ export function createInternationalCallupEvent(
       ? { out: 1, def: 1, ply: 1 }
       : { ins: 1, out: 1, ply: 1 };
 
+  const baseSubtitle =
+    tournamentType === 'ASIAN_GAMES' && !canEarnExemption
+      ? '조별리그 · 8강 · 4강 · 아시아 정상 도전'
+      : tournamentType === 'OLYMPICS' && !canEarnExemption
+      ? '세계 최정예 12개국 본선 토너먼트'
+      : cfg.subtitle;
+
+  const subtitle = showNonExemptionNotice
+    ? `${baseSubtitle} · 병역특례 비대상`
+    : baseSubtitle;
+
+  const effectSuffix =
+    tournamentType === 'OLYMPICS' && canEarnExemption
+      ? ' · 동메달 이상 시 병역특례'
+      : tournamentType === 'ASIAN_GAMES' && canEarnExemption
+      ? ' · 결승 우승 시 병역특례'
+      : showNonExemptionNotice
+      ? ' · 병역특례 비대상'
+      : '';
+
   return {
     id: eventId,
     title: `${year} ${cfg.name} 국가대표 최종 엔트리 소집`,
-    subtitle: `${cfg.subtitle}${
-      canEarnExemption && tournamentType !== 'ASIAN_GAMES' ? ' · 병역특례 가능' : ''
-    }`,
+    subtitle,
     description: `${year}년 ${cfg.name}에 출전하는 대한민국 남자농구 국가대표팀 최종 12인 명단에 선발되었습니다. 조별리그와 8강·4강을 거쳐 결승전 또는 동메달 결정전에서 실시간 중계로 승부를 가립니다.${exemptionNote}`,
     category: canEarnExemption ? 'MILITARY' : 'NATIONAL_PRIDE',
     choices: [
@@ -369,17 +389,12 @@ export function createInternationalCallupEvent(
         label: `${cfg.shortName} 국가대표 본선 출전`,
         description:
           '조별리그·8강·4강 요약 진행 후, 결승전(금/은메달) 또는 3·4위전(동메달)을 실시간 중계로 치릅니다.',
-        effectSummary: `${cfg.shortName} 출전 · 스카우트 평가 +${cfg.draftStockBonus}${
-          tournamentType === 'OLYMPICS' && canEarnExemption
-            ? ' · 동메달 이상 시 병역특례'
-            : tournamentType === 'ASIAN_GAMES' && canEarnExemption
-            ? ' · 금메달 시 병역특례'
-            : ''
-        }`,
+        effectSummary: `${cfg.shortName} 출전 · 스카우트 평가 +${cfg.draftStockBonus}${effectSuffix}`,
         statChanges: statBonus,
         trustDelta: 6,
         draftStockDelta: cfg.draftStockBonus,
         enterInternationalTournament: tournamentType,
+        internationalTournamentYear: year,
         ...(tournamentType === 'ASIAN_GAMES'
           ? { enterAsianGamesTournament: true }
           : {}),
@@ -858,17 +873,43 @@ export function rollSeasonEvent(
   rng: () => number = Math.random,
   completedSeasonYear?: number
 ): CareerEvent | null {
+  const targetYear = completedSeasonYear ?? career.seasonYear;
+  const scheduledTournament = getInternationalTournamentByYear(targetYear);
+  const tourneyCfg = INTERNATIONAL_TOURNAMENT_CONFIG[scheduledTournament];
+  // 동일 연도·동일 대회 기준으로만 중복 출전 차단 (구 세이브의 1년 밀린 아시아컵 기록이 아시안게임을 막지 않도록 방어)
+  const alreadyPlayedThisTournament = (career.internationalHistory || []).some(
+    (rec) => rec.year === targetYear && rec.tournamentType === scheduledTournament
+  );
+  const exemptionMaxAge = getMilitaryExemptionMaxAgeForLeague(career.league);
+
   // 0) 병역 미필자 상무 입대 이벤트 (국내/일반 프로 만 27세, NBA 소속 선수는 만 28세까지 연기 후 만 29세 발부)
+  //    단, 방금 종료된 시즌 연령이 병역특례 상한(일반 26세 / NBA 28세) 이하이고 해당 연도가 아시안게임·올림픽이라면
+  //    마지막 병역특례 도전 기회를 상무 입대 영장보다 먼저 제공합니다.
   const enlistAgeThreshold = getMilitaryEnlistAgeForLeague(career.league);
   if (
     !career.militaryExempt &&
     career.militaryServiceSeasonsLeft === 0 &&
     career.age >= enlistAgeThreshold
   ) {
+    const completedSeasonAge =
+      completedSeasonYear !== undefined ? career.age - 1 : career.age;
+    const isExemptionTournament = tourneyCfg.militaryExemptionMinMedal !== null;
+    const eligibleForLastChanceExemption =
+      completedSeasonAge <= exemptionMaxAge &&
+      isExemptionTournament &&
+      !alreadyPlayedThisTournament &&
+      career.ovr >= tourneyCfg.minOvr;
+    if (eligibleForLastChanceExemption) {
+      return createInternationalCallupEvent(
+        career,
+        targetYear,
+        scheduledTournament
+      );
+    }
     return createSangmuEnlistmentEvent(career);
   }
 
-  // 1) 🧬 만 32~34세 베테랑 '플레이 스타일 진화(Re-invention)' 이벤트 (커리어 단 1회)
+  // 1) 만 32~34세 베테랑 '플레이 스타일 진화(Re-invention)' 이벤트 (커리어 단 1회)
   if (
     career.age >= 32 &&
     career.age <= 34 &&
@@ -878,7 +919,7 @@ export function rollSeasonEvent(
     return createVeteranReinventionEvent(career);
   }
 
-  // 2) ④ 노장 치명적 부상 은퇴 기로: 만 32세 이상이고 PHY <= 65일 때 10% 확률
+  // 2) 노장 치명적 부상 은퇴 기로: 만 32세 이상이고 PHY <= 65일 때 10% 확률
   if (career.age >= 32 && career.stats.phy <= 65 && rng() < 0.1) {
     return VETERAN_CRITICAL_INJURY_EVENT;
   }
@@ -892,15 +933,8 @@ export function rollSeasonEvent(
   }
 
   // 4) 4년 주기 국제대회 국가대표 차출 (아시아컵 %4==1 / 아시안게임 %4==2 / FIBA 월드컵 %4==3 / 올림픽 %4==0)
-  const targetYear = completedSeasonYear ?? career.seasonYear;
-  const scheduledTournament = getInternationalTournamentByYear(targetYear);
-  const tourneyCfg = INTERNATIONAL_TOURNAMENT_CONFIG[scheduledTournament];
-  const alreadyPlayedThisYear = (career.internationalHistory || []).some(
-    (rec) => rec.year === targetYear
-  );
-  const exemptionMaxAge = getMilitaryExemptionMaxAgeForLeague(career.league);
   if (
-    !alreadyPlayedThisYear &&
+    !alreadyPlayedThisTournament &&
     career.militaryServiceSeasonsLeft === 0 &&
     career.age >= 19 &&
     career.age <= 36 &&

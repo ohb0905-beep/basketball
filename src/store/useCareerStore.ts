@@ -13,7 +13,12 @@ import {
   getPersonalCareCostFromConfig,
   isPersonalCareAllowedInLeague,
 } from '../config/balanceConfig';
-import { rollMidSeasonCrossroadsEvent, rollSeasonEvent } from '../data/events';
+import {
+  createSangmuEnlistmentEvent,
+  getMilitaryEnlistAgeForLeague,
+  rollMidSeasonCrossroadsEvent,
+  rollSeasonEvent,
+} from '../data/events';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import {
   ALL_TEAMS,
@@ -398,10 +403,13 @@ function applyCompletedLiveGameOutcome(
 
   const outcome = finishedLive.finalOutcome;
   const ps = finishedLive.playerStats;
+  const liveEventYear = isInternationalLiveGame(finishedLive.gameType)
+    ? finishedLive.internationalTournamentYear ?? career.seasonYear
+    : career.seasonYear;
   const nextHighs = { ...career.careerHighs };
   if (ps.pts > nextHighs.points) {
     nextHighs.points = ps.pts;
-    nextHighs.pointsContext = `${career.seasonYear}시즌 ${finishedLive.title}`;
+    nextHighs.pointsContext = `${liveEventYear}시즌 ${finishedLive.title}`;
   }
   nextHighs.rebounds = Math.max(nextHighs.rebounds, ps.reb);
   nextHighs.assists = Math.max(nextHighs.assists, ps.ast);
@@ -417,6 +425,8 @@ function applyCompletedLiveGameOutcome(
   if (isInternationalLiveGame(finishedLive.gameType)) {
     const tournamentType =
       getLiveGameTournamentType(finishedLive) || 'ASIAN_GAMES';
+    const tournamentYear =
+      finishedLive.internationalTournamentYear ?? career.seasonYear;
     const tourneyCfg = INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType];
     const preMatches = finishedLive.internationalPreMatches || [];
     const totalGames = preMatches.length + 1;
@@ -462,8 +472,8 @@ function applyCompletedLiveGameOutcome(
     };
 
     const record: InternationalTournamentRecord = {
-      id: `INTL_${tournamentType}_${career.seasonYear}_${Date.now()}`,
-      year: career.seasonYear,
+      id: `INTL_${tournamentType}_${tournamentYear}_${Date.now()}`,
+      year: tournamentYear,
       age: career.age,
       tournamentType,
       tournamentName: tourneyCfg.name,
@@ -505,7 +515,7 @@ function applyCompletedLiveGameOutcome(
         : 1;
 
     const existingHistory = (career.internationalHistory || []).filter(
-      (r) => !(r.year === career.seasonYear && r.tournamentType === tournamentType)
+      (r) => !(r.year === tournamentYear && r.tournamentType === tournamentType)
     );
 
     const logs = [...career.seasonLogs];
@@ -542,10 +552,10 @@ function applyCompletedLiveGameOutcome(
       milestones: [
         ...career.milestones,
         {
-          id: `MS_INTL_${tournamentType}_${career.seasonYear}_${Date.now()}`,
-          year: career.seasonYear,
+          id: `MS_INTL_${tournamentType}_${tournamentYear}_${Date.now()}`,
+          year: tournamentYear,
           age: career.age,
-          title: `${career.seasonYear} ${tourneyCfg.shortName} ${medalLabel}${
+          title: `${tournamentYear} ${tourneyCfg.shortName} ${medalLabel}${
             outcome.wonTournamentMvp ? ' · 대회 MVP' : ''
           }${earnedNewExemption ? ' · 병역특례' : ''}`,
           description: outcome.headline,
@@ -2320,12 +2330,20 @@ export const useCareerStore = create<CareerStoreState>()(
         const finishedType = career.liveGame?.gameType;
 
         // 1) 국제대회 결승전 / 3·4위전 종료 -> 이미 오프시즌 상태이므로 오프시즌 복귀
+        //    입대 직전 마지막 특례 대회에서 면제에 실패한 경우 상무 입대 영장 즉시 연계
         if (finishedType && isInternationalLiveGame(finishedType)) {
+          const needsImmediateEnlistment =
+            !career.militaryExempt &&
+            career.militaryServiceSeasonsLeft === 0 &&
+            career.age >= getMilitaryEnlistAgeForLeague(career.league);
           set({
             career: {
               ...career,
               liveGame: null,
               seasonPhase: 'OFFSEASON',
+              pendingEvent: needsImmediateEnlistment
+                ? createSangmuEnlistmentEvent(career)
+                : career.pendingEvent,
             },
           });
           return;
@@ -2706,6 +2724,8 @@ export const useCareerStore = create<CareerStoreState>()(
           (choice.enterAsianGamesTournament || choice.startAsianGamesFinal
             ? 'ASIAN_GAMES'
             : null);
+        const requestedTournamentYear =
+          choice.internationalTournamentYear ?? career.seasonYear;
 
         if (requestedTournamentType) {
           const tourney = simulateInternationalTournament(
@@ -2743,15 +2763,16 @@ export const useCareerStore = create<CareerStoreState>()(
               liveType,
               {
                 tournamentType: requestedTournamentType,
+                tournamentYear: requestedTournamentYear,
                 preMatches: tourney.matches,
               }
             );
             nextSeasonPhase = 'LIVE_FINAL_BROADCAST';
             nextMilestones.push({
-              id: `MS_INTL_FINAL_${requestedTournamentType}_${Date.now()}`,
-              year: career.seasonYear,
+              id: `MS_INTL_FINAL_${requestedTournamentType}_${requestedTournamentYear}_${Date.now()}`,
+              year: requestedTournamentYear,
               age: career.age,
-              title: `${career.seasonYear} ${tourneyCfg.shortName} 결승 진출 (vs ${tourney.finalOpponent.shortName})`,
+              title: `${requestedTournamentYear} ${tourneyCfg.shortName} 결승 진출 (vs ${tourney.finalOpponent.shortName})`,
               description: `${matchSummaries.join(' / ')} · 결승전 실시간 중계에서 금메달에 도전합니다.`,
               type: 'SPECIAL',
               teamName: '대한민국 국가대표팀',
@@ -2766,15 +2787,16 @@ export const useCareerStore = create<CareerStoreState>()(
               'INTERNATIONAL_BRONZE',
               {
                 tournamentType: requestedTournamentType,
+                tournamentYear: requestedTournamentYear,
                 preMatches: tourney.matches,
               }
             );
             nextSeasonPhase = 'LIVE_FINAL_BROADCAST';
             nextMilestones.push({
-              id: `MS_INTL_BRONZE_${requestedTournamentType}_${Date.now()}`,
-              year: career.seasonYear,
+              id: `MS_INTL_BRONZE_${requestedTournamentType}_${requestedTournamentYear}_${Date.now()}`,
+              year: requestedTournamentYear,
               age: career.age,
-              title: `${career.seasonYear} ${tourneyCfg.shortName} 3·4위전 진출 (vs ${tourney.bronzeOpponent.shortName})`,
+              title: `${requestedTournamentYear} ${tourneyCfg.shortName} 3·4위전 진출 (vs ${tourney.bronzeOpponent.shortName})`,
               description: `${matchSummaries.join(' / ')} · 동메달 결정전 실시간 중계에 나섭니다.`,
               type: 'SPECIAL',
               teamName: '대한민국 국가대표팀',
@@ -2787,8 +2809,8 @@ export const useCareerStore = create<CareerStoreState>()(
             nextSeasonPhase = 'OFFSEASON';
             const totalGames = Math.max(1, tourney.matches.length);
             const qfRecord: InternationalTournamentRecord = {
-              id: `INTL_${requestedTournamentType}_${career.seasonYear}_${Date.now()}`,
-              year: career.seasonYear,
+              id: `INTL_${requestedTournamentType}_${requestedTournamentYear}_${Date.now()}`,
+              year: requestedTournamentYear,
               age: career.age,
               tournamentType: requestedTournamentType,
               tournamentName: tourneyCfg.name,
@@ -2821,7 +2843,7 @@ export const useCareerStore = create<CareerStoreState>()(
               ...nextInternationalHistory.filter(
                 (r) =>
                   !(
-                    r.year === career.seasonYear &&
+                    r.year === requestedTournamentYear &&
                     r.tournamentType === requestedTournamentType
                   )
               ),
@@ -2834,10 +2856,10 @@ export const useCareerStore = create<CareerStoreState>()(
             };
 
             nextMilestones.push({
-              id: `MS_INTL_QF_${requestedTournamentType}_${Date.now()}`,
-              year: career.seasonYear,
+              id: `MS_INTL_QF_${requestedTournamentType}_${requestedTournamentYear}_${Date.now()}`,
+              year: requestedTournamentYear,
               age: career.age,
-              title: `${career.seasonYear} ${tourneyCfg.shortName} 8강 마감`,
+              title: `${requestedTournamentYear} ${tourneyCfg.shortName} 8강 마감`,
               description: `${matchSummaries.join(' / ')} · ${tourney.summaryHeadline}`,
               type: requestedTournamentType === 'ASIAN_GAMES' ? 'MILITARY' : 'SPECIAL',
               teamName: '대한민국 국가대표팀',
@@ -2944,6 +2966,22 @@ export const useCareerStore = create<CareerStoreState>()(
           milestones: nextMilestones,
           pendingEvent: null,
         };
+
+        // 입대 직전 마지막 특례 대회를 고사하거나 8강 탈락으로 즉시 오프시즌에 복귀한 경우 상무 입대 영장 연계
+        const wasInternationalCallup = Boolean(
+          currentEvent &&
+            (currentEvent.id === 'EVT_ASIAN_GAMES_GOLD' ||
+              currentEvent.id.startsWith('EVT_INTL_'))
+        );
+        if (
+          wasInternationalCallup &&
+          !nextLiveGame &&
+          !updatedBase.militaryExempt &&
+          updatedBase.militaryServiceSeasonsLeft === 0 &&
+          updatedBase.age >= getMilitaryEnlistAgeForLeague(updatedBase.league)
+        ) {
+          updatedBase.pendingEvent = createSangmuEnlistmentEvent(updatedBase);
+        }
 
         const refreshedOptions = updatedBase.offseasonLocked
           ? generateOffseasonOptions(updatedBase)

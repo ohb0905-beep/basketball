@@ -952,6 +952,15 @@ export function LiveGameBroadcast() {
               {liveGame.finalOutcome.grantedMilitaryExemption && (
                 <span className="text-[var(--t-ok)]">· 병역 특례 확정</span>
               )}
+              {!liveGame.finalOutcome.grantedMilitaryExemption &&
+                !career.militaryExempt &&
+                career.militaryServiceSeasonsLeft === 0 &&
+                (liveGame.internationalTournamentType === 'ASIA_CUP' ||
+                  liveGame.internationalTournamentType === 'FIBA_WORLD_CUP') && (
+                  <span className="text-[var(--t-g500)] font-medium">
+                    · 병역특례 비대상 대회
+                  </span>
+                )}
             </div>
           )}
           <p className="text-[15px] font-bold text-[var(--t-g900)] leading-relaxed">

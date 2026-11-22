@@ -487,6 +487,16 @@ export function SeasonTab() {
               {career.lastInternationalSummary.grantedMilitaryExemption && (
                 <span className="text-[var(--t-ok)]">· 병역 특례 확정</span>
               )}
+              {!career.lastInternationalSummary.grantedMilitaryExemption &&
+                !career.militaryExempt &&
+                career.militaryServiceSeasonsLeft === 0 &&
+                (career.lastInternationalSummary.tournamentType === 'ASIA_CUP' ||
+                  career.lastInternationalSummary.tournamentType ===
+                    'FIBA_WORLD_CUP') && (
+                  <span className="text-[var(--t-g500)] font-medium">
+                    · 병역특례 비대상 대회
+                  </span>
+                )}
             </div>
 
             {career.lastInternationalSummary.matches.length > 0 && (

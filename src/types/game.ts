@@ -451,6 +451,7 @@ export interface LiveGameState {
     | 'INTERNATIONAL_BRONZE';
   internationalTournamentType?: InternationalTournamentType;
   internationalTournamentName?: string;
+  internationalTournamentYear?: number;
   internationalPreMatches?: AsianGamesMatchLog[];
   title: string;
   subtitle: string;
@@ -694,6 +695,7 @@ export interface CareerEventChoice {
   startAsianGamesFinal?: boolean;
   enterAsianGamesTournament?: boolean;
   enterInternationalTournament?: InternationalTournamentType;
+  internationalTournamentYear?: number;
   enlistSangmu?: boolean;
   startFarewellTour?: boolean;
   executeTradeToContender?: boolean;
