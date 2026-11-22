@@ -186,7 +186,12 @@ for (let run = 0; run < CAREERS; run++) {
       }
       if (c.seasonPhase === 'POSTSEASON_BRACKET') {
         const bracket = c.playoffBracket;
-        if (bracket?.championTeamId || bracket?.playerEliminated) st.enterOffseasonFromPlayoffs();
+        // 탈락 플래그만 보고 곧바로 오프시즌에 들어가면 스토어의
+        // advancePlayoffBracketRound()가 수행하는 잔여 대진 자동 완결과
+        // 시즌 로그의 우승팀/플레이오프 결과 반영을 건너뛰게 됩니다.
+        // championTeamId가 확정될 때까지 먼저 라운드를 한 번 더 진행합니다.
+        if (bracket?.championTeamId) st.enterOffseasonFromPlayoffs();
+        else if (bracket?.playerEliminated) st.advancePlayoffBracketRound();
         else if (bracket?.playerReachedFinals || bracket?.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;
