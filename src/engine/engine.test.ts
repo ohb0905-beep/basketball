@@ -17,6 +17,7 @@ import {
   ASIAN_NATIONAL_TEAMS,
   ALL_INTERNATIONAL_TEAMS,
   getNationalTeamsForTournament,
+  getTeamsByLeague,
   SANGMU_TEAM,
   ALL_TEAMS,
   evolveLeagueTeamRatings,
@@ -5456,4 +5457,332 @@ test('61. 상향된 명예의 전당 퍼스트 발롯 기준 검증 (NBA MVP/FMV
   assert.ok(hofCatalog?.criteria.includes('10회'));
   assert.ok(hofCatalog?.criteria.includes('퍼스트'));
 });
+
+test('62. 9개 전 리그 정원·와일드카드 불변식, 포지션·인원 부족, G/F/C MVP 보장 연쇄 강등, TOP 5 자격 필터링 및 타 리그 라이벌 대칭 풀 검증', () => {
+  const allLeagues: LeagueId[] = [
+    'HIGH_SCHOOL',
+    'U_LEAGUE',
+    'NCAA',
+    'KBL',
+    'B_LEAGUE',
+    'NBL',
+    'EUROLEAGUE',
+    'GLEAGUE',
+    'NBA',
+  ];
+
+  // 1) 9개 전 리그 정원 설정 불변식 + 실제 통합 수상 평가 정원/포지션/올리그 5인 팀 검증
+  for (const lg of allLeagues) {
+    const quota = LEAGUE_AWARD_QUOTAS[lg];
+    assert.equal(
+      quota.allStarGuards + quota.allStarFrontcourt + quota.allStarWildcards,
+      quota.allStarTotal,
+      `${lg}: guards + frontcourt + wildcards must equal allStarTotal`
+    );
+
+    const lgTeams = getTeamsByLeague(lg);
+    const myTeam = lgTeams[0];
+    const cfg = LEAGUE_CONFIG[lg];
+    const wins = Math.round(cfg.games * 0.65);
+    const losses = Math.max(1, cfg.games - wins);
+    const lgCareer = createBaseCareer({
+      league: lg,
+      team: myTeam,
+      ovr: cfg.ldr + 5,
+      primaryPos: 'PG',
+    });
+    let s = 12345;
+    const detRng = () => {
+      s = (s * 16807) % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+    const standings = generateLeagueStandings(lgCareer, wins, losses, detRng);
+    const unified = evaluateUnifiedLeagueAwards({
+      career: lgCareer,
+      boxScore: createSeasonLog({
+        league: lg,
+        teamId: myTeam.id,
+        teamName: myTeam.name,
+        teamShortName: myTeam.shortName,
+        gp: Math.round(cfg.games * 0.92),
+        mpg: 34.0,
+        ppg: 23.0,
+        rpg: 5.5,
+        apg: 7.5,
+        spg: 1.5,
+        bpg: 0.4,
+        fgPct: 48.0,
+        wins,
+        losses,
+      }),
+      standings,
+      updatedRivals: [],
+      isRookieSeason: true,
+      rng: detRng,
+    });
+
+    assert.equal(
+      unified.allStarIds.size,
+      quota.allStarTotal,
+      `${lg}: All-Star selected count must equal quota (${quota.allStarTotal})`
+    );
+    assert.ok(
+      unified.allStarGuardCount >= quota.allStarGuards,
+      `${lg}: All-Star guard count must meet minimum (${quota.allStarGuards}), got ${unified.allStarGuardCount}`
+    );
+    assert.ok(
+      unified.allStarFrontcourtCount >= quota.allStarFrontcourt,
+      `${lg}: All-Star frontcourt count must meet minimum (${quota.allStarFrontcourt}), got ${unified.allStarFrontcourtCount}`
+    );
+    assert.equal(
+      unified.allLeagueTeams.size,
+      quota.allLeagueTeamCount * 5,
+      `${lg}: All-League total must equal ${quota.allLeagueTeamCount * 5}`
+    );
+    for (let t = 1; t <= quota.allLeagueTeamCount; t++) {
+      const tierCount = [...unified.allLeagueTeams.values()].filter((v) => v === t).length;
+      assert.equal(tierCount, 5, `${lg}: All-League team ${t} must have exactly 5 players`);
+    }
+    assert.ok(unified.mvpRace.length >= 1 && unified.mvpRace.length <= 5);
+    assert.ok((unified.royRace?.length ?? 0) >= 1 && (unified.royRace?.length ?? 0) <= 5);
+  }
+
+  // 2) 후보 부족 & 특정 포지션(센터 0명 / 가드 0명) 부재 시 안전 보충 및 부적격 후보 제외 검증
+  const nbaQuota = LEAGUE_AWARD_QUOTAS.NBA;
+  const makeCand = (
+    id: string,
+    pos: Position,
+    score: number,
+    overrides: Partial<{
+      eligible: boolean;
+      mvpScore: number;
+      royScore: number;
+      isPlayer: boolean;
+      isRookie: boolean;
+    }> = {}
+  ) => ({
+    id,
+    name: `Cand_${id}`,
+    teamId: NBA_TEAMS[0].id,
+    teamShortName: NBA_TEAMS[0].shortName,
+    pos,
+    isPlayer: overrides.isPlayer ?? false,
+    isRookie: overrides.isRookie ?? false,
+    gp: overrides.eligible === false ? 20 : 75,
+    mpg: overrides.eligible === false ? 14 : 34,
+    ppg: 20,
+    rpg: 6,
+    apg: 5,
+    spg: 1.2,
+    bpg: 0.7,
+    fgPct: 48,
+    wins: 50,
+    losses: 32,
+    eligible: overrides.eligible ?? true,
+    mvpScore: overrides.mvpScore ?? score,
+    allStarScore: score,
+    royScore: overrides.royScore ?? score,
+  });
+
+  // 2-a) 적격 후보가 정원(24)보다 적은 6명 + 부적격 10명 -> 적격 6명만 선발
+  const scarcePool = [
+    ...Array.from({ length: 6 }, (_, i) => makeCand(`E${i}`, i % 2 === 0 ? 'PG' : 'SF', 40 - i)),
+    ...Array.from({ length: 10 }, (_, i) => makeCand(`IN${i}`, 'C', 90 - i, { eligible: false })),
+  ];
+  const scarceRes = selectPositionBalancedAllStars(scarcePool, nbaQuota);
+  assert.equal(scarceRes.selectedIds.size, 6, 'Scarcity pool must only select the 6 eligible players');
+  for (const id of scarceRes.selectedIds) {
+    assert.ok(id.startsWith('E'), 'Ineligible candidates must never be selected for All-Star');
+  }
+
+  // 2-b) 센터 0명인 30명 풀 -> NBA 올스타 24명 & 올-NBA 3팀(15명) 모두 중복 없이 안전 보충
+  const noCenterPool = Array.from({ length: 30 }, (_, i) =>
+    makeCand(`NC${i}`, (['PG', 'SG', 'SF', 'PF'] as Position[])[i % 4], 60 - i * 0.5)
+  );
+  const noCenterAs = selectPositionBalancedAllStars(noCenterPool, nbaQuota);
+  assert.equal(noCenterAs.selectedIds.size, 24);
+  const noCenterAl = assignPositionBalancedAllLeagueTeams(noCenterPool, 3);
+  assert.equal(noCenterAl.size, 15);
+  for (const tier of [1, 2, 3] as const) {
+    assert.equal([...noCenterAl.values()].filter((v) => v === tier).length, 5);
+  }
+
+  // 2-c) 가드 0명인 30명 풀 -> 프론트코트만으로 24명 & 올-NBA 3팀(15명) 안전 보충
+  const noGuardPool = Array.from({ length: 30 }, (_, i) =>
+    makeCand(`NG${i}`, (['SF', 'PF', 'C'] as Position[])[i % 3], 60 - i * 0.5)
+  );
+  assert.equal(selectPositionBalancedAllStars(noGuardPool, nbaQuota).selectedIds.size, 24);
+  assert.equal(assignPositionBalancedAllLeagueTeams(noGuardPool, 3).size, 15);
+
+  // 3) MVP 보장 정책 예외 검증: 가드(PG) / 포워드(SF) / 센터(C) MVP가 독립 올스타·올리그 3팀 밖(순위권 외)에서
+  //    보장 승격될 때도 올스타 총 정원(24)과 올-리그 1·2·3팀 각각 정확히 5명 유지 확인
+  const baseNbaCareer = createBaseCareer({ league: 'NBA', team: NBA_TEAMS[0], ovr: 90 });
+  const nbaStandings = generateLeagueStandings(baseNbaCareer, 60, 22, () => 0.5);
+  for (const mvpPos of ['PG', 'SF', 'C'] as Position[]) {
+    const positions5: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
+    const customPool = [
+      // 주인공이 MVP 점수 1위(99)지만 allStarScore는 28로 24인/15인 컷 밖인 극단 케이스
+      makeCand('PLAYER', mvpPos, 28, { isPlayer: true, mvpScore: 99 }),
+      ...Array.from({ length: 30 }, (_, i) =>
+        makeCand(`TOP${i}`, positions5[i % 5], 70 - i, { mvpScore: 60 - i })
+      ),
+    ];
+    const res = evaluateUnifiedLeagueAwards({
+      career: { ...baseNbaCareer, primaryPos: mvpPos },
+      boxScore: createSeasonLog({ league: 'NBA', wins: 60, losses: 22 }),
+      standings: nbaStandings,
+      updatedRivals: [],
+      isRookieSeason: false,
+      customPool,
+    });
+    assert.equal(res.playerWonMvp, true, `MVP guarantee (${mvpPos}): player must win MVP`);
+    assert.equal(res.playerAllStarSelected, true, `MVP guarantee (${mvpPos}): MVP must be guaranteed All-Star`);
+    assert.equal(res.playerAllLeagueTeam, 1, `MVP guarantee (${mvpPos}): MVP must be guaranteed 1st Team`);
+    assert.equal(res.allStarIds.size, 24, `MVP guarantee (${mvpPos}): All-Star quota must stay exactly 24`);
+    assert.equal(res.allLeagueTeams.size, 15, `MVP guarantee (${mvpPos}): All-League total must stay exactly 15`);
+    for (const tier of [1, 2, 3] as const) {
+      const count = [...res.allLeagueTeams.values()].filter((v) => v === tier).length;
+      assert.equal(count, 5, `MVP guarantee (${mvpPos}): All-League Team ${tier} must stay exactly 5`);
+    }
+  }
+
+  // 4) MVP & ROY TOP 5 자격 필터링 검증 (적격 3명 + 부적격 10명 -> TOP 5는 3명만 노출, 0명 적격 시 안전 빈 배열)
+  const mixedEligibilityPool = [
+    makeCand('PLAYER', 'PG', 42, { isPlayer: true, isRookie: true, eligible: false, mvpScore: 120, royScore: 120 }),
+    makeCand('ELIG_1', 'SG', 55, { isRookie: true, eligible: true, mvpScore: 62, royScore: 58 }),
+    makeCand('ELIG_2', 'SF', 53, { isRookie: true, eligible: true, mvpScore: 59, royScore: 54 }),
+    makeCand('ELIG_3', 'C', 51, { isRookie: true, eligible: true, mvpScore: 55, royScore: 51 }),
+    makeCand('INELIG_BIG', 'PF', 95, { isRookie: true, eligible: false, mvpScore: 110, royScore: 110 }),
+  ];
+  const filteredRes = evaluateUnifiedLeagueAwards({
+    career: baseNbaCareer,
+    boxScore: createSeasonLog({ league: 'NBA', gp: 20, mpg: 35, ppg: 32 }),
+    standings: nbaStandings,
+    updatedRivals: [],
+    isRookieSeason: true,
+    customPool: mixedEligibilityPool,
+    customRookiePool: mixedEligibilityPool,
+  });
+  assert.equal(filteredRes.mvpRace.length, 3, 'MVP TOP 5 must exclude all ineligible candidates');
+  assert.equal(filteredRes.mvpRace.some((e) => e.isPlayer || e.name.includes('INELIG')), false);
+  assert.equal(filteredRes.playerMvpRank, null, 'Ineligible player must have null MVP rank');
+  assert.equal(filteredRes.royRace?.length, 3, 'ROY TOP 5 must exclude all ineligible rookies');
+  assert.equal(filteredRes.playerRoyRank, null, 'Ineligible rookie player must have null ROY rank');
+
+  const zeroEligiblePool = [
+    makeCand('PLAYER', 'PG', 40, { isPlayer: true, isRookie: true, eligible: false }),
+    makeCand('IN_1', 'SG', 60, { isRookie: true, eligible: false }),
+  ];
+  const zeroRes = evaluateUnifiedLeagueAwards({
+    career: baseNbaCareer,
+    boxScore: createSeasonLog({ league: 'NBA', gp: 10, mpg: 12 }),
+    standings: nbaStandings,
+    updatedRivals: [],
+    isRookieSeason: true,
+    customPool: zeroEligiblePool,
+    customRookiePool: zeroEligiblePool,
+  });
+  assert.equal(zeroRes.mvpRace.length, 0);
+  assert.equal(zeroRes.mvpWinnerId, null);
+  assert.equal(zeroRes.royRace?.length, 0);
+  assert.equal(zeroRes.royWinnerId, null);
+
+  // 5) 타 리그 라이벌 대칭 풀 검증 (주인공은 NBA, 라이벌 3명은 KBL 잔류 — 임의 25% 확률 없이 KBL 정원·NPC 풀로 대칭 판정)
+  const kblTopTeam = KBL_TEAMS[0];
+  const kblBotTeam = KBL_TEAMS[KBL_TEAMS.length - 1];
+  const kblTeamRatings: Record<string, number> = {};
+  for (const t of KBL_TEAMS) {
+    kblTeamRatings[t.id] = t.id === kblTopTeam.id ? 88 : t.id === kblBotTeam.id ? 60 : 72;
+  }
+  const foreignRivals = [
+    {
+      id: 'RIVAL_KBL_SUPER',
+      name: '강도윤',
+      draftYear: 2027,
+      league: 'KBL' as const,
+      teamId: kblTopTeam.id,
+      teamName: kblTopTeam.name,
+      teamShortName: kblTopTeam.shortName,
+      pos: 'SF' as const,
+      ovr: 96,
+      potential: 97,
+      ppg: 0,
+      rpg: 0,
+      apg: 0,
+      championships: 0,
+      mvps: 0,
+      allStars: 0,
+      roys: 0,
+      lastHeadline: '',
+    },
+    {
+      id: 'RIVAL_KBL_ROOKIE',
+      name: '서지훈',
+      draftYear: 2029,
+      league: 'KBL' as const,
+      teamId: kblTopTeam.id,
+      teamName: kblTopTeam.name,
+      teamShortName: kblTopTeam.shortName,
+      pos: 'PG' as const,
+      ovr: 88,
+      potential: 93,
+      ppg: 0,
+      rpg: 0,
+      apg: 0,
+      championships: 0,
+      mvps: 0,
+      allStars: 0,
+      roys: 0,
+      lastHeadline: '',
+    },
+    {
+      id: 'RIVAL_KBL_BENCH',
+      name: '박민준',
+      draftYear: 2027,
+      league: 'KBL' as const,
+      teamId: kblBotTeam.id,
+      teamName: kblBotTeam.name,
+      teamShortName: kblBotTeam.shortName,
+      pos: 'PG' as const,
+      ovr: 54,
+      potential: 64,
+      ppg: 0,
+      rpg: 0,
+      apg: 0,
+      championships: 0,
+      mvps: 0,
+      allStars: 0,
+      roys: 0,
+      lastHeadline: '',
+    },
+  ];
+  let foreignSeed = 20290415;
+  const foreignRng = () => {
+    foreignSeed = (Math.imul(foreignSeed, 1664525) + 1013904223) >>> 0;
+    return foreignSeed / 4294967296;
+  };
+  const nbaBox = createSeasonLog({ league: 'NBA', teamId: NBA_TEAMS[0].id });
+  const foreignSim = simulateRivalsSeason(foreignRivals, 2029, nbaBox, foreignRng, kblTeamRatings);
+  const superKblRival = foreignSim.updatedRivals.find((r) => r.id === 'RIVAL_KBL_SUPER')!;
+  const rookieKblRival = foreignSim.updatedRivals.find((r) => r.id === 'RIVAL_KBL_ROOKIE')!;
+  const benchKblRival = foreignSim.updatedRivals.find((r) => r.id === 'RIVAL_KBL_BENCH')!;
+  assert.equal(
+    superKblRival.allStars,
+    1,
+    'Dominant KBL rival (OVR 96) must earn KBL All-Star via symmetric KBL pool'
+  );
+  assert.equal(
+    superKblRival.mvps,
+    1,
+    'Dominant KBL rival (OVR 96 on #1 seed) must win KBL MVP via symmetric KBL pool'
+  );
+  assert.equal(
+    rookieKblRival.roys,
+    1,
+    'Elite KBL rookie rival (OVR 88) must win KBL ROY via symmetric KBL rookie pool'
+  );
+  assert.equal(benchKblRival.mvps, 0, 'Low-OVR KBL rival must not win KBL MVP');
+  assert.equal(benchKblRival.allStars, 0, 'Low-OVR KBL rival must not make KBL All-Star');
+});
+
 

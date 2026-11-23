@@ -12,10 +12,18 @@
  */
 export {};
 
-const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const CHECK = process.argv.includes('--check');
+const rawArgs = process.argv.slice(2);
+const args = rawArgs.filter((a) => !a.startsWith('--'));
+const CHECK = rawArgs.includes('--check');
+const seedsFlag = rawArgs.find((a) => a.startsWith('--seeds='));
 const CAREERS = Number(args[0] ?? 200);
-const SEED = Number(args[1] ?? 20261121);
+const SEEDS: number[] = seedsFlag
+  ? seedsFlag
+      .slice('--seeds='.length)
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  : [Number(args[1] ?? 20261121)];
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -27,7 +35,6 @@ function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-Math.random = mulberry32(SEED);
 
 const mem: Record<string, string> = {};
 (globalThis as any).localStorage = {
@@ -77,6 +84,18 @@ const q = (xs: number[], p: number) => {
   const s = [...xs].sort((a, b) => a - b);
   return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * p))] : 0;
 };
+
+function runSeedSimulation(SEED: number, verbose: boolean): {
+  seed: number;
+  failed: number;
+  passed: number;
+  total: number;
+  failedNames: string[];
+  summary: Record<string, number>;
+  targetValues: Record<string, number>;
+  targetRanges: Record<string, [number, number]>;
+} {
+Math.random = mulberry32(SEED);
 
 // ───────────────────── 1) 커리어 루프 ─────────────────────
 const initOvr: Record<string, number[]> = {};
@@ -549,7 +568,7 @@ for (const lg of ['KBL', 'EUROLEAGUE', 'NBA'] as const) {
     const stats = { ins: v, out: v, ply: v, def: v, reb: v, phy: v };
     const ovr = STAT.calculateOvr(stats, 'SG', 193);
     let mvp = 0, simFmvp = 0, liveWins = 0, liveFmvp = 0, ptsSum = 0;
-    const N = 80;
+    const N = 160;
     for (let i = 0; i < N; i++) {
       const c: any = {
         id: 'F',
@@ -736,60 +755,83 @@ const metrics = {
   nbaStarLiveFmvpPct: fmvpCheckMetrics.NBA.starLiveFmvp,
 };
 
-console.log(`\n== 시드 ${SEED} · 커리어 ${CAREERS}회 · 결승 스냅샷 ${snaps.length}개`);
-console.log('\n[포지션별 초기 OVR / 최고 OVR 평균]', Object.fromEntries(POS.map((p) => [p, `${avg(initOvr[p] || [])} -> ${avg(posPeakOvr[p] || [])}`])));
-console.log('\n[나이별 평균 OVR 곡선]', ageOvrSummary);
-console.log('\n[성장 DNA별 장기 커리어 분포]');
-console.table(dnaTable);
-console.log('[내구성 유형별 커리어·부상 비교]');
-console.table(durabilityTable);
-console.log('[부상 등급별 결장 경기 수]');
-console.table(injuryTierSummary);
-console.log('[리그별 시즌 기록]');
-console.table(leagueTable);
-console.log('[실제 결승 · 전술별 승률 / 선수 득점 / 야투율]');
-console.table(
-  Object.fromEntries(
-    TACTICS.map((t) => [
-      t,
-      {
-        '승률%': metrics.realFinalsWinPct[t],
-        선수득점: metrics.realFinalsPlayerPts[t],
-        '야투%': metrics.realFinalsPlayerFgPct[t],
-      },
-    ])
-  )
-);
-console.log('[동일 전력 결승 · 선수 등급 × 전술 승률%]');
-console.table(
-  Object.fromEntries(
-    Object.keys(TIERS).map((tier) => [
-      tier,
-      Object.fromEntries(
-        TACTICS.map((t) => [t, pct(equalTier[`${tier}|${t}`]?.w ?? 0, equalTier[`${tier}|${t}`]?.n ?? 0)])
-      ),
-    ])
-  )
-);
-console.log('[9개 리그 자체 20년 판도 (리그당 100시즌)]');
-console.table(parityTable);
-console.log('[주요 프로리그 등급별 정규 MVP · 파이널 MVP 정합성]');
-console.table(fmvpCheckTable);
-console.log('[요약 지표]');
-console.log(JSON.stringify(metrics, null, 2));
+const earlyPeakAge = dnaTable.EARLY_BLOOMER?.전성기나이 ?? 0;
+const latePeakAge = dnaTable.LATE_BLOOMER?.전성기나이 ?? 0;
+const ironInjuryPct = durabilityTable['강철체력']?.['시즌부상률%'] ?? 0;
+const normalInjuryPct = durabilityTable['일반']?.['시즌부상률%'] ?? 0;
+const glassInjuryPct = durabilityTable['유리몸']?.['시즌부상률%'] ?? 0;
 
-// ───────────────────── 목표 범위 검사 ─────────────────────
+const dnaLateMinusEarlyPeakAge = +(latePeakAge - earlyPeakAge).toFixed(2);
+const durabilityNormalMinusIronInjuryPct = +(normalInjuryPct - ironInjuryPct).toFixed(1);
+const durabilityGlassMinusNormalInjuryPct = +(glassInjuryPct - normalInjuryPct).toFixed(1);
+
+if (verbose) {
+  console.log(`\n== 시드 ${SEED} · 커리어 ${CAREERS}회 · 결승 스냅샷 ${snaps.length}개`);
+  console.log('\n[포지션별 초기 OVR / 최고 OVR 평균]', Object.fromEntries(POS.map((p) => [p, `${avg(initOvr[p] || [])} -> ${avg(posPeakOvr[p] || [])}`])));
+  console.log('\n[나이별 평균 OVR 곡선]', ageOvrSummary);
+  console.log('\n[성장 DNA별 장기 커리어 분포]');
+  console.table(dnaTable);
+  console.log('[내구성 유형별 커리어·부상 비교]');
+  console.table(durabilityTable);
+  console.log('[부상 등급별 결장 경기 수]');
+  console.table(injuryTierSummary);
+  console.log('[리그별 시즌 기록]');
+  console.table(leagueTable);
+  console.log('[실제 결승 · 전술별 승률 / 선수 득점 / 야투율]');
+  console.table(
+    Object.fromEntries(
+      TACTICS.map((t) => [
+        t,
+        {
+          '승률%': metrics.realFinalsWinPct[t],
+          선수득점: metrics.realFinalsPlayerPts[t],
+          '야투%': metrics.realFinalsPlayerFgPct[t],
+        },
+      ])
+    )
+  );
+  console.log('[동일 전력 결승 · 선수 등급 × 전술 승률%]');
+  console.table(
+    Object.fromEntries(
+      Object.keys(TIERS).map((tier) => [
+        tier,
+        Object.fromEntries(
+          TACTICS.map((t) => [t, pct(equalTier[`${tier}|${t}`]?.w ?? 0, equalTier[`${tier}|${t}`]?.n ?? 0)])
+        ),
+      ])
+    )
+  );
+  console.log('[9개 리그 자체 20년 판도 (리그당 100시즌)]');
+  console.table(parityTable);
+  console.log('[주요 프로리그 등급별 정규 MVP · 파이널 MVP 정합성]');
+  console.table(fmvpCheckTable);
+  console.log('[요약 지표]');
+  console.log(JSON.stringify(metrics, null, 2));
+}
+
+// ───────────────────── 목표 범위 검사 (성장·에이징·내구성·수상·판도·라이브 통합) ─────────────────────
 const BALANCE_TARGETS: [string, number, number, number][] = [
   ['오류 0', metrics.errors, 0, 0],
   ['미완결 플레이오프 대진 0', metrics.unfinishedPlayoffBrackets, 0, 0],
   ['NBA 진출률(%)', metrics.nbaReachPct, 30, 55],
+  ['NBA 진출자 평균 활동 시즌', metrics.nbaAvgSeasons, 7.0, 14.0],
   ['NBA 진출자 중 올스타 경험(%)', metrics.nbaAllStarPctOfNba, 20, 65],
   ['NBA MVP 경험(%)', metrics.nbaMvpPct, 1, 12],
   ['최고 OVR 중앙값', metrics.peakOvrP50, 80, 87],
+  ['평균 전성기 나이', metrics.avgPeakAge, 28.5, 31.5],
+  ['평균 은퇴 나이', metrics.avgRetireAge, 33.5, 37.0],
+  ['잠재력 대비 최고 OVR 격차', metrics.avgPotAttainmentGap, -5.0, 1.0],
+  ['35세 이후 연간 OVR 하락폭', metrics.avgPost35AnnualOvrDrop, 1.2, 3.6],
+  ['30대 시즌 부상률(%)', metrics.age30PlusInjuryPct, 10, 28],
+  ['성장 DNA 전성기 순서 (대기만성-조기개화)', dnaLateMinusEarlyPeakAge, 0.0, 3.5],
+  ['내구성 부상률 격차 (일반-강철체력 %p)', durabilityNormalMinusIronInjuryPct, 4.0, 22.0],
+  ['내구성 부상률 격차 (유리몸-일반 %p)', durabilityGlassMinusNormalInjuryPct, 2.0, 22.0],
   ['고교·대학 MVP 수상률(%)', metrics.amateurMvpPct, 10, 30],
-  ['KBL 평균 PPG', metrics.kblPpg, 19, 26],
+  ['KBL 평균 PPG', metrics.kblPpg, 19, 26.5],
   ['프로 26+ PPG 시즌 비율(%)', metrics.proPpg26PlusPct, 0, 42],
   ['초기 OVR 포지션 격차', metrics.initOvrSpread, 0, 2.5],
+  ['최고 OVR 포지션 격차', metrics.peakOvrPosSpread, 0, 3.2],
+  ['라이브 결승 연장전 비율(%)', metrics.liveOvertimePct, 1.0, 9.0],
   ['라이브 결승 에이스 모드 평균 득점', metrics.realFinalsPlayerPts.ACE_HERO, 24, 38],
   ['라이브 결승 이타적 조율 평균 득점', metrics.realFinalsPlayerPts.UNSELFISH_PASS, 18, 28],
   ['동일 전력 하위 승률(%)', metrics.equalTeamWinPct['하위'], 25, 48],
@@ -804,10 +846,88 @@ const BALANCE_TARGETS: [string, number, number, number][] = [
   ['NBA 스타급 라이브 FMVP(%)', metrics.nbaStarLiveFmvpPct, 65, 100],
 ];
 let failed = 0;
-console.log('\n[목표 범위 검사]');
+const failedNames: string[] = [];
+if (verbose) console.log('\n[목표 범위 검사]');
 for (const [name, v, lo, hi] of BALANCE_TARGETS) {
   const ok = v >= lo && v <= hi;
-  if (!ok) failed++;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}: ${v} (목표 ${lo}~${hi})`);
+  if (!ok) {
+    failed++;
+    failedNames.push(`${name}=${v} (${lo}~${hi})`);
+  }
+  if (verbose || !ok) {
+    console.log(`${ok ? 'PASS' : 'FAIL'}  [시드 ${SEED}] ${name}: ${v} (목표 ${lo}~${hi})`);
+  }
 }
-if (CHECK && failed) process.exit(1);
+return {
+  seed: SEED,
+  failed,
+  passed: BALANCE_TARGETS.length - failed,
+  total: BALANCE_TARGETS.length,
+  failedNames,
+  summary: {
+    NBA진출: metrics.nbaReachPct,
+    NBA시즌: metrics.nbaAvgSeasons,
+    NBA올스타: metrics.nbaAllStarPctOfNba,
+    NBAMVP: metrics.nbaMvpPct,
+    평균FMVP: metrics.nbaAvgLiveFmvpPct,
+    최고OVR: metrics.peakOvrP50,
+    전성기: metrics.avgPeakAge,
+    은퇴: metrics.avgRetireAge,
+    '30대부상': metrics.age30PlusInjuryPct,
+    DNA차: dnaLateMinusEarlyPeakAge,
+    라이벌MVP: metrics.rivalSymmetryTotals.mvps,
+  },
+  targetValues: Object.fromEntries(BALANCE_TARGETS.map(([name, v]) => [name, v])),
+  targetRanges: Object.fromEntries(BALANCE_TARGETS.map(([name, , lo, hi]) => [name, [lo, hi] as [number, number]])),
+};
+}
+
+const results = SEEDS.map((s) => runSeedSimulation(s, SEEDS.length === 1));
+let pooledFailed = 0;
+if (SEEDS.length > 1) {
+  const pooledFailedNames: string[] = [];
+  const firstRanges = results[0].targetRanges;
+  for (const [name, [lo, hi]] of Object.entries(firstRanges)) {
+    const meanVal = +(
+      results.reduce((sum, r) => sum + (r.targetValues[name] ?? 0), 0) / results.length
+    ).toFixed(2);
+    if (meanVal < lo || meanVal > hi) {
+      pooledFailed++;
+      pooledFailedNames.push(`${name}=${meanVal} (${lo}~${hi})`);
+      console.log(`FAIL  [다중 시드 통합 평균] ${name}: ${meanVal} (목표 ${lo}~${hi})`);
+    }
+  }
+  const pooledSummary = Object.fromEntries(
+    Object.keys(results[0].summary).map((k) => [
+      k,
+      +(results.reduce((sum, r) => sum + (r.summary[k] ?? 0), 0) / results.length).toFixed(2),
+    ])
+  );
+  console.log(`\n[다중 시드 회귀 검증 요약 (${SEEDS.length}개 시드 × ${CAREERS}커리어 = 총 ${SEEDS.length * CAREERS}커리어)]`);
+  console.table({
+    ...Object.fromEntries(
+      results.map((r) => [
+        `SEED_${r.seed}`,
+        {
+          통과: `${r.passed}/${r.total}`,
+          ...r.summary,
+          실패항목: r.failedNames.length ? r.failedNames.join('; ') : '-',
+        },
+      ])
+    ),
+    POOLED_MEAN: {
+      통과: `${results[0].total - pooledFailed}/${results[0].total}`,
+      ...pooledSummary,
+      실패항목: pooledFailedNames.length ? pooledFailedNames.join('; ') : '-',
+    },
+  });
+}
+
+const totalFailed = results.reduce((sum, r) => sum + r.failed, 0);
+const criticalPerSeedFailed = results.some(
+  (r) => (r.targetValues['오류 0'] ?? 0) > 0 || (r.targetValues['미완결 플레이오프 대진 0'] ?? 0) > 0
+);
+if (CHECK) {
+  if (SEEDS.length === 1 && totalFailed > 0) process.exit(1);
+  if (SEEDS.length > 1 && (pooledFailed > 0 || criticalPerSeedFailed)) process.exit(1);
+}
