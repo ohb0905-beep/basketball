@@ -469,22 +469,125 @@ export const ROLE_MPG_CONFIG = {
   },
 };
 
+export interface LeagueAwardQuotaConfig {
+  /** 올스타(또는 베스트 5 / 올-아메리칸) 총 선정 정원 */
+  allStarTotal: number;
+  /** 가드(PG/SG) 우선 배정 슬롯 */
+  allStarGuards: number;
+  /** 프론트코트(SF/PF/C) 우선 배정 슬롯 */
+  allStarFrontcourt: number;
+  /** 포지션 무관 와일드카드 슬롯 */
+  allStarWildcards: number;
+  /** 올-리그 팀 수 (1=퍼스트 5명, 2=1·2팀 10명, 3=1·2·3팀 15명) */
+  allLeagueTeamCount: 1 | 2 | 3;
+  /** 구단당 시즌 NPC 주전·스타 생성 인원 (주인공·라이벌과 동일 풀 경쟁) */
+  npcStarsPerTeam: number;
+}
+
+export const LEAGUE_AWARD_QUOTAS: Record<LeagueId, LeagueAwardQuotaConfig> = {
+  HIGH_SCHOOL: {
+    allStarTotal: 5,
+    allStarGuards: 2,
+    allStarFrontcourt: 3,
+    allStarWildcards: 0,
+    allLeagueTeamCount: 1,
+    npcStarsPerTeam: 2,
+  },
+  U_LEAGUE: {
+    allStarTotal: 5,
+    allStarGuards: 2,
+    allStarFrontcourt: 3,
+    allStarWildcards: 0,
+    allLeagueTeamCount: 1,
+    npcStarsPerTeam: 3,
+  },
+  NCAA: {
+    allStarTotal: 15,
+    allStarGuards: 5,
+    allStarFrontcourt: 7,
+    allStarWildcards: 3,
+    allLeagueTeamCount: 3,
+    npcStarsPerTeam: 2,
+  },
+  KBL: {
+    allStarTotal: 12,
+    allStarGuards: 4,
+    allStarFrontcourt: 6,
+    allStarWildcards: 2,
+    allLeagueTeamCount: 2,
+    npcStarsPerTeam: 4,
+  },
+  B_LEAGUE: {
+    allStarTotal: 16,
+    allStarGuards: 6,
+    allStarFrontcourt: 8,
+    allStarWildcards: 2,
+    allLeagueTeamCount: 2,
+    npcStarsPerTeam: 2,
+  },
+  NBL: {
+    allStarTotal: 10,
+    allStarGuards: 4,
+    allStarFrontcourt: 5,
+    allStarWildcards: 1,
+    allLeagueTeamCount: 2,
+    npcStarsPerTeam: 4,
+  },
+  EUROLEAGUE: {
+    allStarTotal: 15,
+    allStarGuards: 5,
+    allStarFrontcourt: 7,
+    allStarWildcards: 3,
+    allLeagueTeamCount: 3,
+    npcStarsPerTeam: 3,
+  },
+  GLEAGUE: {
+    allStarTotal: 14,
+    allStarGuards: 5,
+    allStarFrontcourt: 7,
+    allStarWildcards: 2,
+    allLeagueTeamCount: 2,
+    npcStarsPerTeam: 2,
+  },
+  NBA: {
+    allStarTotal: 24,
+    allStarGuards: 8,
+    allStarFrontcourt: 12,
+    allStarWildcards: 4,
+    allLeagueTeamCount: 3,
+    npcStarsPerTeam: 3,
+  },
+};
+
 export const AWARD_VOTING_CONFIG = {
-  // MVP 레이스 NPC 스타의 리그별 득점 보정 (주인공이 리그 LDR 대비 얼마나 앞서 출발하는지 반영)
+  // 명시적 수상 연동 정책: MVP·올스타·올리그는 독립 경쟁하되, 정규시즌 MVP 수상자는 올스타 및 올-리그 퍼스트팀을 명시적으로 보장
+  mvpGuaranteesAllStarAndFirstTeam: true,
+  // 리그별 NPC 주전·스타 득점 기준 보정 (구단별 전체 풀 생성 시 주인공의 리그 LDR 대비 커브와 대칭 정렬)
   npcMvpPpgOffsetByLeague: {
-    HIGH_SCHOOL: 6.0,
-    U_LEAGUE: 6.5,
-    NCAA: 2.0,
-    KBL: 7.5,
-    B_LEAGUE: 3.5,
-    NBL: 1.0,
-    EUROLEAGUE: 0,
-    GLEAGUE: 5.0,
-    NBA: -4.0,
+    HIGH_SCHOOL: -0.8,
+    U_LEAGUE: 0.4,
+    NCAA: -1.4,
+    KBL: 2.5,
+    B_LEAGUE: 1.2,
+    NBL: 0.0,
+    EUROLEAGUE: -0.9,
+    GLEAGUE: 1.8,
+    NBA: 0.85,
   } as Record<LeagueId, number>,
-  npcMvpPoolSize: 9, // 라이벌 외 9명의 리그 스타 후보 생성 (총 10~12명 풀에서 공정한 TOP 5 선발)
-  npcRoyPoolSize: 8, // 신인왕 후보 풀 9~11명
-  // 단일 통합 평가 가중치 (개인 스탯 + 팀 성적을 투표 단계에서 통합 반영 — 투표 1위 = 무조건 MVP 수상)
+  npcMvpPoolSize: 9,
+  npcRoyPoolSize: 8, // 신인왕 후보 풀 (루키 NPC 8명 + 동일 리그 루키 라이벌 + 주인공)
+  // 올스타·올리그 정원 경쟁 통합 평가 가중치 (개인 기록 비중 중심 + 팀 성적 완만 반영)
+  allStarWeights: {
+    ppg: 1.15,
+    rpg: 0.72,
+    apg: 0.92,
+    spg: 2.35,
+    bpg: 2.55,
+    fgEffBase: 44.0,
+    fgEffWeight: 0.22,
+    winPctWeight: 10.5,
+  },
+  // 단일 통합 MVP 평가 가중치 (개인 스탯 + 팀 성적을 투표 단계에서 통합 반영 — 투표 1위 = 무조건 MVP 수상)
   mvpWeights: {
     ppg: 1.12,
     rpg: 0.74,
@@ -593,6 +696,13 @@ export const AGING_RETIREMENT_CONFIG = {
     minNbaMvps: 3,
     minNbaChampionships: 3,
     minFinalsMvps: 2,
+  },
+  firstBallotHofRequirements: {
+    minNbaMvps: 1,
+    minNbaFinalsMvps: 1,
+    minAllNbaFirstTeams: 3,
+    minNbaAllStars: 10,
+    minNbaPoints: 25000,
   },
 };
 

@@ -555,28 +555,55 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     '벤치에서 출발해 끝까지 코트를 지키며 자신의 커리어를 완주했습니다.';
 
   const finalsMvps = career.totals.finalsMvps || 0;
+  const nbaMvpsFromLogs = career.seasonLogs.filter(
+    (l) => l.league === 'NBA' && l.wonMvp
+  ).length;
+  const nbaFinalsMvpsFromLogs = career.seasonLogs.filter(
+    (l) => l.league === 'NBA' && l.wonFinalsMvp
+  ).length;
+  const allNbaFirstTeams = career.seasonLogs.filter(
+    (l) => l.league === 'NBA' && l.allLeagueTeam === 1
+  ).length;
+  const nbaAllStarsFromLogs = career.seasonLogs.filter(
+    (l) => l.league === 'NBA' && l.allStarSelected
+  ).length;
+
+  const nbaMvps = Math.max(career.totals.nbaMvps || 0, nbaMvpsFromLogs);
+  const nbaFinalsMvps =
+    career.seasonLogs.length > 0
+      ? nbaFinalsMvpsFromLogs
+      : career.totals.nbaChampionships >= 1
+      ? Math.min(finalsMvps, career.totals.nbaChampionships)
+      : 0;
+  const nbaAllStars = Math.max(
+    career.totals.nbaAllStars || 0,
+    nbaAllStarsFromLogs
+  );
 
   const goatReq = AGING_RETIREMENT_CONFIG.goatRequirements;
+  const hofReq = AGING_RETIREMENT_CONFIG.firstBallotHofRequirements;
+  const meetsFirstBallotHof =
+    nbaMvps >= hofReq.minNbaMvps ||
+    nbaFinalsMvps >= hofReq.minNbaFinalsMvps ||
+    allNbaFirstTeams >= hofReq.minAllNbaFirstTeams ||
+    nbaAllStars >= hofReq.minNbaAllStars ||
+    career.totals.nbaPoints >= hofReq.minNbaPoints;
+
   // GOAT 필수 조건: NBA MVP >= 3 AND NBA 우승 >= 3 AND 파이널 MVP >= 2 (점수 합산 우회 진입 완전 금지)
   if (
-    career.totals.nbaMvps >= goatReq.minNbaMvps &&
+    nbaMvps >= goatReq.minNbaMvps &&
     career.totals.nbaChampionships >= goatReq.minNbaChampionships &&
-    finalsMvps >= goatReq.minFinalsMvps
+    nbaFinalsMvps >= goatReq.minFinalsMvps
   ) {
     tierId = 'GOAT';
     tierTitle = '역대 최고 선수 (GOAT)';
     summaryComment =
       'NBA MVP, 파이널 우승, 파이널 MVP를 모두 다수 석권하며 농구 역사상 최고 반열에 이름을 올렸습니다.';
-  } else if (
-    career.totals.nbaMvps >= 1 ||
-    (career.totals.nbaChampionships >= 2 && career.totals.nbaAllStars >= 4) ||
-    career.totals.nbaAllStars >= 6 ||
-    career.totals.nbaPoints >= 15000
-  ) {
+  } else if (meetsFirstBallotHof) {
     tierId = 'FIRST_BALLOT_HOF';
     tierTitle = '명예의 전당 퍼스트 발롯';
     summaryComment =
-      'NBA 무대에서 수년간 리그 최정상급 기량을 증명하며 첫 투표 만에 명예의 전당 헌액 자격을 확보했습니다.';
+      'NBA 무대에서 MVP·파이널 MVP, All-NBA 퍼스트 팀 다수 선정, 올스타 10회 또는 통산 25,000득점의 반열에 오르며 첫 투표 만에 명예의 전당 헌액 자격을 확보했습니다.';
   } else if (
     career.totals.nbaAllStars >= 1 ||
     career.totals.nbaChampionships >= 1 ||

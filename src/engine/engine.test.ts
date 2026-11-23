@@ -47,7 +47,9 @@ import {
   rollPlayerDnaAndPlaystyle,
 } from './statCalculator';
 import {
+  assignPositionBalancedAllLeagueTeams,
   buildAwardRaceTop5,
+  calcUnifiedAllStarScore,
   calculateRoleAndMpg,
   calculatePpg,
   calculateSeasonStatGrowth,
@@ -56,11 +58,14 @@ import {
   calculateTeamContractOfferSalary,
   checkPotentialBreakthrough,
   computeCareerMinutes,
+  evaluateFluidSeasonAwards,
+  evaluateUnifiedLeagueAwards,
   generateDraftRivals,
   getAwardsByLeague,
   getLeagueBaselineTeamRating,
   getSangmuDischargeContractType,
   isEligibleForLeagueRookieAward,
+  selectPositionBalancedAllStars,
   simulateRivalsSeason,
   simulateSeason,
 } from './seasonSimulator';
@@ -126,7 +131,9 @@ import {
   skipLiveGameToEnd,
 } from './playoffEngine';
 import {
+  AWARD_VOTING_CONFIG,
   INTERNATIONAL_TOURNAMENT_CONFIG,
+  LEAGUE_AWARD_QUOTAS,
   canUseProTradeSystem,
   getInternationalTournamentByYear,
   isPersonalCareAllowedInLeague,
@@ -5039,12 +5046,414 @@ test('59. 인카운터 트레이드오프 제거 유지, 단순 계약·트레�
   assert.equal(migratedNextStars.career?.offseasonOptions[0].contractType, 'NBL_CONTRACT');
 });
 
+test('60. P0 플레이오프 완결 가드, P1 리그별 정원·포지션 올스타/올리그, 단일 MVP 보장 정책 및 주인공·라이벌·NPC 대칭 풀 검증', async () => {
+  // 1) evaluateFluidSeasonAwards는 1단계 중복 MVP/ROY/올스타 컷을 더 이상 산출하지 않음 (단일 진실 소스 보장)
+  const nbaStarCareer = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 92,
+    stats: { ins: 91, out: 90, ply: 88, def: 86, reb: 84, phy: 88 },
+  });
+  const auxAwards = evaluateFluidSeasonAwards({
+    career: nbaStarCareer,
+    role: '에이스 (1옵션)',
+    gp: 78,
+    mpg: 36.2,
+    ppg: 30.5,
+    rpg: 8.5,
+    apg: 8.0,
+    spg: 2.1,
+    bpg: 1.4,
+    winRate: 0.72,
+    rng: () => 0.5,
+  });
+  assert.equal(auxAwards.wonMvp, false, '1st stage must not compute separate wonMvp');
+  assert.equal(auxAwards.wonRookieOfYear, false, '1st stage must not compute separate wonRookieOfYear');
+  assert.equal(auxAwards.allStarSelected, false, '1st stage must not compute separate threshold allStarSelected');
+  assert.equal(auxAwards.allLeagueTeam, null, '1st stage must not compute separate allLeagueTeam');
+  assert.equal(AWARD_VOTING_CONFIG.mvpGuaranteesAllStarAndFirstTeam, true);
 
+  // 2) 리그별 정원(Quota) + 포지션 균형 배분 검증 (NBA 24명 · KBL 12명 · 고교 5명)
+  for (const lg of ['NBA', 'KBL', 'HIGH_SCHOOL'] as const) {
+    const team =
+      lg === 'NBA' ? NBA_TEAMS[0] : lg === 'KBL' ? KBL_TEAMS[0] : HIGH_SCHOOL_TEAMS[0];
+    const games = LEAGUE_CONFIG[lg].games;
+    const career = createBaseCareer({
+      league: lg,
+      team,
+      ovr: LEAGUE_CONFIG[lg].ldr + 4,
+      primaryPos: 'PG',
+    });
+    const standings = generateLeagueStandings(career, Math.round(games * 0.65), Math.round(games * 0.35), () => 0.5);
+    const bx = createSeasonLog({
+      league: lg,
+      teamId: team.id,
+      teamName: team.name,
+      teamShortName: team.shortName,
+      gp: games,
+      mpg: 34.0,
+      ppg: 24.0,
+      rpg: 5.5,
+      apg: 7.5,
+      spg: 1.6,
+      bpg: 0.5,
+      fgPct: 48.0,
+      wins: Math.round(games * 0.65),
+      losses: Math.round(games * 0.35),
+    });
+    const unified = evaluateUnifiedLeagueAwards({
+      career,
+      boxScore: bx,
+      standings,
+      updatedRivals: [],
+      isRookieSeason: false,
+      rng: () => 0.45,
+    });
+    const quota = LEAGUE_AWARD_QUOTAS[lg];
+    assert.equal(
+      unified.allStarIds.size,
+      quota.allStarTotal,
+      `${lg} All-Star count (${unified.allStarIds.size}) must strictly equal quota (${quota.allStarTotal})`
+    );
+    assert.ok(
+      unified.allStarGuardCount >= quota.allStarGuards,
+      `${lg} guard All-Stars (${unified.allStarGuardCount}) must meet >= ${quota.allStarGuards}`
+    );
+    assert.ok(
+      unified.allStarFrontcourtCount >= quota.allStarFrontcourt,
+      `${lg} frontcourt All-Stars (${unified.allStarFrontcourtCount}) must meet >= ${quota.allStarFrontcourt}`
+    );
+    const firstTeamCount = [...unified.allLeagueTeams.values()].filter((t) => t === 1).length;
+    assert.equal(firstTeamCount, 5, `${lg} All-League 1st Team must have exact 5 players`);
+    assert.equal(
+      unified.allLeagueTeams.size,
+      quota.allLeagueTeamCount * 5,
+      `${lg} total All-League slots must equal ${quota.allLeagueTeamCount * 5}`
+    );
+  }
 
+  // 3) 명시적 MVP 보장 정책: 정원 유지(24명·퍼스트팀 5명)하면서 MVP 수상자의 올스타·퍼스트팀 보장
+  const nbaQuota = LEAGUE_AWARD_QUOTAS.NBA;
+  const syntheticPool = Array.from({ length: 40 }, (_, i) => {
+    const pos = (['PG', 'SG', 'SF', 'PF', 'C'] as const)[i % 5];
+    return {
+      id: `C_${i}`,
+      name: `Player ${i}`,
+      teamId: `T_${i}`,
+      teamShortName: `T${i}`,
+      pos,
+      isPlayer: i === 0,
+      isRookie: false,
+      gp: 78,
+      mpg: 34,
+      ppg: 25 - i * 0.25,
+      rpg: pos === 'C' || pos === 'PF' ? 9.5 : 5.0,
+      apg: pos === 'PG' ? 8.0 : 4.2,
+      spg: 1.2,
+      bpg: pos === 'C' ? 1.8 : 0.5,
+      fgPct: 48.0,
+      wins: 50,
+      losses: 32,
+      eligible: true,
+      mvpScore: 55 - i * 0.5,
+      allStarScore: calcUnifiedAllStarScore({
+        ppg: 25 - i * 0.25,
+        rpg: pos === 'C' || pos === 'PF' ? 9.5 : 5.0,
+        apg: pos === 'PG' ? 8.0 : 4.2,
+        wins: 50,
+        losses: 32,
+      }),
+      royScore: 30,
+    };
+  });
+  const selAllStars = selectPositionBalancedAllStars(syntheticPool, nbaQuota);
+  assert.equal(selAllStars.selectedIds.size, 24);
+  const allLeagueMap = assignPositionBalancedAllLeagueTeams(syntheticPool, 3);
+  assert.equal(allLeagueMap.size, 15);
 
+  // 4) 주인공·라이벌·NPC 완전 대칭 경쟁 풀: 동일 리그 라이벌이 1위 시드 압도적 성적이면 라이벌이 MVP 1위 + mvps/allStars 동기화
+  const rivalTeam = NBA_TEAMS[1];
+  const playerTeam = NBA_TEAMS[0];
+  const superRival = {
+    id: 'RIVAL_DOMINANT',
+    name: 'Dominant Rival',
+    draftYear: 2028,
+    league: 'NBA' as const,
+    teamId: rivalTeam.id,
+    teamName: rivalTeam.name,
+    teamShortName: rivalTeam.shortName,
+    pos: 'SF' as const,
+    ovr: 96,
+    potential: 97,
+    ppg: 33.5,
+    rpg: 10.4,
+    apg: 9.2,
+    championships: 0,
+    mvps: 0,
+    allStars: 0,
+    roys: 0,
+    lastHeadline: '테스트 라이벌',
+  };
+  const symCareer = createBaseCareer({
+    league: 'NBA',
+    team: playerTeam,
+    seasonYear: 2030,
+    ovr: 87,
+    rivals: [superRival],
+  });
+  const symStandings = generateLeagueStandings(symCareer, 46, 36, () => 0.5).map((s) =>
+    s.team.id === rivalTeam.id
+      ? { ...s, wins: 68, losses: 14, winPct: Number((68 / 82).toFixed(3)) }
+      : s
+  );
+  symStandings.sort((a, b) => b.winPct - a.winPct);
 
+  // simulateRivalsSeason은 동일 리그 라이벌의 mvps/allStars를 선반영하지 않아야 함
+  const preSim = simulateRivalsSeason(
+    [superRival],
+    2030,
+    createSeasonLog({ league: 'NBA', ppg: 22.0 }),
+    () => 0.5
+  );
+  assert.equal(preSim.updatedRivals[0].mvps, 0, 'Same-league rival MVP must be resolved only in unified pool');
+  assert.equal(preSim.updatedRivals[0].allStars, 0, 'Same-league rival All-Star must be resolved only in unified pool');
 
+  const symUnified = evaluateUnifiedLeagueAwards({
+    career: symCareer,
+    boxScore: createSeasonLog({
+      league: 'NBA',
+      teamId: playerTeam.id,
+      teamName: playerTeam.name,
+      teamShortName: playerTeam.shortName,
+      gp: 78,
+      mpg: 34.5,
+      ppg: 23.0,
+      rpg: 5.5,
+      apg: 5.2,
+      spg: 1.2,
+      bpg: 0.5,
+      fgPct: 47.0,
+      wins: 46,
+      losses: 36,
+    }),
+    standings: symStandings,
+    updatedRivals: [superRival],
+    rivalSeasonStats: {
+      [superRival.id]: {
+        rivalId: superRival.id,
+        gp: 80,
+        mpg: 36.5,
+        ppg: 33.5,
+        rpg: 10.4,
+        apg: 9.2,
+        spg: 2.1,
+        bpg: 1.5,
+        fgPct: 54.0,
+      },
+    },
+    isRookieSeason: false,
+    rng: () => 0.5,
+  });
+  assert.equal(symUnified.playerWonMvp, false, 'Player must not win MVP when rival dominates');
+  assert.equal(symUnified.mvpWinnerId, `RIVAL_${superRival.id}`, 'Dominant rival must win MVP in unified pool');
+  assert.equal(symUnified.mvpRace[0].name, superRival.name);
+  assert.equal(symUnified.syncedRivals[0].mvps, 1, 'Synced rival mvps must increment by 1');
+  assert.equal(symUnified.syncedRivals[0].allStars, 1, 'Synced rival allStars must increment by 1');
 
+  // 5) P0 스토어 가드: 미완결 플레이오프 대진표에서 enterOffseasonFromPlayoffs 호출 시 championTeamId 자동 완결
+  const memStore: Record<string, string> = {};
+  (globalThis as Record<string, unknown>).localStorage = {
+    getItem: (k: string) => memStore[k] ?? null,
+    setItem: (k: string, v: string) => {
+      memStore[k] = v;
+    },
+    removeItem: (k: string) => {
+      delete memStore[k];
+    },
+  };
+  const { useCareerStore } = await import('../store/useCareerStore');
+  const poStandings = generateLeagueStandings(nbaStarCareer, 52, 30, () => 0.5);
+  const unfinishedBracket = {
+    ...createPlayoffBracket(nbaStarCareer, poStandings, () => 0.5),
+    playerEliminated: true,
+    championTeamId: null,
+  };
+  useCareerStore.setState({
+    career: {
+      ...nbaStarCareer,
+      currentStandings: poStandings,
+      playoffBracket: unfinishedBracket,
+      seasonLogs: [
+        createSeasonLog({
+          league: 'NBA',
+          teamId: nbaStarCareer.team.id,
+          teamName: nbaStarCareer.team.name,
+          teamShortName: nbaStarCareer.team.shortName,
+          wins: 52,
+          losses: 30,
+        }),
+      ],
+      seasonPhase: 'POSTSEASON_BRACKET',
+    },
+  });
+  useCareerStore.getState().enterOffseasonFromPlayoffs();
+  const afterOffseason = useCareerStore.getState().career!;
+  assert.equal(afterOffseason.seasonPhase, 'OFFSEASON');
+  assert.ok(
+    afterOffseason.playoffBracket?.championTeamId,
+    'enterOffseasonFromPlayoffs must finalize championTeamId before settling offseason'
+  );
+});
 
+test('61. 상향된 명예의 전당 퍼스트 발롯 기준 검증 (NBA MVP/FMVP 1+, All-NBA 퍼스트 3+, 올스타 10+, 통산 25,000득점)', () => {
+  const bos = NBA_TEAMS[0];
+  const baseTotals = {
+    gp: 900,
+    points: 20000,
+    rebounds: 5000,
+    assists: 4000,
+    steals: 1000,
+    blocks: 400,
+    nbaGp: 900,
+    nbaPoints: 20000,
+    championships: 2,
+    nbaChampionships: 2,
+    mvps: 0,
+    nbaMvps: 0,
+    finalsMvps: 0,
+    dpoys: 0,
+    sixthManAwards: 0,
+    mips: 0,
+    allLeagueSelections: 2,
+    allStars: 9,
+    nbaAllStars: 9,
+  };
 
+  // 1) 구 기준(올스타 9회, NBA 24,999득점, 우승 2회, All-NBA 퍼스트 2회)은 이제 퍼스트 발롯 미달 -> NBA_ALL_STAR
+  const nearMissLogs = [
+    createSeasonLog({ league: 'NBA', teamId: bos.id, teamName: bos.name, allLeagueTeam: 1, allStarSelected: true, wonChampionship: true }),
+    createSeasonLog({ league: 'NBA', teamId: bos.id, teamName: bos.name, allLeagueTeam: 1, allStarSelected: true, wonChampionship: true }),
+  ];
+  const nearMissCareer = createBaseCareer({
+    league: 'NBA',
+    team: bos,
+    seasonLogs: nearMissLogs,
+    totals: {
+      ...baseTotals,
+      nbaPoints: 24999,
+      points: 24999,
+      nbaAllStars: 9,
+      allStars: 9,
+    },
+  });
+  assert.equal(
+    evaluateCareerLegacy(nearMissCareer).tierId,
+    'NBA_ALL_STAR',
+    '9 All-Stars, 24,999 NBA points, 2 rings, and 2 All-NBA 1st teams must NOT reach First Ballot HOF'
+  );
+
+  // 2) KBL MVP·파이널 MVP는 NBA 퍼스트 발롯 조건으로 인정되지 않아야 함
+  const kblOnlyCareer = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    seasonLogs: [
+      createSeasonLog({
+        league: 'KBL',
+        teamId: KBL_TEAMS[0].id,
+        teamName: KBL_TEAMS[0].name,
+        wonMvp: true,
+        wonChampionship: true,
+        wonFinalsMvp: true,
+        allLeagueTeam: 1,
+        allStarSelected: true,
+      }),
+    ],
+    totals: {
+      ...baseTotals,
+      nbaGp: 0,
+      nbaPoints: 0,
+      nbaChampionships: 0,
+      nbaMvps: 0,
+      nbaAllStars: 0,
+      mvps: 3,
+      finalsMvps: 2,
+      championships: 3,
+    },
+  });
+  assert.notEqual(
+    evaluateCareerLegacy(kblOnlyCareer).tierId,
+    'FIRST_BALLOT_HOF',
+    'KBL Finals MVP must not trigger NBA First Ballot HOF'
+  );
+
+  // 3) 조건 A: NBA 정규시즌 MVP 1회
+  const mvpCareer = createBaseCareer({
+    league: 'NBA',
+    team: bos,
+    seasonLogs: [createSeasonLog({ league: 'NBA', teamId: bos.id, teamName: bos.name, wonMvp: true })],
+    totals: { ...baseTotals, nbaPoints: 12000, nbaAllStars: 4, nbaChampionships: 0, nbaMvps: 1, mvps: 1 },
+  });
+  assert.equal(evaluateCareerLegacy(mvpCareer).tierId, 'FIRST_BALLOT_HOF');
+
+  // 4) 조건 B: NBA 파이널 MVP 1회
+  const fmvpCareer = createBaseCareer({
+    league: 'NBA',
+    team: bos,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        teamId: bos.id,
+        teamName: bos.name,
+        wonChampionship: true,
+        wonFinalsMvp: true,
+      }),
+    ],
+    totals: { ...baseTotals, nbaPoints: 11000, nbaAllStars: 3, nbaChampionships: 1, finalsMvps: 1 },
+  });
+  assert.equal(evaluateCareerLegacy(fmvpCareer).tierId, 'FIRST_BALLOT_HOF');
+
+  // 5) 조건 C: All-NBA 퍼스트 팀 3회 이상
+  const allNbaFirst3Logs = [0, 1, 2].map((idx) =>
+    createSeasonLog({
+      seasonNumber: idx + 1,
+      year: 2028 + idx,
+      league: 'NBA',
+      teamId: bos.id,
+      teamName: bos.name,
+      allLeagueTeam: 1,
+      allStarSelected: true,
+    })
+  );
+  const allNbaFirstCareer = createBaseCareer({
+    league: 'NBA',
+    team: bos,
+    seasonLogs: allNbaFirst3Logs,
+    totals: { ...baseTotals, nbaPoints: 14000, nbaAllStars: 5, nbaChampionships: 0, allLeagueSelections: 3 },
+  });
+  assert.equal(evaluateCareerLegacy(allNbaFirstCareer).tierId, 'FIRST_BALLOT_HOF');
+
+  // 6) 조건 D: NBA 올스타 10회 이상
+  const tenAllStarCareer = createBaseCareer({
+    league: 'NBA',
+    team: bos,
+    seasonLogs: [createSeasonLog({ league: 'NBA', teamId: bos.id, teamName: bos.name, allStarSelected: true })],
+    totals: { ...baseTotals, nbaPoints: 18000, nbaAllStars: 10, allStars: 10, nbaChampionships: 0 },
+  });
+  assert.equal(evaluateCareerLegacy(tenAllStarCareer).tierId, 'FIRST_BALLOT_HOF');
+
+  // 7) 조건 E: NBA 통산 25,000득점 돌파
+  const scorerCareer = createBaseCareer({
+    league: 'NBA',
+    team: bos,
+    seasonLogs: [createSeasonLog({ league: 'NBA', teamId: bos.id, teamName: bos.name })],
+    totals: { ...baseTotals, nbaPoints: 25000, points: 25000, nbaAllStars: 5, nbaChampionships: 0 },
+  });
+  assert.equal(evaluateCareerLegacy(scorerCareer).tierId, 'FIRST_BALLOT_HOF');
+
+  // 8) 등급 도감 설명 동기화 확인
+  const hofCatalog = LEGACY_TIER_CATALOG.find((t) => t.id === 'FIRST_BALLOT_HOF');
+  assert.ok(hofCatalog?.criteria.includes('25,000'));
+  assert.ok(hofCatalog?.criteria.includes('10회'));
+  assert.ok(hofCatalog?.criteria.includes('퍼스트'));
+});
 

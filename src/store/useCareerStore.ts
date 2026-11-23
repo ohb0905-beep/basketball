@@ -270,8 +270,20 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
     }
   }
 
+  const champTeamId = career.playoffBracket?.championTeamId ?? null;
+  const currentRivals = career.rivals ?? [];
+  const settledRivals =
+    champTeamId && currentRivals.length > 0
+      ? currentRivals.map((r) =>
+          r.league === career.league && r.teamId === champTeamId
+            ? { ...r, championships: r.championships + 1 }
+            : r
+        )
+      : career.rivals;
+
   const settledBase: CareerState = {
     ...career,
+    rivals: settledRivals,
     age: nextAge,
     seasonYear: nextSeasonYear,
     seasonsPlayed: nextSeasonsPlayed,
@@ -1877,9 +1889,17 @@ export const useCareerStore = create<CareerStoreState>()(
             Math.round(bs.salaryEarned * ECONOMY_CONFIG.proNetCashRatio)
           : getEffectiveCashBalance(career) + ECONOMY_CONFIG.amateurAnnualStipendUsd;
 
-        const initialBracket = createPlayoffBracket(career, sim.standings);
+        let initialBracket = createPlayoffBracket(career, sim.standings);
         const qualifiedForPlayoffs =
           !initialBracket.playerEliminated && initialBracket.rounds.length > 0;
+        // 플레이어 팀이 PO 진출에 실패했더라도 리그 최종 우승팀을 확정해 대진표 및 라이벌 우승 기록 정합성 유지
+        if (
+          !qualifiedForPlayoffs &&
+          initialBracket.rounds.length > 0 &&
+          !initialBracket.championTeamId
+        ) {
+          initialBracket = skipEntirePlayoffs(initialBracket, career, sim.standings);
+        }
 
         const postRegularSeasonCareer: CareerState = {
           ...career,
@@ -2090,7 +2110,67 @@ export const useCareerStore = create<CareerStoreState>()(
       enterOffseasonFromPlayoffs: () => {
         const { career, recordBook, lastPersonalCareIds } = get();
         if (!career) return;
-        const checked = applyLatestSeasonRecordChecks(recordBook, career);
+
+        // 안전 가드: 미완결 플레이오프 대진표가 남아 있으면 최종 우승팀 확정 후 오프시즌 정산
+        let careerToSettle = career;
+        if (
+          career.playoffBracket &&
+          career.playoffBracket.rounds.length > 0 &&
+          !career.playoffBracket.championTeamId
+        ) {
+          const standings = career.currentStandings || [];
+          const finishedBracket = skipEntirePlayoffs(
+            career.playoffBracket,
+            career,
+            standings
+          );
+          const logs = [...career.seasonLogs];
+          const nextTotals = { ...career.totals };
+          const nextMilestones = [...career.milestones];
+          if (logs.length > 0) {
+            const lastIdx = logs.length - 1;
+            const prevLog = logs[lastIdx];
+            const wonChamp =
+              Boolean(finishedBracket.championTeamId) &&
+              finishedBracket.championTeamId === prevLog.teamId;
+            const wonFmvp = wonChamp
+              ? evaluateRealisticFinalsMvp(career, wonChamp)
+              : false;
+            if (wonChamp && !prevLog.wonChampionship) {
+              nextTotals.championships += 1;
+              if (prevLog.league === 'NBA') nextTotals.nbaChampionships += 1;
+              if (wonFmvp) {
+                nextTotals.finalsMvps = (nextTotals.finalsMvps || 0) + 1;
+              }
+              nextMilestones.push({
+                id: `MS_CHAMP_${prevLog.year}_${Date.now()}`,
+                year: prevLog.year,
+                age: prevLog.age,
+                title: `${prevLog.leagueName} 챔피언십 우승${
+                  wonFmvp ? ' · 파이널 MVP' : ''
+                }`,
+                description: `${prevLog.teamName} 소속으로 포스트시즌 정상에 올랐습니다.`,
+                type: 'CHAMPIONSHIP',
+                teamName: prevLog.teamName,
+              });
+            }
+            logs[lastIdx] = {
+              ...prevLog,
+              playoffResult: finishedBracket.playoffResultLabel,
+              wonChampionship: wonChamp || prevLog.wonChampionship,
+              wonFinalsMvp: wonFmvp || prevLog.wonFinalsMvp,
+            };
+          }
+          careerToSettle = {
+            ...career,
+            playoffBracket: finishedBracket,
+            seasonLogs: logs,
+            totals: nextTotals,
+            milestones: nextMilestones,
+          };
+        }
+
+        const checked = applyLatestSeasonRecordChecks(recordBook, careerToSettle);
         const preservedCare =
           (checked.nextCareer.activePersonalCare || []).length > 0
             ? checked.nextCareer.activePersonalCare

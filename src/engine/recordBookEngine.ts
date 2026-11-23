@@ -652,7 +652,7 @@ export const LEGACY_TIER_CATALOG: {
   {
     id: 'FIRST_BALLOT_HOF',
     title: '명예의 전당 퍼스트 발롯',
-    criteria: 'NBA MVP 1회 또는 올스타 6회 / 통산 15,000득점',
+    criteria: 'NBA MVP·FMVP 1회 / All-NBA 퍼스트 3회 / 올스타 10회 / 25,000득점 중 1개 충족',
   },
   {
     id: 'NBA_ALL_STAR',

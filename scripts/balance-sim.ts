@@ -80,14 +80,44 @@ const q = (xs: number[], p: number) => {
 
 // ───────────────────── 1) 커리어 루프 ─────────────────────
 const initOvr: Record<string, number[]> = {};
+const posPeakOvr: Record<string, number[]> = {};
 const peaks: number[] = [];
+const peakAges: number[] = [];
+const potDiffs: number[] = [];
+const retireAges: number[] = [];
+const proJumpDeltas: number[] = [];
+const ageOvrBuckets: Record<number, number[]> = {};
+const post35Drops: number[] = [];
+const dnaStats: Record<
+  string,
+  { n: number; peaks: number[]; peakAges: number[]; seasons: number[]; retireAges: number[]; potAttain: number[] }
+> = {};
+const durabilityStats: Record<
+  string,
+  { n: number; seasons: number[]; retireAges: number[]; peaks: number[]; totalSeasons: number; injuredSeasons: number }
+> = {};
+const injuryTierStats: Record<string, { n: number; gamesMissed: number[] }> = {
+  MINOR: { n: 0, gamesMissed: [] },
+  MODERATE: { n: 0, gamesMissed: [] },
+  MAJOR: { n: 0, gamesMissed: [] },
+};
 const snaps: { career: any; live: any }[] = [];
 const seasons: any[] = [];
 let nbaCareers = 0;
+let nbaTotalSeasons = 0;
 let nbaAllStarCareers = 0;
 let nbaMvpCareers = 0;
 let glassSeasons = 0;
 let glassInjured = 0;
+let age30PlusSeasons = 0;
+let age30PlusInjured = 0;
+let age30PlusMissed: number[] = [];
+let unfinishedPlayoffBrackets = 0;
+let proPlayoffQualified = 0;
+let proTotalSeasons = 0;
+let rivalTotalAllStars = 0;
+let rivalTotalMvps = 0;
+let rivalTotalChamps = 0;
 let errors = 0;
 
 for (let run = 0; run < CAREERS; run++) {
@@ -100,7 +130,9 @@ for (let run = 0; run < CAREERS; run++) {
     primaryPos: pos,
     highSchoolTeamId: 'HS_SAMIL',
   });
-  (initOvr[pos] ??= []).push(S().career!.ovr);
+  const initCareer: any = S().career!;
+  const initPotential: number = initCareer.potential;
+  (initOvr[pos] ??= []).push(initCareer.ovr);
   S().setView('DASHBOARD');
   try {
     for (let i = 0; i < 900 && S().view !== 'RETIREMENT'; i++) {
@@ -132,12 +164,16 @@ for (let run = 0; run < CAREERS; run++) {
       }
       if (c.seasonPhase === 'POSTSEASON_BRACKET') {
         const b = c.playoffBracket;
-        if (b.championTeamId || b.playerEliminated) st.enterOffseasonFromPlayoffs();
+        // [P0 경로 통일] 플레이어가 조기 탈락했더라도 championTeamId가 확정될 때까지 대진표를 완결한 뒤 오프시즌 진입
+        if (b.championTeamId) st.enterOffseasonFromPlayoffs();
         else if (b.playerReachedFinals || b.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;
       }
       if (c.seasonPhase === 'OFFSEASON' || c.offseasonLocked) {
+        if (c.playoffBracket && c.playoffBracket.rounds?.length > 0 && !c.playoffBracket.championTeamId) {
+          unfinishedPlayoffBrackets++;
+        }
         const opts = c.offseasonOptions || [];
         const o =
           opts.find((x: any) => !x.locked && !String(x.actionType).startsWith('RETIRE')) ??
@@ -155,12 +191,103 @@ for (let run = 0; run < CAREERS; run++) {
   const c: any = S().career;
   if (!c) continue;
   peaks.push(c.peakOvr);
-  const nbaLogs = c.seasonLogs.filter((l: any) => l.league === 'NBA');
-  if (nbaLogs.length) nbaCareers++;
+  (posPeakOvr[pos] ??= []).push(c.peakOvr);
+  potDiffs.push(c.peakOvr - initPotential);
+  retireAges.push(c.age);
+
+  const logs: any[] = c.seasonLogs || [];
+  let maxLogOvr = -1;
+  let maxLogAge = c.age;
+  let recordedProJump = false;
+  for (let idx = 0; idx < logs.length; idx++) {
+    const l = logs[idx];
+    if (l.ovr > maxLogOvr) {
+      maxLogOvr = l.ovr;
+      maxLogAge = l.age;
+    }
+    (ageOvrBuckets[l.age] ??= []).push(l.ovr);
+    if (idx > 0 && l.age >= 35 && logs[idx - 1].age === l.age - 1) {
+      post35Drops.push(logs[idx - 1].ovr - l.ovr);
+    }
+    if (!recordedProJump && idx > 0 && !AMATEUR.includes(l.league) && AMATEUR.includes(logs[idx - 1].league)) {
+      const nextLog = logs[idx + 1];
+      if (nextLog) {
+        proJumpDeltas.push(nextLog.ovr - l.ovr);
+        recordedProJump = true;
+      }
+    }
+    if (!AMATEUR.includes(l.league)) {
+      proTotalSeasons++;
+      if (l.playoffResult && l.playoffResult !== 'PO 탈락') {
+        proPlayoffQualified++;
+      }
+    }
+    if (l.injuredGamesMissed > 0 && l.injurySeverity && injuryTierStats[l.injurySeverity]) {
+      injuryTierStats[l.injurySeverity].n++;
+      injuryTierStats[l.injurySeverity].gamesMissed.push(l.injuredGamesMissed);
+    }
+    if (l.age >= 30) {
+      age30PlusSeasons++;
+      if (l.injuredGamesMissed > 0) {
+        age30PlusInjured++;
+        age30PlusMissed.push(l.injuredGamesMissed);
+      }
+    }
+  }
+  peakAges.push(maxLogAge);
+
+  const dnaKey: string = c.growthDna || 'STANDARD';
+  const dBucket = (dnaStats[dnaKey] ??= {
+    n: 0,
+    peaks: [],
+    peakAges: [],
+    seasons: [],
+    retireAges: [],
+    potAttain: [],
+  });
+  dBucket.n++;
+  dBucket.peaks.push(c.peakOvr);
+  dBucket.peakAges.push(maxLogAge);
+  dBucket.seasons.push(logs.length);
+  dBucket.retireAges.push(c.age);
+  dBucket.potAttain.push(c.peakOvr - initPotential);
+
+  const traits: string[] = c.traits || [];
+  const durKey = traits.includes('GLASS_BODY')
+    ? '유리몸'
+    : traits.includes('IRON_STAMINA')
+    ? '강철체력'
+    : '일반';
+  const dur = (durabilityStats[durKey] ??= {
+    n: 0,
+    seasons: [],
+    retireAges: [],
+    peaks: [],
+    totalSeasons: 0,
+    injuredSeasons: 0,
+  });
+  dur.n++;
+  dur.seasons.push(logs.length);
+  dur.retireAges.push(c.age);
+  dur.peaks.push(c.peakOvr);
+  dur.totalSeasons += logs.length;
+  dur.injuredSeasons += logs.filter((l: any) => l.injuredGamesMissed > 0).length;
+
+  for (const r of c.rivals || []) {
+    rivalTotalAllStars += r.allStars || 0;
+    rivalTotalMvps += r.mvps || 0;
+    rivalTotalChamps += r.championships || 0;
+  }
+
+  const nbaLogs = logs.filter((l: any) => l.league === 'NBA');
+  if (nbaLogs.length) {
+    nbaCareers++;
+    nbaTotalSeasons += nbaLogs.length;
+  }
   if (nbaLogs.some((l: any) => l.allStarSelected)) nbaAllStarCareers++;
   if (nbaLogs.some((l: any) => l.wonMvp)) nbaMvpCareers++;
-  const glass = (c.traits || []).includes('GLASS_BODY');
-  for (const l of c.seasonLogs) {
+  const glass = traits.includes('GLASS_BODY');
+  for (const l of logs) {
     seasons.push(l);
     if (glass) {
       glassSeasons++;
@@ -204,15 +331,18 @@ function playOut(live: any, career: any, tactic: string) {
   return lg;
 }
 const REPS = 20;
-const tacticReal: Record<string, { n: number; w: number; pts: number }> = {};
+const tacticReal: Record<string, { n: number; w: number; pts: number; ot: number; fgm: number; fga: number }> = {};
 for (const sn of snaps) {
   for (const t of TACTICS) {
     for (let k = 0; k < REPS; k++) {
       const lg = playOut(sn.live, sn.career, t);
-      const a = (tacticReal[t] ??= { n: 0, w: 0, pts: 0 });
+      const a = (tacticReal[t] ??= { n: 0, w: 0, pts: 0, ot: 0, fgm: 0, fga: 0 });
       a.n++;
       a.w += lg.teamScore > lg.oppScore ? 1 : 0;
       a.pts += lg.playerStats.pts;
+      a.ot += (lg.overtimeCount || 0) > 0 ? 1 : 0;
+      a.fgm += lg.playerStats.fgm || 0;
+      a.fga += lg.playerStats.fga || 0;
     }
   }
 }
@@ -419,7 +549,7 @@ for (const lg of ['KBL', 'EUROLEAGUE', 'NBA'] as const) {
     const stats = { ins: v, out: v, ply: v, def: v, reb: v, phy: v };
     const ovr = STAT.calculateOvr(stats, 'SG', 193);
     let mvp = 0, simFmvp = 0, liveWins = 0, liveFmvp = 0, ptsSum = 0;
-    const N = 40;
+    const N = 80;
     for (let i = 0; i < N; i++) {
       const c: any = {
         id: 'F',
@@ -501,10 +631,56 @@ for (const lg of ['KBL', 'EUROLEAGUE', 'NBA'] as const) {
 }
 
 // ───────────────────── 출력 ─────────────────────
+const totalLiveSims = Object.values(tacticReal).reduce((s, a) => s + a.n, 0);
+const totalLiveOt = Object.values(tacticReal).reduce((s, a) => s + a.ot, 0);
+
+const dnaTable = Object.fromEntries(
+  Object.entries(dnaStats).map(([k, v]) => [
+    k,
+    {
+      인원: v.n,
+      최고OVR: avg(v.peaks),
+      전성기나이: avg(v.peakAges),
+      현역시즌: avg(v.seasons),
+      은퇴나이: avg(v.retireAges),
+      '잠재력대비(OVR-POT)': avg(v.potAttain),
+    },
+  ])
+);
+
+const durabilityTable = Object.fromEntries(
+  Object.entries(durabilityStats).map(([k, v]) => [
+    k,
+    {
+      인원: v.n,
+      현역시즌: avg(v.seasons),
+      은퇴나이: avg(v.retireAges),
+      최고OVR: avg(v.peaks),
+      '시즌부상률%': pct(v.injuredSeasons, v.totalSeasons),
+    },
+  ])
+);
+
+const ageMilestones = [17, 19, 21, 23, 25, 27, 30, 33, 35, 38, 40];
+const ageOvrSummary = Object.fromEntries(
+  ageMilestones
+    .filter((a) => (ageOvrBuckets[a]?.length ?? 0) > 0)
+    .map((a) => [`${a}세`, `${avg(ageOvrBuckets[a])} (n=${ageOvrBuckets[a].length})`])
+);
+
+const injuryTierSummary = Object.fromEntries(
+  Object.entries(injuryTierStats).map(([tier, v]) => [
+    tier,
+    { 발생횟수: v.n, 평균결장경기: avg(v.gamesMissed) },
+  ])
+);
+
 const metrics = {
   careers: CAREERS,
   errors,
+  unfinishedPlayoffBrackets,
   nbaReachPct: pct(nbaCareers, CAREERS),
+  nbaAvgSeasons: nbaCareers ? +(nbaTotalSeasons / nbaCareers).toFixed(2) : 0,
   nbaAllStarPctOfNba: pct(nbaAllStarCareers, nbaCareers),
   nbaMvpPct: pct(nbaMvpCareers, CAREERS),
   nbaPpg: byLeague.NBA ? avg(byLeague.NBA.ppg) : 0,
@@ -512,15 +688,38 @@ const metrics = {
   kblMvpPct: byLeague.KBL ? pct(byLeague.KBL.mvp, byLeague.KBL.n) : 0,
   peakOvrP50: q(peaks, 0.5),
   peakOvrP90: q(peaks, 0.9),
+  avgPeakAge: avg(peakAges),
+  avgPotAttainmentGap: avg(potDiffs),
+  avgProFirstYearOvrJump: avg(proJumpDeltas),
+  avgRetireAge: avg(retireAges),
+  avgOvrAt30: avg(ageOvrBuckets[30] || []),
+  avgOvrAt35: avg(ageOvrBuckets[35] || []),
+  avgOvrAt40: avg(ageOvrBuckets[40] || []),
+  avgPost35AnnualOvrDrop: avg(post35Drops),
+  age30PlusInjuryPct: pct(age30PlusInjured, age30PlusSeasons),
+  age30PlusAvgMissedGames: avg(age30PlusMissed),
   amateurMvpPct: pct(amateurSeasons.filter((l) => l.wonMvp).length, amateurSeasons.length),
   proPpg26PlusPct: pct(proPpg.filter((x) => x >= 26).length, proPpg.length),
+  proPlayoffQualPct: pct(proPlayoffQualified, proTotalSeasons),
   glassBodyInjuryPct: pct(glassInjured, glassSeasons),
   initOvrSpread: +(
     Math.max(...Object.values(initOvr).map(avg)) - Math.min(...Object.values(initOvr).map(avg))
   ).toFixed(2),
+  peakOvrPosSpread: +(
+    Math.max(...Object.values(posPeakOvr).map(avg)) - Math.min(...Object.values(posPeakOvr).map(avg))
+  ).toFixed(2),
+  rivalSymmetryTotals: {
+    allStars: rivalTotalAllStars,
+    mvps: rivalTotalMvps,
+    championships: rivalTotalChamps,
+  },
+  liveOvertimePct: pct(totalLiveOt, totalLiveSims),
   realFinalsWinPct: Object.fromEntries(TACTICS.map((t) => [t, pct(tacticReal[t]?.w ?? 0, tacticReal[t]?.n ?? 0)])),
   realFinalsPlayerPts: Object.fromEntries(
     TACTICS.map((t) => [t, tacticReal[t] ? +(tacticReal[t].pts / tacticReal[t].n).toFixed(1) : 0])
+  ),
+  realFinalsPlayerFgPct: Object.fromEntries(
+    TACTICS.map((t) => [t, tacticReal[t] && tacticReal[t].fga > 0 ? pct(tacticReal[t].fgm, tacticReal[t].fga) : 0])
   ),
   equalTeamWinPct: Object.fromEntries(Object.keys(TIERS).map((k) => [k, pct(equalTier[k]?.w ?? 0, equalTier[k]?.n ?? 0)])),
   equalTeamTacticSpread: Object.fromEntries(
@@ -538,13 +737,27 @@ const metrics = {
 };
 
 console.log(`\n== 시드 ${SEED} · 커리어 ${CAREERS}회 · 결승 스냅샷 ${snaps.length}개`);
-console.log('\n[포지션별 초기 OVR 평균]', Object.fromEntries(Object.entries(initOvr).map(([k, v]) => [k, avg(v)])));
-console.log('\n[리그별 시즌 기록]');
+console.log('\n[포지션별 초기 OVR / 최고 OVR 평균]', Object.fromEntries(POS.map((p) => [p, `${avg(initOvr[p] || [])} -> ${avg(posPeakOvr[p] || [])}`])));
+console.log('\n[나이별 평균 OVR 곡선]', ageOvrSummary);
+console.log('\n[성장 DNA별 장기 커리어 분포]');
+console.table(dnaTable);
+console.log('[내구성 유형별 커리어·부상 비교]');
+console.table(durabilityTable);
+console.log('[부상 등급별 결장 경기 수]');
+console.table(injuryTierSummary);
+console.log('[리그별 시즌 기록]');
 console.table(leagueTable);
-console.log('[실제 결승 · 전술별 승률 / 선수 득점]');
+console.log('[실제 결승 · 전술별 승률 / 선수 득점 / 야투율]');
 console.table(
   Object.fromEntries(
-    TACTICS.map((t) => [t, { '승률%': metrics.realFinalsWinPct[t], 선수득점: metrics.realFinalsPlayerPts[t] }])
+    TACTICS.map((t) => [
+      t,
+      {
+        '승률%': metrics.realFinalsWinPct[t],
+        선수득점: metrics.realFinalsPlayerPts[t],
+        '야투%': metrics.realFinalsPlayerFgPct[t],
+      },
+    ])
   )
 );
 console.log('[동일 전력 결승 · 선수 등급 × 전술 승률%]');
@@ -568,6 +781,7 @@ console.log(JSON.stringify(metrics, null, 2));
 // ───────────────────── 목표 범위 검사 ─────────────────────
 const BALANCE_TARGETS: [string, number, number, number][] = [
   ['오류 0', metrics.errors, 0, 0],
+  ['미완결 플레이오프 대진 0', metrics.unfinishedPlayoffBrackets, 0, 0],
   ['NBA 진출률(%)', metrics.nbaReachPct, 30, 55],
   ['NBA 진출자 중 올스타 경험(%)', metrics.nbaAllStarPctOfNba, 20, 65],
   ['NBA MVP 경험(%)', metrics.nbaMvpPct, 1, 12],

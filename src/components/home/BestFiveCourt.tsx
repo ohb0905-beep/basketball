@@ -348,7 +348,7 @@ export function BestFiveCourt() {
                       >
                         {tier.title}
                       </span>
-                      <span className="block text-[12px] text-[var(--t-g500)] truncate">
+                      <span className="block text-[12px] text-[var(--t-g500)] leading-snug">
                         {tier.criteria}
                       </span>
                     </div>
