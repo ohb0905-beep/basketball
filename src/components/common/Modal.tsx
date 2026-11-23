@@ -266,8 +266,8 @@ export function CareerEventModal({
                     ? successChancePct !== null
                       ? `성공률 ${successChancePct}%`
                       : '도전'
-                    : choice.riskTier === 'BALANCED'
-                    ? '트레이드오프'
+                    : costUsd > 0
+                    ? '자금 투자'
                     : '확정';
 
                   const metaColor = isLockedByReq
@@ -276,7 +276,7 @@ export function CareerEventModal({
                     ? 'text-[var(--t-accent-ink)]'
                     : choice.riskTier === 'HIGH_RISK' || choice.successCheck
                     ? 'text-[var(--t-accent-ink)]'
-                    : choice.riskTier === 'BALANCED'
+                    : costUsd > 0
                     ? 'text-[var(--t-gold)]'
                     : 'text-[var(--t-ok)]';
 

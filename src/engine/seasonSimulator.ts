@@ -939,7 +939,10 @@ export function calculatePpg(
   const diff = attackStat - ldr;
   const offEdge =
     (diff >= 0
-      ? Math.max(0.28, 1.0 + diff / 33)
+      ? Math.max(
+          0.28,
+          1.0 + (diff <= 11 ? diff / 35 : 11 / 35 + (diff - 11) / 85)
+        )
       : Math.max(0.28, 1.0 + diff / 26)) * traitMultiplier;
 
   const rawPpg = (mpg / 36) * basePer36 * offEdge + (rng() * 1.8 - 0.9);
@@ -1296,12 +1299,23 @@ export function evaluateFluidSeasonAwards(params: {
       ? Math.max(...sameLeagueRivals.map((r) => r.ppg + r.rpg * 0.72 + r.apg * 0.9))
       : 0;
 
+  const eliteLeagueAllStarPremium =
+    career.league === 'NBA'
+      ? 7.8
+      : career.league === 'EUROLEAGUE'
+      ? 4.0
+      : career.league === 'KBL' || career.league === 'B_LEAGUE'
+      ? 2.5
+      : career.league === 'NBL' || career.league === 'GLEAGUE'
+      ? 2.2
+      : 0;
+
   const dynamicAllStarBar = Math.max(
     22.0,
-    (21.5 + ldrScale * 9.5) * seasonPaceFactor
+    (21.5 + ldrScale * 9.5 + eliteLeagueAllStarPremium) * seasonPaceFactor
   );
   const dynamicMvpBar = Math.max(
-    dynamicAllStarBar + 6.5,
+    dynamicAllStarBar + 5.5,
     (29.5 + ldrScale * 11.8) * seasonPaceFactor,
     topRivalImpact * 0.96
   );

@@ -1491,15 +1491,6 @@ const STAT_KO_LABEL: Record<keyof PlayerStats, string> = {
   phy: '피지컬(PHY)',
 };
 
-const OPPOSITE_STAT: Record<keyof PlayerStats, keyof PlayerStats> = {
-  ins: 'phy',
-  out: 'def',
-  ply: 'ins',
-  def: 'out',
-  reb: 'ply',
-  phy: 'out',
-};
-
 function getPrimaryStatKey(stats?: Partial<PlayerStats>): keyof PlayerStats {
   if (!stats) return 'ins';
   let bestKey: keyof PlayerStats = 'ins';
@@ -1933,11 +1924,10 @@ const CHAIN_FOLLOWUPS: Record<
 function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoice[] {
   const c1Primary = getPrimaryStatKey(s.c1Stats);
   const c2Primary = getPrimaryStatKey(s.c2Stats);
-  const c1TradeoffStat = OPPOSITE_STAT[c1Primary];
   const isProScenario = PRO_ONLY_CODES.has(s.code);
   const chainEntry = CHAIN_FOLLOWUPS[s.code];
 
-  // 선택지 1: 안정형 또는 트레이드오프형 (100% 확정 결과, 과도한 공짜 버프 대신 명확한 방향성/소폭 트레이드오프)
+  // 선택지 1: 안정 확정형 (100% 확정 결과, 모든 인카운터 일관 구조)
   const c1StatsBalanced: Partial<PlayerStats> = {};
   const c1Keys = Object.keys(s.c1Stats || {}) as (keyof PlayerStats)[];
   if (c1Keys.length >= 2) {
@@ -1946,22 +1936,18 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
   } else {
     c1StatsBalanced[c1Primary] = 2;
   }
-  const hasC1Tradeoff = s.code.endsWith('02') || s.code.endsWith('04') || s.code.endsWith('06');
-  if (hasC1Tradeoff && !c1StatsBalanced[c1TradeoffStat]) {
-    c1StatsBalanced[c1TradeoffStat] = -1;
-  }
 
   const c1StatParts = (Object.keys(c1StatsBalanced) as (keyof PlayerStats)[]).map(
-    (k) => `${k.toUpperCase()} ${(c1StatsBalanced[k] ?? 0) > 0 ? `+${c1StatsBalanced[k]}` : c1StatsBalanced[k]}`
+    (k) => `${k.toUpperCase()} +${c1StatsBalanced[k]}`
   );
   const c1TrustAdj = Math.max(3, Math.min(8, s.c1Trust));
   const c1DraftAdj = Math.max(1, Math.min(4, s.c1Draft));
 
-  const safeOrTradeoffChoice: CareerEventChoice = {
+  const safeChoice: CareerEventChoice = {
     label: s.c1Label,
     description: s.c1Desc,
-    riskTier: hasC1Tradeoff ? 'BALANCED' : 'SAFE',
-    effectSummary: `${hasC1Tradeoff ? '트레이드오프 확정' : '안정 확정'} · ${c1StatParts.join(', ')} · 신뢰도 +${c1TrustAdj}`,
+    riskTier: 'SAFE',
+    effectSummary: `안정 확정 · ${c1StatParts.join(', ')} · 신뢰도 +${c1TrustAdj}`,
     statChanges: c1StatsBalanced,
     trustDelta: c1TrustAdj,
     draftStockDelta: c1DraftAdj,
@@ -2017,14 +2003,14 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
     draftStockDelta: c2SuccessDraft,
   };
 
-  const choices: CareerEventChoice[] = [safeOrTradeoffChoice, highRiskChoice];
+  const choices: CareerEventChoice[] = [safeChoice, highRiskChoice];
 
   // 일부 핵심 프로/특훈 시나리오에는 자금 투자형 및 능력치·특성·관계도 전용 3번째 선택지 추가
   if (isProScenario && (s.category === 'LOAD_MANAGEMENT' || s.category === 'OFF_COURT_BRAND')) {
     choices.push({
       label: '사비를 투자해 전문 컨설턴트·트레이너를 개인 초빙한다 (-$15K)',
       description: '보유 현금을 과감히 투자해 리스크 없이 피지컬과 기량 보너스를 확보합니다.',
-      riskTier: 'BALANCED',
+      riskTier: 'SAFE',
       cashDelta: -15000,
       effectSummary: '가용 자산 -$15K · PHY +2 · 감독 신뢰 +6 확정',
       statChanges: { phy: 2, [c1Primary]: 1 },
@@ -2131,7 +2117,7 @@ export function calculateEncounterSuccessChance(
 }
 
 /**
- * 인카운터 선택지 결과를 확률 판정 및 트레이드오프에 따라 결정적으로 해석합니다.
+ * 인카운터 선택지 결과를 확률 판정 및 안정 확정 분기에 따라 결정적으로 해석합니다.
  */
 export function resolveEncounterChoiceOutcome(
   career: CareerState,

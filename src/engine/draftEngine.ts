@@ -844,7 +844,8 @@ export function evaluateTwoWaySurvival(
 }
 
 /**
- * 오프시즌 계약 중 트레이드 요청 승인 확률 계산 (draftEngine UI 표시 & useCareerStore 협상 판정 단일 진실 소스)
+ * 오프시즌 계약 중 트레이드 승인 확률 계산
+ * (draftEngine UI 표시 & useCareerStore 협상 판정 단일 진실 소스)
  */
 export function calculateOffseasonTradeAcceptProb(
   career: Pick<
@@ -857,6 +858,7 @@ export function calculateOffseasonTradeAcceptProb(
   const trCfg = DRAFT_SCOUTING_CONFIG.trade;
   const scoutingInterestBonus = clampNum((scoutingScore - 68) * 0.0045, -0.08, 0.1);
   const contenderDifficulty = targetTeam.direction === 'CONTENDER' ? -0.05 : 0.02;
+
   const prob =
     trCfg.baseAcceptanceProb +
     (career.brokenRolePromise ? trCfg.brokenPromiseBonus : 0) +
@@ -1047,9 +1049,9 @@ export function generateOffseasonOptions(
       }
     }
 
-    // 4) 해외 프로/G리그 직행: 5성 고교 유망주에게 NBL Next Stars / B.리그 / G리그 중 스카우팅 적합도 최상위 구단 오퍼 발생
+    // 4) 해외 프로/G리그 직행: 5성 고교 유망주에게 B.리그 / NBL / G리그 중 스카우팅 적합도 최상위 구단 오퍼 발생
     if (prospect.stars === 5) {
-      const directCandidates = [...nblTeams, ...bLeagueTeams, ...gleagueTeams]
+      const directCandidates = [...bLeagueTeams, ...nblTeams, ...gleagueTeams]
         .map((team) => ({
           team,
           scout: evaluateTeamScouting(career, team, rng),
@@ -1073,10 +1075,7 @@ export function generateOffseasonOptions(
         options.push({
           id: `OPT_ROUTE_D_${pickedDirect.id}`,
           title: `${pickedDirect.name} 영입 오퍼`,
-          subtitle:
-            pickedDirect.league === 'NBL'
-              ? '호주 NBL Next Stars 유망주 직행 프로그램 공식 제안입니다.'
-              : `${LEAGUE_CONFIG[pickedDirect.league].shortName} 구단 스카우트의 프로 직행 제안입니다.`,
+          subtitle: `${LEAGUE_CONFIG[pickedDirect.league].shortName} 구단 스카우트의 프로 직행 제안입니다.`,
           badgeText: `${LEAGUE_CONFIG[pickedDirect.league].shortName} 직행`,
           targetLeague: pickedDirect.league,
           targetTeam: pickedDirect,
@@ -1377,7 +1376,7 @@ export function generateOffseasonOptions(
       });
     }
   } else if (career.contractYearsLeft === 0 && !isOutOfLeague) {
-    // 2) 계약 만료(FA) 상태: 원소속팀 재계약 심사 (프랜차이즈의 심장 특성 및 직전 시즌 핵심 실적 우대)
+    // 2) 계약 만료(FA) 상태: 원소속팀 재계약 심사 (프랜차이즈 심장 우대)
     const currentTeamEval = evaluateTeamScouting(career, career.team, rng);
     const hasFranchiseHeart = (career.traits || []).includes('FRANCHISE_HEART');
 
@@ -1397,6 +1396,13 @@ export function generateOffseasonOptions(
         secondaryPos: career.secondaryPos,
         rng,
       });
+      const resignYears =
+        career.age >= 35
+          ? 1
+          : career.age >= 33 && currentTeamEval.promisedRole === 'VETERAN_MENTOR'
+          ? 1
+          : 3;
+
       options.push({
         id: 'OPT_RESIGN_CURRENT_TEAM',
         title: `${career.team.name} 재계약 오퍼`,
@@ -1405,13 +1411,7 @@ export function generateOffseasonOptions(
         targetLeague: career.league,
         targetTeam: career.team,
         contractType: currentTeamEval.recommendedContract,
-        contractYears:
-          career.age >= 35
-            ? 1
-            : career.age >= 33 &&
-              currentTeamEval.promisedRole === 'VETERAN_MENTOR'
-            ? 1
-            : 3,
+        contractYears: resignYears,
         annualSalary: sal,
         scoutingScore: currentTeamEval.scoutingScore,
         promisedRole: currentTeamEval.promisedRole,
@@ -1468,6 +1468,8 @@ export function generateOffseasonOptions(
         secondaryPos: career.secondaryPos,
         rng,
       });
+      const faYears = career.age >= 34 ? 1 : 2;
+
       options.push({
         id: `OPT_FA_OFFER_${item.team.id}`,
         title: `${item.team.name} FA 오퍼`,
@@ -1476,7 +1478,7 @@ export function generateOffseasonOptions(
         targetLeague: item.team.league,
         targetTeam: item.team,
         contractType: item.eval.recommendedContract,
-        contractYears: career.age >= 34 ? 1 : 2,
+        contractYears: faYears,
         annualSalary: sal,
         scoutingScore: item.eval.scoutingScore,
         promisedRole: item.eval.promisedRole,

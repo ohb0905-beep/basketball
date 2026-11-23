@@ -48,8 +48,23 @@ console.warn = (...a: unknown[]) => {
 
 const { useCareerStore } = await import('../src/store/useCareerStore');
 const PE = await import('../src/engine/playoffEngine');
+const SIM = await import('../src/engine/seasonSimulator');
+const STAT = await import('../src/engine/statCalculator');
+const TEAMS = await import('../src/data/teams');
 const { LEAGUE_CONFIG } = await import('../src/data/leagues');
 const S = () => useCareerStore.getState();
+
+const ALL_LEAGUES = [
+  'HIGH_SCHOOL',
+  'U_LEAGUE',
+  'NCAA',
+  'KBL',
+  'B_LEAGUE',
+  'NBL',
+  'EUROLEAGUE',
+  'GLEAGUE',
+  'NBA',
+] as const;
 
 const POS = ['PG', 'SG', 'SF', 'PF', 'C'] as const;
 const HEIGHT: Record<string, number> = { PG: 185, SG: 192, SF: 199, PF: 204, C: 211 };
@@ -227,6 +242,264 @@ for (const sn of leagueSnaps) {
   }
 }
 
+// ───────────────────── 4) 9개 리그 자체 20년 판도 시뮬레이션 (리그당 100시즌) ─────────────────────
+const parityRng = mulberry32(SEED ^ 0x51a7b3);
+const parityTable: Record<string, any> = {};
+const parityMetrics: Record<
+  string,
+  {
+    uniqueChamps: number;
+    maxChampPct: number;
+    maxFinalsPct: number;
+    bottomHalfChampPct: number;
+    consecFinalsPct: number;
+    topChamp: string;
+    topPair: string;
+  }
+> = {};
+
+for (const lg of ALL_LEAGUES) {
+  const teams = TEAMS.getTeamsByLeague(lg);
+  const sortedInit = [...teams].sort((a, b) => b.rating - a.rating);
+  const bottomHalfIds = new Set(
+    sortedInit.slice(Math.floor(sortedInit.length / 2)).map((t) => t.id)
+  );
+  const champCounts: Record<string, number> = {};
+  const finalsTeamCounts: Record<string, number> = {};
+  const finalsPairCounts: Record<string, number> = {};
+  let consecFinals = 0;
+  let bottomHalfChamps = 0;
+  let totalSeasons = 0;
+
+  for (let run = 0; run < 5; run++) {
+    let ratingsMap = TEAMS.createInitialTeamRatingsMap();
+    let prevPair = '';
+    for (let yr = 0; yr < 20; yr++) {
+      if (yr > 0) ratingsMap = TEAMS.evolveLeagueTeamRatings(ratingsMap, parityRng);
+      const totalG = LEAGUE_CONFIG[lg].games;
+      const ghostCareer: any = {
+        id: 'PARITY',
+        name: 'NPC',
+        age: 22,
+        seasonYear: 2025 + yr,
+        seasonsPlayed: yr,
+        heightCm: 192,
+        primaryPos: 'SG',
+        secondaryPos: null,
+        jerseyNumber: 7,
+        playstyle: 'ALL_ROUNDER',
+        growthDna: 'BALANCED',
+        traits: [],
+        league: lg,
+        team: { ...sortedInit[0], id: 'GHOST_OBSERVER', rating: 50 },
+        teamRatingsMap: ratingsMap,
+        ovr: LEAGUE_CONFIG[lg].ldr,
+        peakOvr: 70,
+        ovrHistory: [70],
+        potential: 75,
+        stats: {
+          ins: LEAGUE_CONFIG[lg].ldr,
+          out: LEAGUE_CONFIG[lg].ldr,
+          ply: LEAGUE_CONFIG[lg].ldr,
+          def: LEAGUE_CONFIG[lg].ldr,
+          reb: LEAGUE_CONFIG[lg].ldr,
+          phy: LEAGUE_CONFIG[lg].ldr,
+        },
+        role: '주전',
+        coachTrust: 50,
+        draftStock: 50,
+        contractType: 'STANDARD',
+        contractYearsLeft: 1,
+        annualSalary: 50000,
+        cashBalance: 50000,
+        activePersonalCare: [],
+        militaryExempt: true,
+        militaryServiceSeasonsLeft: 0,
+        previousTeamBeforeMilitary: null,
+        seasonLogs: [],
+        milestones: [],
+        badges: [],
+        rivals: [],
+        internationalHistory: [],
+        totals: {
+          games: 0,
+          points: 0,
+          rebounds: 0,
+          assists: 0,
+          steals: 0,
+          blocks: 0,
+          championships: 0,
+          nbaChampionships: 0,
+          mvps: 0,
+          finalsMvps: 0,
+          allStars: 0,
+          allLeagueTeams: 0,
+        },
+        careerHighs: { points: 0, pointsContext: '', rebounds: 0, assists: 0, steals: 0, blocks: 0 },
+        seasonPhase: 'REGULAR_SEASON',
+        offseasonLocked: false,
+        offseasonOptions: [],
+        pendingEvent: null,
+      };
+      const rawStandings = PE.generateLeagueStandings(ghostCareer, 1, totalG - 1, parityRng);
+      const realStandings = rawStandings.filter((s) => s.team.id !== 'GHOST_OBSERVER');
+      const carrierTeam = realStandings[0].team;
+      const neutralCareer = { ...ghostCareer, team: carrierTeam };
+      const standingsWithCarrier = realStandings.map((s) => ({
+        ...s,
+        isPlayerTeam: s.team.id === carrierTeam.id,
+      }));
+      let bracket = PE.createPlayoffBracket(neutralCareer, standingsWithCarrier, parityRng);
+      bracket = {
+        ...bracket,
+        rounds: bracket.rounds.map((r) => r.map((s) => ({ ...s, involvesPlayer: false }))),
+      };
+      const finished = PE.skipEntirePlayoffs(bracket, neutralCareer, standingsWithCarrier, parityRng);
+      if (!finished.championTeamId) continue;
+      totalSeasons++;
+      const champTeam = teams.find((t) => t.id === finished.championTeamId);
+      const champName = champTeam?.shortName || finished.championTeamId;
+      champCounts[champName] = (champCounts[champName] || 0) + 1;
+      if (bottomHalfIds.has(finished.championTeamId)) bottomHalfChamps++;
+
+      const finalsSeries = (finished.rounds[finished.rounds.length - 1] || [])[0];
+      let pairKey = 'NONE';
+      if (finalsSeries) {
+        const a = finalsSeries.higherSeed.team.shortName;
+        const b = finalsSeries.lowerSeed.team.shortName;
+        finalsTeamCounts[a] = (finalsTeamCounts[a] || 0) + 1;
+        finalsTeamCounts[b] = (finalsTeamCounts[b] || 0) + 1;
+        pairKey = [a, b].sort().join(' vs ');
+      }
+      finalsPairCounts[pairKey] = (finalsPairCounts[pairKey] || 0) + 1;
+      if (yr > 0 && pairKey === prevPair) consecFinals++;
+      prevPair = pairKey;
+    }
+  }
+
+  const topChampEntry = Object.entries(champCounts).sort((a, b) => b[1] - a[1])[0] ?? ['-', 0];
+  const topFinalsEntry = Object.entries(finalsTeamCounts).sort((a, b) => b[1] - a[1])[0] ?? ['-', 0];
+  const topPairEntry = Object.entries(finalsPairCounts).sort((a, b) => b[1] - a[1])[0] ?? ['-', 0];
+  const pm = {
+    uniqueChamps: Object.keys(champCounts).length,
+    maxChampPct: pct(topChampEntry[1], totalSeasons),
+    maxFinalsPct: pct(topFinalsEntry[1], totalSeasons),
+    bottomHalfChampPct: pct(bottomHalfChamps, totalSeasons),
+    consecFinalsPct: pct(consecFinals, Math.max(1, totalSeasons - 5)),
+    topChamp: `${topChampEntry[0]}(${topChampEntry[1]}%)`,
+    topPair: `${topPairEntry[0]}(${topPairEntry[1]}%)`,
+  };
+  parityMetrics[lg] = pm;
+  parityTable[lg] = {
+    우승팀종류: `${pm.uniqueChamps}/${teams.length}`,
+    '최다결승%': pm.maxFinalsPct,
+    '최다우승%': pm.maxChampPct,
+    '하위50%우승%': pm.bottomHalfChampPct,
+    '연속동일결승%': pm.consecFinalsPct,
+    최다우승: pm.topChamp,
+    최다매치업: pm.topPair,
+  };
+}
+
+// ───────────────────── 5) 리그별 등급(평균/스타/슈퍼) MVP · 파이널 MVP 정합성 검증 ─────────────────────
+const fmvpRng = mulberry32(SEED ^ 0x9e3779b9);
+const fmvpCheckTable: Record<string, any> = {};
+const fmvpCheckMetrics: Record<string, { avgLiveFmvp: number; starLiveFmvp: number; avgLivePts: number; starSimFmvp: number }> = {};
+for (const lg of ['KBL', 'EUROLEAGUE', 'NBA'] as const) {
+  const ldr = LEAGUE_CONFIG[lg].ldr;
+  const teams = TEAMS.getTeamsByLeague(lg);
+  const sorted = [...teams].sort((a, b) => b.rating - a.rating);
+  const midTeam = sorted[Math.floor(sorted.length * 0.35)];
+  const oppTeam = sorted[0].id === midTeam.id ? sorted[1] : sorted[0];
+  const ratingsMap = TEAMS.createInitialTeamRatingsMap();
+  const tierRes: Record<string, { liveFmvp: number; simFmvp: number; livePts: number; mvp: number }> = {};
+
+  for (const [label, delta] of [['평균', 0], ['스타', 6], ['슈퍼', 12]] as const) {
+    const v = Math.min(97, ldr + delta);
+    const stats = { ins: v, out: v, ply: v, def: v, reb: v, phy: v };
+    const ovr = STAT.calculateOvr(stats, 'SG', 193);
+    let mvp = 0, simFmvp = 0, liveWins = 0, liveFmvp = 0, ptsSum = 0;
+    const N = 40;
+    for (let i = 0; i < N; i++) {
+      const c: any = {
+        id: 'F',
+        name: '테스트',
+        age: 25,
+        seasonYear: 2027,
+        seasonsPlayed: 5,
+        heightCm: 193,
+        primaryPos: 'SG',
+        secondaryPos: null,
+        jerseyNumber: 7,
+        playstyle: 'ALL_ROUNDER',
+        growthDna: 'BALANCED',
+        traits: [],
+        trainingFocus: 'BALANCED',
+        league: lg,
+        team: midTeam,
+        teamRatingsMap: ratingsMap,
+        ovr,
+        peakOvr: ovr,
+        ovrHistory: [ovr],
+        potential: Math.min(99, ovr + 4),
+        stats,
+        role: delta >= 6 ? '에이스' : '주전',
+        coachTrust: 75,
+        draftStock: 75,
+        contractType: 'STANDARD',
+        contractYearsLeft: 2,
+        annualSalary: 1000000,
+        cashBalance: 500000,
+        activePersonalCare: [],
+        militaryExempt: true,
+        militaryServiceSeasonsLeft: 0,
+        previousTeamBeforeMilitary: null,
+        seasonLogs: [],
+        milestones: [],
+        badges: [],
+        rivals: [],
+        internationalHistory: [],
+        totals: { games:0, points:0, rebounds:0, assists:0, steals:0, blocks:0, championships:0, nbaChampionships:0, mvps:0, finalsMvps:0, allStars:0, allLeagueTeams:0 },
+        careerHighs: { points:0, pointsContext:'', rebounds:0, assists:0, steals:0, blocks:0 },
+        seasonPhase: 'REGULAR_SEASON',
+        offseasonLocked: false,
+        offseasonOptions: [],
+        pendingEvent: null,
+      };
+      const sim = SIM.simulateSeason(c, fmvpRng);
+      if (sim.boxScore.wonMvp) mvp++;
+      const cLog = { ...c, seasonLogs: [sim.boxScore] };
+      if (PE.evaluateRealisticFinalsMvp(cLog, true)) simFmvp++;
+      const live = PE.createLiveFinalGame(cLog, oppTeam, 'LEAGUE_FINALS');
+      const done = PE.skipLiveGameToEnd(live, cLog, fmvpRng);
+      ptsSum += done.playerStats.pts;
+      if (done.finalOutcome?.won) {
+        liveWins++;
+        if (done.finalOutcome.wonFinalsMvp) liveFmvp++;
+      }
+    }
+    tierRes[label] = {
+      mvp: pct(mvp, N),
+      simFmvp: pct(simFmvp, N),
+      liveFmvp: pct(liveFmvp, liveWins),
+      livePts: +(ptsSum / N).toFixed(1),
+    };
+  }
+  fmvpCheckMetrics[lg] = {
+    avgLiveFmvp: tierRes['평균'].liveFmvp,
+    starLiveFmvp: tierRes['스타'].liveFmvp,
+    avgLivePts: tierRes['평균'].livePts,
+    starSimFmvp: tierRes['스타'].simFmvp,
+  };
+  fmvpCheckTable[lg] = {
+    '평균_라이브득점': tierRes['평균'].livePts,
+    '평균_FMVP(시뮬/라이브%)': `${tierRes['평균'].simFmvp}/${tierRes['평균'].liveFmvp}`,
+    '스타_FMVP(시뮬/라이브%)': `${tierRes['스타'].simFmvp}/${tierRes['스타'].liveFmvp}`,
+    '슈퍼_MVP%': tierRes['슈퍼'].mvp,
+    '슈퍼_FMVP(시뮬/라이브%)': `${tierRes['슈퍼'].simFmvp}/${tierRes['슈퍼'].liveFmvp}`,
+  };
+}
+
 // ───────────────────── 출력 ─────────────────────
 const metrics = {
   careers: CAREERS,
@@ -235,6 +508,8 @@ const metrics = {
   nbaAllStarPctOfNba: pct(nbaAllStarCareers, nbaCareers),
   nbaMvpPct: pct(nbaMvpCareers, CAREERS),
   nbaPpg: byLeague.NBA ? avg(byLeague.NBA.ppg) : 0,
+  kblPpg: byLeague.KBL ? avg(byLeague.KBL.ppg) : 0,
+  kblMvpPct: byLeague.KBL ? pct(byLeague.KBL.mvp, byLeague.KBL.n) : 0,
   peakOvrP50: q(peaks, 0.5),
   peakOvrP90: q(peaks, 0.9),
   amateurMvpPct: pct(amateurSeasons.filter((l) => l.wonMvp).length, amateurSeasons.length),
@@ -254,6 +529,12 @@ const metrics = {
       return [tier, +(Math.max(...ws) - Math.min(...ws)).toFixed(1)];
     })
   ),
+  nbaParityMaxFinalsPct: parityMetrics.NBA.maxFinalsPct,
+  nbaParityBottomHalfChampPct: parityMetrics.NBA.bottomHalfChampPct,
+  nbaParityConsecFinalsPct: parityMetrics.NBA.consecFinalsPct,
+  kblParityMaxChampPct: parityMetrics.KBL.maxChampPct,
+  nbaAvgLiveFmvpPct: fmvpCheckMetrics.NBA.avgLiveFmvp,
+  nbaStarLiveFmvpPct: fmvpCheckMetrics.NBA.starLiveFmvp,
 };
 
 console.log(`\n== 시드 ${SEED} · 커리어 ${CAREERS}회 · 결승 스냅샷 ${snaps.length}개`);
@@ -277,6 +558,10 @@ console.table(
     ])
   )
 );
+console.log('[9개 리그 자체 20년 판도 (리그당 100시즌)]');
+console.table(parityTable);
+console.log('[주요 프로리그 등급별 정규 MVP · 파이널 MVP 정합성]');
+console.table(fmvpCheckTable);
 console.log('[요약 지표]');
 console.log(JSON.stringify(metrics, null, 2));
 
@@ -288,11 +573,21 @@ const BALANCE_TARGETS: [string, number, number, number][] = [
   ['NBA MVP 경험(%)', metrics.nbaMvpPct, 1, 12],
   ['최고 OVR 중앙값', metrics.peakOvrP50, 80, 87],
   ['고교·대학 MVP 수상률(%)', metrics.amateurMvpPct, 10, 30],
+  ['KBL 평균 PPG', metrics.kblPpg, 19, 26],
+  ['프로 26+ PPG 시즌 비율(%)', metrics.proPpg26PlusPct, 0, 42],
   ['초기 OVR 포지션 격차', metrics.initOvrSpread, 0, 2.5],
+  ['라이브 결승 에이스 모드 평균 득점', metrics.realFinalsPlayerPts.ACE_HERO, 24, 38],
+  ['라이브 결승 이타적 조율 평균 득점', metrics.realFinalsPlayerPts.UNSELFISH_PASS, 18, 28],
   ['동일 전력 하위 승률(%)', metrics.equalTeamWinPct['하위'], 25, 48],
   ['동일 전력 평균 승률(%)', metrics.equalTeamWinPct['평균'], 45, 60],
   ['동일 전력 엘리트 승률(%)', metrics.equalTeamWinPct['엘리트'], 60, 80],
   ['평균 선수 전술 승률 격차(%p)', metrics.equalTeamTacticSpread['평균'], 0, 10],
+  ['NBA 최다 결승 진출팀 점유율(%)', metrics.nbaParityMaxFinalsPct, 0, 26],
+  ['NBA 초기 하위50% 팀 우승 비율(%)', metrics.nbaParityBottomHalfChampPct, 20, 55],
+  ['NBA 연속 동일 결승 비율(%)', metrics.nbaParityConsecFinalsPct, 0, 8],
+  ['KBL 최다 우승팀 점유율(%)', metrics.kblParityMaxChampPct, 0, 24],
+  ['NBA 평균 주전 라이브 FMVP(%)', metrics.nbaAvgLiveFmvpPct, 10, 55],
+  ['NBA 스타급 라이브 FMVP(%)', metrics.nbaStarLiveFmvpPct, 65, 100],
 ];
 let failed = 0;
 console.log('\n[목표 범위 검사]');

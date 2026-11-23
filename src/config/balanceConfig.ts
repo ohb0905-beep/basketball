@@ -139,6 +139,9 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
   },
 };
 
+/**
+ * 프로 트레이드 시스템 허용 여부 (아마추어 및 상무 복무 제외 모든 프로 리그 허용)
+ */
 export function canUseProTradeSystem(params: {
   league: LeagueId;
   contractType?: ContractType;
@@ -338,7 +341,7 @@ export const LIVE_GAME_CONFIG = {
   clutchMaxPointGap: 4, // 실제 ±4점 이내 접전일 때만 클러치 마지막 1포제션 자연 발동
   maxOvertimePeriods: 3, // 최대 3차 연장(3OT)
   // [대칭 보정] 선수 기여도는 리그 평균 선수(스탯 = LDR) 기대 기여도 대비 차이로 반영
-  playerImpactWeight: 0.65, // 공격 기여도(평균 대비) → 팀 쿼터 득점 환산 계수
+  playerImpactWeight: 0.8, // 공격 기여도(평균 대비) → 팀 쿼터 득점 환산 계수
   defImpactWeight: 0.6, // 수비 기여도(평균 대비) → 상대 쿼터 득점 억제 계수
   replacementStaminaFactor: 0.95, // 리그 평균 선수의 기준 체력 효율 (이보다 지치면 손해)
   fouledOutLiftPenalty: 1.5, // 5/6반칙 퇴장 후 쿼터당 공격 손실
@@ -360,7 +363,7 @@ export const LIVE_GAME_CONFIG = {
     LOCKDOWN_DEFENSE: {
       usageMult: 0.86,
       fgBonus: 0.01,
-      defBonus: 1.8,
+      defBonus: 1.45,
       astBonus: 0.95,
       staminaDrain: 22,
       foulRisk: 0.42,
@@ -376,9 +379,9 @@ export const LIVE_GAME_CONFIG = {
       label: '이타적 조율 (팀플레이)',
     },
     PACE_CONSERVE: {
-      usageMult: 0.74,
+      usageMult: 0.78,
       fgBonus: 0.03,
-      defBonus: 1.0,
+      defBonus: 1.15,
       astBonus: 0.9,
       staminaDrain: 8,
       foulRisk: 0.1,
@@ -459,24 +462,24 @@ export const ROLE_MPG_CONFIG = {
     PG: { base: 43.5, stretchBigBase: 43.5, min: 32.0, max: 54.0 },
   },
   ppg: {
-    softCapStart: 26.0,
-    softCapSlope: 0.48,
+    softCapStart: 22.8,
+    softCapSlope: 0.35,
     minPpg: 1.2,
-    maxPpg: 34.5,
+    maxPpg: 32.5,
   },
 };
 
 export const AWARD_VOTING_CONFIG = {
   // MVP 레이스 NPC 스타의 리그별 득점 보정 (주인공이 리그 LDR 대비 얼마나 앞서 출발하는지 반영)
   npcMvpPpgOffsetByLeague: {
-    HIGH_SCHOOL: 6.5,
+    HIGH_SCHOOL: 6.0,
     U_LEAGUE: 6.5,
     NCAA: 2.0,
-    KBL: 5.0,
-    B_LEAGUE: 2.0,
+    KBL: 7.5,
+    B_LEAGUE: 3.5,
     NBL: 1.0,
     EUROLEAGUE: 0,
-    GLEAGUE: 3.0,
+    GLEAGUE: 5.0,
     NBA: -4.0,
   } as Record<LeagueId, number>,
   npcMvpPoolSize: 9, // 라이벌 외 9명의 리그 스타 후보 생성 (총 10~12명 풀에서 공정한 TOP 5 선발)

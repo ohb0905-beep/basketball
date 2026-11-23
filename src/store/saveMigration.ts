@@ -71,6 +71,12 @@ export function migrateLegacyContractType(
     if (league === 'NBL') return 'NBL_CONTRACT';
     return 'BLEAGUE_CONTRACT';
   }
+  if (contractType === 'NBA_SUPERMAX') {
+    return 'NBA_MAX';
+  }
+  if (contractType === 'NBL_NEXT_STARS') {
+    return 'NBL_CONTRACT';
+  }
   return (contractType as ContractType) || 'AMATEUR';
 }
 
@@ -185,17 +191,23 @@ export function normalizeCareerSave(
     career.seasonPhase === 'OFFSEASON' &&
     !career.retirementReason;
 
-  // 구 세이브의 세부 지표 / 진화형 배지 필드는 안전하게 제거
+  // 구 세이브의 세부 지표 / 진화형 배지 / 롤백된 특수 계약 필드는 안전하게 제거
   const rawCareer = career as CareerState & Record<string, unknown>;
   const {
     secondaryMetrics: _legacySecondary,
     tieredBadges: _legacyTieredBadges,
     badgeTrackers: _legacyTrackers,
+    hasNbaOutClause: _legacyNbaOut,
+    buyoutFeeUsd: _legacyBuyout,
+    isRookieScaleContract: _legacyRookieScale,
     ...cleanCareerRest
   } = rawCareer;
   void _legacySecondary;
   void _legacyTieredBadges;
   void _legacyTrackers;
+  void _legacyNbaOut;
+  void _legacyBuyout;
+  void _legacyRookieScale;
 
   const normalizedTeam = normalizeTeamInfo(career.team);
   const migratedLeague = migrateLegacyLeagueId(career.league, normalizedTeam.id);
@@ -286,29 +298,56 @@ export function normalizeCareerSave(
       ...rival,
       league: migrateLegacyLeagueId(rival.league, rival.teamId),
     })),
-    offseasonOptions: (career.offseasonOptions || []).map((opt) => {
-      const normalizedTargetTeam = opt.targetTeam
-        ? normalizeTeamInfo(opt.targetTeam)
-        : opt.targetTeam;
-      const optLeague: LeagueId = opt.targetLeague
-        ? migrateLegacyLeagueId(opt.targetLeague, normalizedTargetTeam?.id)
-        : normalizedTargetTeam?.league || migratedLeague;
-      const optContract = opt.contractType
-        ? migrateLegacyContractType(opt.contractType, optLeague)
-        : opt.contractType;
-      return {
-        ...opt,
-        title: opt.title
-          .replace(/\[5성 슈퍼 유망주 특별 오퍼\]\s*/g, '')
-          .replace(
-            /\s*\((독수리|호랑이|청룡|사자|황소|코끼리|불사조|백마|곰|천마|불곰|상무 농구단)\)/g,
-            ''
-          ),
-        targetLeague: optLeague,
-        contractType: optContract,
-        targetTeam: normalizedTargetTeam,
-      };
-    }),
+    offseasonOptions: (career.offseasonOptions || [])
+      .filter((opt) => (opt.actionType as string) !== 'EXERCISE_NBA_OUT')
+      .map((opt) => {
+        const rawOpt = opt as typeof opt & Record<string, unknown>;
+        const {
+          buyoutTotalUsd: _o1,
+          nbaTeamContributionUsd: _o2,
+          playerBuyoutCostUsd: _o3,
+          isRfaOfferSheet: _o4,
+          isSupermaxOffer: _o5,
+          includesNbaOutClause: _o6,
+          isNextStarsProgram: _o7,
+          ...cleanOpt
+        } = rawOpt;
+        void _o1;
+        void _o2;
+        void _o3;
+        void _o4;
+        void _o5;
+        void _o6;
+        void _o7;
+
+        const normalizedTargetTeam = opt.targetTeam
+          ? normalizeTeamInfo(opt.targetTeam)
+          : opt.targetTeam;
+        const optLeague: LeagueId = opt.targetLeague
+          ? migrateLegacyLeagueId(opt.targetLeague, normalizedTargetTeam?.id)
+          : normalizedTargetTeam?.league || migratedLeague;
+        const optContract = opt.contractType
+          ? migrateLegacyContractType(opt.contractType, optLeague)
+          : opt.contractType;
+        const rawAction = opt.actionType as string;
+        const normalizedActionType =
+          rawAction === 'REQUEST_BUYOUT' || rawAction === 'REQUEST_MUTUAL_RELEASE'
+            ? 'REQUEST_TRADE'
+            : opt.actionType;
+        return {
+          ...(cleanOpt as typeof opt),
+          actionType: normalizedActionType,
+          title: opt.title
+            .replace(/\[5성 슈퍼 유망주 특별 오퍼\]\s*/g, '')
+            .replace(
+              /\s*\((독수리|호랑이|청룡|사자|황소|코끼리|불사조|백마|곰|천마|불곰|상무 농구단)\)/g,
+              ''
+            ),
+          targetLeague: optLeague,
+          contractType: optContract,
+          targetTeam: normalizedTargetTeam,
+        };
+      }),
     seasonLogs: (career.seasonLogs || []).map((log) => {
       const logLeague = migrateLegacyLeagueId(log.league, log.teamId);
       const wasLegacyOverseas = (log.league as string) === 'OVERSEAS';

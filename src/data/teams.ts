@@ -3204,24 +3204,54 @@ export function createInitialTeamRatingsMap(): Record<string, number> {
 }
 
 /**
- * 매 오프시즌 구단 전력 동적 변동
- * - 강팀(CONTENDER)이 인공적인 평균 회귀 때문에 1년 만에 중하위권으로 추락하지 않도록 완만한 세대교체 곡선 적용
+ * 매 오프시즌 구단 전력 동적 변동 (현실형 세대교체 사이클)
+ * - 구단의 태초 고정 레이팅이 아닌 '해당 리그 평균'을 기준으로 완만히 순환해
+ *   2~4년 왕조 유지 후 자연 하락(샐러리캡·노쇠화)과 하위권 드래프트 반등이 모두 일어나도록 설계
  */
 export function evolveLeagueTeamRatings(
   currentMap: Record<string, number>,
   rng: () => number = Math.random
 ): Record<string, number> {
   const nextMap: Record<string, number> = { ...currentMap };
+
+  // 리그별 기준 평균 레이팅 계산 (군팀 제외)
+  const leagueSum: Partial<Record<LeagueId, number>> = {};
+  const leagueCnt: Partial<Record<LeagueId, number>> = {};
+  for (const t of ALL_TEAMS) {
+    if (t.isMilitaryTeam) continue;
+    leagueSum[t.league] = (leagueSum[t.league] ?? 0) + t.rating;
+    leagueCnt[t.league] = (leagueCnt[t.league] ?? 0) + 1;
+  }
+
   for (const t of ALL_TEAMS) {
     if (t.isMilitaryTeam) {
       nextMap[t.id] = t.rating;
       continue;
     }
     const cur = currentMap[t.id] ?? t.rating;
-    // -2 ~ +2 사이의 완만한 변동으로 강팀이 2~4년간 왕조 전력을 유지할 수 있게 보장
-    const delta = Math.floor(rng() * 5) - 2;
-    const meanReversion =
-      cur > t.rating + 5 ? -1 : cur < t.rating - 5 ? 1 : 0;
+    const leagueMean =
+      (leagueSum[t.league] ?? t.rating) / Math.max(1, leagueCnt[t.league] ?? 1);
+    const gapFromMean = cur - leagueMean;
+
+    // 연도별 기본 변동 (-3 ~ +3) + 오프시즌 빅 무브(드래프트 대박·에이스 영입/이탈) 14% 확률
+    let delta = Math.floor(rng() * 7) - 3;
+    if (rng() < 0.14) {
+      delta += rng() < 0.5 ? 2 : -2;
+    }
+
+    // 세대교체 순환 압력: 최상위 왕조(평균 +4 이상)는 노쇠화·샐러리캡 압력,
+    // 하위 리빌딩 팀(평균 -3 이하)은 상위 드래프트 픽 반등 보정
+    let cycleShift = 0;
+    if (gapFromMean >= 6.5) {
+      cycleShift = rng() < 0.72 ? -2 : -1;
+    } else if (gapFromMean >= 4.0) {
+      cycleShift = rng() < 0.58 ? -1 : 0;
+    } else if (gapFromMean <= -5.5) {
+      cycleShift = rng() < 0.72 ? 2 : 1;
+    } else if (gapFromMean <= -3.0) {
+      cycleShift = rng() < 0.58 ? 1 : 0;
+    }
+
     const minR =
       t.league === 'NBA'
         ? 75
@@ -3236,7 +3266,7 @@ export function evolveLeagueTeamRatings(
         : 56;
     const maxR =
       t.league === 'NBA'
-        ? 95
+        ? 94
         : t.league === 'EUROLEAGUE'
         ? 89
         : t.league === 'NBL'
@@ -3244,11 +3274,11 @@ export function evolveLeagueTeamRatings(
         : t.league === 'B_LEAGUE'
         ? 82
         : t.league === 'KBL'
-        ? 84
+        ? 83
         : 86;
     nextMap[t.id] = Math.max(
       minR,
-      Math.min(maxR, cur + delta + meanReversion)
+      Math.min(maxR, Math.round(cur + delta + cycleShift))
     );
   }
   return nextMap;

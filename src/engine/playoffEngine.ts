@@ -121,18 +121,18 @@ export function generateLeagueStandings(
 
     const directionMod =
       team.direction === 'CONTENDER'
-        ? 0.055
+        ? 0.022
         : team.direction === 'REBUILDING'
-        ? -0.055
+        ? -0.022
         : 0;
-    // 플레이어 팀 승률 기대치 공식과 정확히 동일한 기준선(leagueMeanRating) 적용
+    // 플레이어 팀 승률 기대치 공식과 동일한 기준선(leagueMeanRating) 적용 + 현실적 시즌 변동폭(±8%)
     const expectedWinPct = clamp(
       0.5 +
-        (dynamicRating - leagueMeanRating) * 0.022 +
+        (dynamicRating - leagueMeanRating) * 0.021 +
         directionMod +
-        (rng() - 0.5) * 0.1,
+        (rng() - 0.5) * 0.16,
       0.16,
-      0.86
+      0.84
     );
     const wins = clamp(
       Math.round(totalGames * expectedWinPct),
@@ -1203,13 +1203,13 @@ function simulateSingleSeries(
 
   const hiEffective =
     series.higherSeed.team.rating +
-    1.5 +
+    1.0 +
     (series.higherSeed.team.id === career.team.id ? playerBonus : 0);
   const loEffective =
     series.lowerSeed.team.rating +
     (series.lowerSeed.team.id === career.team.id ? playerBonus : 0);
 
-  const hiWinProb = clamp(0.5 + (hiEffective - loEffective) * 0.032, 0.2, 0.82);
+  const hiWinProb = clamp(0.5 + (hiEffective - loEffective) * 0.024, 0.24, 0.78);
 
   let hiWins = series.higherSeedWins;
   let loWins = series.lowerSeedWins;
@@ -1347,7 +1347,7 @@ export function evaluateRealisticFinalsMvp(
       finalsGameScore * clamp(0.7 + minuteShareFactor * 0.3, 0.7, 1.05) +
       teamGapAdjust -
       strainPenalty;
-    const teamAceGameBenchmark = Math.max(19.5, (teamRating - 62) * 0.9);
+    const teamAceGameBenchmark = Math.max(31.0, 27.5 + (teamRating - 62) * 1.12);
     return effectiveGameImpact >= teamAceGameBenchmark;
   }
 
@@ -1361,7 +1361,7 @@ export function evaluateRealisticFinalsMvp(
     seasonImpact * clamp(0.65 + minuteShareFactor * 0.35, 0.65, 1.05) +
     teamGapAdjust -
     strainPenalty;
-  const teamAceSeasonBenchmark = Math.max(18.5, (teamRating - 56) * 0.86);
+  const teamAceSeasonBenchmark = Math.max(22.0, 14.0 + (teamRating - 58) * 0.76);
 
   return effectiveSeasonImpact >= teamAceSeasonBenchmark;
 }
@@ -3140,7 +3140,7 @@ export function getReplacementLevelQuarterImpact(
   minutesFactor: number,
   isOvertime: boolean
 ): { lift: number; stocks: number } {
-  const fga = (isOvertime ? 2.6 : 4.8) * minutesFactor * (0.84 + (2 * ldr) / 225);
+  const fga = (isOvertime ? 1.8 : 3.25) * minutesFactor * (0.76 + (2 * ldr) / 280);
   const fgProb =
     clamp(0.44, 0.24, 0.72) * LIVE_GAME_CONFIG.replacementStaminaFactor;
   const threeShare = ldr >= 56 ? clamp((ldr - 42) / 105, 0.12, 0.55) : 0;
@@ -3148,7 +3148,7 @@ export function getReplacementLevelQuarterImpact(
   const ftProb = clamp(0.62 + (ldr - 50) * 0.006, 0.55, 0.93);
   const ftPts = 0.28 * minutesFactor * 2 * ftProb;
   const ast =
-    (0.7 + (ldr / 100) * 2.7) * minutesFactor * (isOvertime ? 0.55 : 1.0);
+    (0.4 + (ldr / 100) * 1.85) * minutesFactor * (isOvertime ? 0.55 : 1.0);
   const stocks =
     clamp((ldr / 100) * 0.42 * minutesFactor, 0.03, 0.62) +
     clamp((ldr / 100) * 0.36 * minutesFactor, 0.02, 0.52);
@@ -3237,13 +3237,13 @@ export function simulateLiveQuarter(
   let nextStamina = curStamina;
 
   if (!isAlreadyFouledOut) {
-    const baseFga = (isOvertime ? 2.6 : 4.8) * roleMinutesFactor * foulTroubleMinutesMult;
+    const baseFga = (isOvertime ? 1.8 : 3.25) * roleMinutesFactor * foulTroubleMinutesMult;
     qFga = Math.max(
       seasonMpg < 12 ? 0 : 1,
       Math.round(
         baseFga *
           mod.usageMult *
-          (0.84 + (stats.ins + stats.out) / 225) *
+          (0.76 + (stats.ins + stats.out) / 280) *
           (0.85 + rng() * 0.3)
       )
     );
@@ -3296,7 +3296,7 @@ export function simulateLiveQuarter(
     qReb = Math.max(
       0,
       Math.round(
-        (1.0 + (stats.reb / 100) * 3.1) *
+        (0.55 + (stats.reb / 100) * 2.15) *
           roleMinutesFactor *
           foulTroubleMinutesMult *
           mismatch.rebMultiplier *
@@ -3307,7 +3307,7 @@ export function simulateLiveQuarter(
     qAst = Math.max(
       0,
       Math.round(
-        (0.7 + (stats.ply / 100) * 2.7) *
+        (0.4 + (stats.ply / 100) * 1.85) *
           roleMinutesFactor *
           foulTroubleMinutesMult *
           mod.astBonus *

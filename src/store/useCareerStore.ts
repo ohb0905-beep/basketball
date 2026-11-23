@@ -1607,7 +1607,7 @@ export const useCareerStore = create<CareerStoreState>()(
         );
         if (pool.length === 0) return;
 
-        // 연속 트레이드 승인 확률 산출 (역할 약속 위반/높은 OVR 레버리지/낮은 신뢰도 반영)
+        // 연속 승인 확률 산출 (역할 약속 위반/높은 OVR 레버리지/낮은 신뢰도 반영)
         const trCfg = DRAFT_SCOUTING_CONFIG.trade;
         const acceptProb = clampNum(
           trCfg.baseAcceptanceProb +
@@ -1629,7 +1629,7 @@ export const useCareerStore = create<CareerStoreState>()(
               id: `TOAST_${Date.now()}`,
               title: '구단 프런트가 트레이드 요청을 반려했습니다',
               description:
-                '현재 계약 조건과 타 구단 매물 상황이 맞지 않아 이적이 보류되었습니다.',
+                '현재 계약 조건과 타 구단 매물 상황이 맞지 않아 트레이드가 보류되었습니다.',
               tone: 'amber',
             },
           });
@@ -2677,7 +2677,7 @@ export const useCareerStore = create<CareerStoreState>()(
                 year: career.seasonYear,
                 age: career.age,
                 title: `트레이드 데드라인 이적: ${pickedContender.name}`,
-                description: `${oldTeamName} 프런트와의 협상 끝에 ${pickedContender.name}로 트레이드 이적했습니다 (${ROLE_PROMISE_LABELS[nextPromisedRole]}).`,
+                description: `${oldTeamName} 프런트와의 협상 끝에 ${pickedContender.name}로 이적했습니다 (${ROLE_PROMISE_LABELS[nextPromisedRole]}).`,
                 type: 'SPECIAL',
                 teamName: pickedContender.name,
               });
@@ -2687,7 +2687,7 @@ export const useCareerStore = create<CareerStoreState>()(
                 successChancePct: acceptPct,
                 rolledSuccess: true,
                 outcomeTier: 'SUCCESS',
-                narrative: `구단 간 트레이드 패키지가 타결되었습니다. ${oldTeamName}을 떠나 ${pickedContender.name}에 합류하며 새 팀에서 ${ROLE_PROMISE_LABELS[nextPromisedRole]} 역할을 맡게 됩니다.`,
+                narrative: `구단 간 트레이드 협상이 타결되었습니다. ${oldTeamName}을 떠나 ${pickedContender.name}에 합류하며 새 팀에서 ${ROLE_PROMISE_LABELS[nextPromisedRole]} 역할을 맡게 됩니다.`,
                 trustDelta: nextTrust - career.coachTrust,
               };
             }
@@ -3156,7 +3156,7 @@ export const useCareerStore = create<CareerStoreState>()(
           getTeamById(rawNextTeam.id, career.teamRatingsMap) || rawNextTeam;
         const nextLeague = option.targetLeague;
 
-        // 오프시즌 계약 중 트레이드 요청: 구단 단장 심사 · 반려 판정 적용 (무조건 100% 자가 이적 폐지)
+        // 오프시즌 계약 중 트레이드 요청 협상 판정
         if (option.actionType === 'REQUEST_TRADE' && option.targetTeam) {
           if (career.tradeRequestedThisYear) {
             get().showToast(
@@ -3202,7 +3202,7 @@ export const useCareerStore = create<CareerStoreState>()(
               },
               toast: {
                 id: `TOAST_${Date.now()}`,
-                title: `${career.team.shortName} 프런트가 트레이드 요청을 반려했습니다`,
+                title: `${career.team.shortName} 구단이 트레이드 요청을 반려했습니다`,
                 description: `${nextTeam.shortName}와의 패키지 협상이 결렬되었습니다. 소속팀 잔류 탭에서 기존 계약을 이어가세요.`,
                 tone: 'amber',
               },
@@ -3283,6 +3283,21 @@ export const useCareerStore = create<CareerStoreState>()(
           });
         }
 
+        const toastTitle = isTeamChanged
+          ? `${nextTeam.name} ${
+              option.actionType === 'REQUEST_TRADE'
+                ? '트레이드 이적 완료'
+                : '계약 체결'
+            }`
+          : isExistingContractStay && career.contractYearsLeft > 0
+          ? `${nextTeam.name} 기존 계약 유지 · 새 시즌 개막`
+          : `${nextTeam.name} 새 시즌 준비 완료`;
+
+        const toastDescription =
+          isExistingContractStay && career.contractYearsLeft > 0
+            ? `잔여 계약 ${career.contractYearsLeft}년 · ${ROLE_PROMISE_LABELS[nextPromisedRole]}`
+            : `약속 역할: ${ROLE_PROMISE_LABELS[nextPromisedRole]}`;
+
         set({
           career: {
             ...career,
@@ -3318,16 +3333,8 @@ export const useCareerStore = create<CareerStoreState>()(
           },
           toast: {
             id: `TOAST_${Date.now()}`,
-            title: isTeamChanged
-              ? `${nextTeam.name} ${
-                  option.actionType === 'REQUEST_TRADE' ? '트레이드 이적 완료' : '계약 체결'
-                }`
-              : isExistingContractStay && career.contractYearsLeft > 0
-              ? `${nextTeam.name} 기존 계약 유지 · 새 시즌 개막`
-              : `${nextTeam.name} 새 시즌 준비 완료`,
-            description: isExistingContractStay && career.contractYearsLeft > 0
-              ? `잔여 계약 ${career.contractYearsLeft}년 · ${ROLE_PROMISE_LABELS[nextPromisedRole]}`
-              : `약속 역할: ${ROLE_PROMISE_LABELS[nextPromisedRole]}`,
+            title: toastTitle,
+            description: toastDescription,
             tone: 'orange',
           },
         });

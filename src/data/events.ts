@@ -565,7 +565,7 @@ export function rollMidSeasonCrossroadsEvent(
   career: CareerState,
   rng: () => number = Math.random
 ): CareerEvent {
-  const canTriggerTradeRumor = canUseProTradeSystem({
+  const isPro = canUseProTradeSystem({
     league: career.league,
     contractType: career.contractType,
     isMilitaryTeam: career.team.isMilitaryTeam,
@@ -586,7 +586,7 @@ export function rollMidSeasonCrossroadsEvent(
     seasonsOnTeam >= rumorCfg.minSeasonsOnTeam;
 
   let tradeRumorChance = 0;
-  if (canTriggerTradeRumor && passesTradeCooldown && passesTeamTenure) {
+  if (isPro && passesTradeCooldown && passesTeamTenure) {
     if (career.brokenRolePromise) {
       tradeRumorChance = rumorCfg.brokenPromiseProb;
     } else if (career.team.direction === 'REBUILDING') {
@@ -602,19 +602,19 @@ export function rollMidSeasonCrossroadsEvent(
     }
   }
 
-  // 시나리오 1: 트레이드 데드라인 루머 (희귀 발동 · 쿨다운 & 최소 재적 연수 충족 시에만)
+  // 시나리오 1: 트레이드 데드라인 영입 타진 루머
   if (tradeRumorChance > 0 && rng() < tradeRumorChance) {
     return {
       id: `EVT_MID_TRADE_DEADLINE_${career.seasonYear}`,
       title: '트레이드 데드라인 영입 타진 루머',
       subtitle: '정규시즌 반환점 · 잔류 vs 구단 트레이드 협상',
       description: career.brokenRolePromise
-        ? `계약 당시 약속받은 출전 시간이 지켜지지 않자 타 구단들이 트레이드 데드라인을 앞두고 영입을 타진하고 있습니다.`
+        ? `계약 당시 약속받은 출전 시간이 지켜지지 않자 타 구단들이 데드라인을 앞두고 영입을 타진하고 있습니다.`
         : `${career.team.shortName}에서의 시즌이 길어지며 타 구단 단장들이 트레이드 문의를 넣어오고 있습니다. 잔류할지 프런트에 트레이드 협상을 요청할지 결정하세요.`,
       category: 'MID_SEASON_CROSSROADS',
       choices: [
         {
-          label: '이적 루머 일축 · 소속팀 잔류 선언',
+          label: '트레이드 루머 일축 · 소속팀 잔류 선언',
           description: '라커룸 분위기를 다잡고 현재 동료들과 시즌을 완주합니다.',
           riskTier: 'SAFE',
           effectSummary: '안정 확정 · 감독 신뢰도 +8 · INS +1, DEF +1',
@@ -699,7 +699,7 @@ export function rollMidSeasonCrossroadsEvent(
         {
           label: '개인 스킬 트레이너와 약점 기술 집중 교정',
           description: '휴식 대신 슈팅 폼과 풋워크를 교정해 후반기 폭발력을 노립니다.',
-          riskTier: 'BALANCED',
+          riskTier: 'HIGH_RISK',
           effectSummary: '성공 시 INS +1, OUT +2, PLY +1 · 실패 시 피로 누적 PHY -1',
           successCheck: {
             statKey: 'phy',

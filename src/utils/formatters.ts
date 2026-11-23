@@ -55,12 +55,13 @@ export function formatSalaryOffer(
     }
     return '비계약 진로';
   }
+  const amountStr = formatCurrencyDetailed(amountUsd);
   if (isExisting) {
     const yearSuffix = years && years > 0 ? ` · 잔여 ${years}년` : '';
-    return `기존 계약 ${formatCurrencyDetailed(amountUsd)}${yearSuffix}`;
+    return `기존 계약 ${amountStr}${yearSuffix}`;
   }
   const yearSuffix = years && years > 0 ? ` · ${years}년` : '';
-  return `${formatCurrencyDetailed(amountUsd)}${yearSuffix}`;
+  return `${amountStr}${yearSuffix}`;
 }
 
 /**

@@ -19,6 +19,7 @@ import {
   getNationalTeamsForTournament,
   SANGMU_TEAM,
   ALL_TEAMS,
+  evolveLeagueTeamRatings,
 } from '../data/teams';
 import {
   PLAYER_TRAIT_META,
@@ -4704,6 +4705,341 @@ test('57. 국제대회 연도 정합성·아시안게임 증발 방지·입대 �
     '병역필'
   );
 });
+
+test('58. 리그 세대교체·결승 다양성, 라이브 결승 득점·FMVP 정합성, NBA 올스타 기준 검증', () => {
+  let s = 20261122;
+  const detRng = () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+
+  // 1) 구단 전력 세대교체: 초기 하위권 팀이 20년 내 상위권 반등 가능 & 초기 최강팀 영구 고착 해소
+  const sortedNba = [...NBA_TEAMS].sort((a, b) => b.rating - a.rating);
+  const topInitId = sortedNba[0].id;
+  const bottomInitIds = sortedNba.slice(-6).map((t) => t.id);
+  let bottomReachedContender = false;
+  let topDroppedBelowPeak = false;
+  for (let trial = 0; trial < 5; trial++) {
+    let map = buildInitialTeamRatingsMap();
+    for (let yr = 0; yr < 20; yr++) {
+      map = evolveLeagueTeamRatings(map, detRng);
+      if (map[topInitId] <= 86) topDroppedBelowPeak = true;
+      if (bottomInitIds.some((id) => map[id] >= 87)) {
+        bottomReachedContender = true;
+      }
+    }
+  }
+  assert.equal(
+    topDroppedBelowPeak,
+    true,
+    'Initial top NBA team must naturally experience generational decline over 20 seasons'
+  );
+  assert.equal(
+    bottomReachedContender,
+    true,
+    'Initial bottom-tier NBA teams must be able to rebuild into contenders over 20 seasons'
+  );
+
+  // 2) 라이브 결승 득점 정상화 & 평균 주전 FMVP 100% 싹쓸이 방지
+  const nbaMidTeam = sortedNba[10];
+  const nbaOppTeam = sortedNba[1];
+  const avgStarterStats = { ins: 84, out: 84, ply: 84, def: 84, reb: 84, phy: 84 };
+  const avgStarterOvr = calculateOvr(avgStarterStats, 'SG', 193);
+  const avgStarterCareer = createBaseCareer({
+    league: 'NBA',
+    team: nbaMidTeam,
+    ovr: avgStarterOvr,
+    stats: avgStarterStats,
+    role: '주전',
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        mpg: 30.0,
+        ppg: 16.5,
+        rpg: 5.0,
+        apg: 4.5,
+        spg: 1.1,
+        bpg: 0.5,
+      }),
+    ],
+  });
+  let totalLivePts = 0;
+  let liveWins = 0;
+  let liveFmvpWins = 0;
+  for (let i = 0; i < 30; i++) {
+    const live = createLiveFinalGame(avgStarterCareer, nbaOppTeam, 'LEAGUE_FINALS');
+    const done = skipLiveGameToEnd(live, avgStarterCareer, detRng);
+    totalLivePts += done.playerStats.pts;
+    if (done.finalOutcome?.won) {
+      liveWins++;
+      if (done.finalOutcome.wonFinalsMvp) liveFmvpWins++;
+    }
+  }
+  const avgLivePts = totalLivePts / 30;
+  assert.ok(
+    avgLivePts >= 14 && avgLivePts <= 29,
+    `Average NBA starter live Finals scoring should be realistic (14~29 pts), got ${avgLivePts.toFixed(1)}`
+  );
+  if (liveWins >= 5) {
+    assert.ok(
+      liveFmvpWins < liveWins,
+      `Average NBA starter should NOT win 100% of live Finals MVPs (${liveFmvpWins}/${liveWins})`
+    );
+  }
+
+  // 3) NBA 올스타 기준 현실화: 평균 14~15점 주전은 자동 올스타 불가, 24점+ 스타는 올스타 선정
+  const nbaAvgSim = simulateSeason(
+    createBaseCareer({
+      league: 'NBA',
+      team: nbaMidTeam,
+      ovr: 82,
+      stats: { ins: 82, out: 82, ply: 82, def: 82, reb: 80, phy: 82 },
+      role: '주전',
+      coachTrust: 70,
+    }),
+    () => 0.5
+  );
+  assert.equal(
+    nbaAvgSim.boxScore.allStarSelected,
+    false,
+    `Average NBA starter (${nbaAvgSim.boxScore.ppg} PPG) should not automatically make All-Star`
+  );
+
+  const nbaSuperSim = simulateSeason(
+    createBaseCareer({
+      league: 'NBA',
+      team: sortedNba[2],
+      ovr: 94,
+      stats: { ins: 94, out: 94, ply: 92, def: 90, reb: 86, phy: 92 },
+      role: '에이스',
+      coachTrust: 90,
+    }),
+    () => 0.5
+  );
+  assert.equal(
+    nbaSuperSim.boxScore.allStarSelected,
+    true,
+    `NBA superstar (${nbaSuperSim.boxScore.ppg} PPG) must be selected as All-Star`
+  );
+});
+
+test('59. 인카운터 트레이드오프 제거 유지, 단순 계약·트레이드 복원 및 구 특수 계약 세이브 자동 변환 검증', () => {
+  let seed = 20261123;
+  const detRng = () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+
+  // 1) 인카운터에서 BALANCED(트레이드오프) 선택지 및 강제 -1 능력치 페널티 제거 상태 유지 검증
+  const testCareerForEnc = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 23,
+    ovr: 84,
+    cashBalance: 5_000_000,
+    coachTrust: 75,
+    fame: 65,
+  });
+  for (let i = 0; i < 60; i++) {
+    const evt = rollCombinatorialEncounter(testCareerForEnc, detRng);
+    if (!evt) continue;
+    for (const ch of evt.choices) {
+      assert.notEqual(
+        ch.riskTier,
+        'BALANCED',
+        `Encounter ${evt.id} choice ${ch.id} must not use BALANCED (tradeoff) riskTier`
+      );
+      assert.equal(
+        ch.label.includes('트레이드오프'),
+        false,
+        `Encounter choice label must not contain '트레이드오프': ${ch.label}`
+      );
+    }
+    const c1 = evt.choices[0];
+    assert.equal(c1.riskTier, 'SAFE', 'First encounter choice must be SAFE');
+    const c1NegStats = Object.values(c1.statChanges || {}).filter(
+      (v) => typeof v === 'number' && v < 0
+    );
+    assert.equal(
+      c1NegStats.length,
+      0,
+      `First SAFE choice in ${evt.id} must not force opposite-stat -1 tradeoff`
+    );
+  }
+
+  // 2) 6개 프로 리그 전체(유로리그·NBL 포함) 단일 트레이드 허용, 아마추어·상무는 차단
+  assert.equal(canUseProTradeSystem({ league: 'NBA' }), true);
+  assert.equal(canUseProTradeSystem({ league: 'GLEAGUE' }), true);
+  assert.equal(canUseProTradeSystem({ league: 'KBL' }), true);
+  assert.equal(canUseProTradeSystem({ league: 'B_LEAGUE' }), true);
+  assert.equal(canUseProTradeSystem({ league: 'EUROLEAGUE' }), true);
+  assert.equal(canUseProTradeSystem({ league: 'NBL' }), true);
+  assert.equal(canUseProTradeSystem({ league: 'KBL', isMilitaryTeam: true }), false);
+  assert.equal(canUseProTradeSystem({ league: 'NCAA' }), false);
+
+  // 3) 유로리그·NBL 다년 계약 시에도 단순 REQUEST_TRADE 생성 + NBA 아웃/바이아웃/상호해지 없음
+  const euroCareer = createBaseCareer({
+    league: 'EUROLEAGUE',
+    team: EUROLEAGUE_TEAMS[0],
+    age: 24,
+    ovr: 81,
+    contractType: 'EUROLEAGUE_CONTRACT',
+    contractYearsLeft: 2,
+    annualSalary: 1_800_000,
+    coachTrust: 70,
+  });
+  const euroOpts = generateOffseasonOptions(euroCareer, detRng);
+  assert.ok(
+    euroOpts.filter((o) => o.actionType === 'REQUEST_TRADE').length > 0,
+    'EuroLeague active multi-year contract must use unified REQUEST_TRADE options'
+  );
+  assert.equal(
+    euroOpts.some((o) => (o.actionType as string) === 'EXERCISE_NBA_OUT'),
+    false,
+    'Rolled-back contract system must not emit EXERCISE_NBA_OUT'
+  );
+
+  const euroMidEvent = rollMidSeasonCrossroadsEvent(
+    { ...euroCareer, coachTrust: 65, role: '주전', brokenRolePromise: true, seasonsOnCurrentTeam: 2 },
+    () => 0.01
+  );
+  assert.ok(
+    euroMidEvent.id.startsWith('EVT_MID_TRADE_DEADLINE_'),
+    `EuroLeague mid-season crossroads should use standard trade deadline event, got ${euroMidEvent.id}`
+  );
+
+  const nblCareer = createBaseCareer({
+    league: 'NBL',
+    team: NBL_TEAMS[0],
+    age: 22,
+    ovr: 76,
+    contractType: 'NBL_CONTRACT',
+    contractYearsLeft: 1,
+    annualSalary: 260_000,
+    coachTrust: 68,
+  });
+  const nblOpts = generateOffseasonOptions(nblCareer, detRng);
+  assert.ok(
+    nblOpts.filter((o) => o.actionType === 'REQUEST_TRADE').length > 0,
+    'NBL active multi-year contract must use unified REQUEST_TRADE options'
+  );
+
+  // 4) 고교 졸업생에게 NBL 넥스트 스타 미생성 & NBA 슈퍼스타 재계약도 기존 NBA_MAX로 복원
+  const eliteHsSenior = createBaseCareer({
+    league: 'HIGH_SCHOOL',
+    team: HIGH_SCHOOL_TEAMS[0],
+    age: 19,
+    contractYearsLeft: 0,
+    ovr: 68,
+    potential: 92,
+    stats: { ins: 68, out: 69, ply: 67, def: 66, reb: 65, phy: 70 },
+    seasonLogs: [
+      createSeasonLog({
+        league: 'HIGH_SCHOOL',
+        ppg: 26.5,
+        rpg: 7.5,
+        apg: 6.2,
+        awards: ['전국대회 MVP'],
+      }),
+    ],
+  });
+  const hsOpts = generateOffseasonOptions(eliteHsSenior, detRng);
+  assert.equal(
+    hsOpts.some((o) => (o.contractType as string) === 'NBL_NEXT_STARS'),
+    false,
+    'HS graduate options must not include rolled-back NBL_NEXT_STARS'
+  );
+
+  const nbaSuperCareer = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 27,
+    ovr: 93,
+    contractType: 'NBA_MAX',
+    contractYearsLeft: 0,
+    coachTrust: 88,
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        awards: ['All-NBA 1st Team'],
+        ppg: 28.5,
+      }),
+    ],
+  });
+  const superOpts = generateOffseasonOptions(nbaSuperCareer, detRng);
+  const resignOpt = superOpts.find((o) => o.id === 'OPT_RESIGN_CURRENT_TEAM');
+  assert.ok(resignOpt, 'NBA superstar must receive standard incumbent resign offer');
+  assert.equal(resignOpt.contractType, 'NBA_MAX');
+  assert.equal(resignOpt.contractYears, 3);
+
+  // 5) 구 특수 계약(NBA_SUPERMAX / NBL_NEXT_STARS / 바이아웃·NBA 아웃 옵션) 세이브 자동 변환 검증
+  const savedSupermax = {
+    career: {
+      ...createBaseCareer({
+        league: 'NBA',
+        team: NBA_TEAMS[1],
+        contractYearsLeft: 4,
+        ovr: 92,
+      }),
+      contractType: 'NBA_SUPERMAX' as unknown as CareerState['contractType'],
+      isRookieScaleContract: true,
+    } as unknown as CareerState,
+  };
+  const migratedSupermax = migratePersistedPayload(savedSupermax);
+  assert.equal(migratedSupermax.career?.contractType, 'NBA_MAX');
+  assert.equal(
+    'isRookieScaleContract' in ((migratedSupermax.career || {}) as Record<string, unknown>),
+    false
+  );
+
+  const savedNextStars = {
+    career: {
+      ...createBaseCareer({
+        league: 'NBL',
+        team: NBL_TEAMS[0],
+        contractYearsLeft: 1,
+        ovr: 72,
+      }),
+      contractType: 'NBL_NEXT_STARS' as unknown as CareerState['contractType'],
+      hasNbaOutClause: true,
+      buyoutFeeUsd: 500_000,
+      offseasonOptions: [
+        {
+          id: 'OPT_NBA_OUT_DRAFT',
+          title: 'NBA 아웃 조항 발동',
+          subtitle: '테스트',
+          badgeText: 'NBA 아웃',
+          targetLeague: 'NBA',
+          contractType: 'NBA_STANDARD',
+          contractYears: 4,
+          actionType: 'EXERCISE_NBA_OUT',
+        },
+        {
+          id: 'OPT_CONTRACT_REQUEST_BUYOUT_NBL_2',
+          title: '바이아웃 이적 타진',
+          subtitle: '테스트',
+          badgeText: '바이아웃',
+          targetLeague: 'NBL',
+          targetTeam: NBL_TEAMS[1],
+          contractType: 'NBL_NEXT_STARS',
+          contractYears: 1,
+          actionType: 'REQUEST_BUYOUT',
+        },
+      ],
+    } as unknown as CareerState,
+  };
+  const migratedNextStars = migratePersistedPayload(savedNextStars);
+  assert.equal(migratedNextStars.career?.contractType, 'NBL_CONTRACT');
+  assert.equal(
+    'hasNbaOutClause' in ((migratedNextStars.career || {}) as Record<string, unknown>),
+    false
+  );
+  assert.equal(migratedNextStars.career?.offseasonOptions.length, 1);
+  assert.equal(migratedNextStars.career?.offseasonOptions[0].actionType, 'REQUEST_TRADE');
+  assert.equal(migratedNextStars.career?.offseasonOptions[0].contractType, 'NBL_CONTRACT');
+});
+
+
 
 
 

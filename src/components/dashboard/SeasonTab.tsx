@@ -308,7 +308,8 @@ export function SeasonTab() {
   );
   const auxiliaryContractOptions = career.offseasonOptions.filter(
     (o) =>
-      o.id !== 'OPT_STAY_CURRENT_CONTRACT' && o.actionType !== 'REQUEST_TRADE'
+      o.id !== 'OPT_STAY_CURRENT_CONTRACT' &&
+      o.actionType !== 'REQUEST_TRADE'
   );
   const isUnderActiveProContract =
     isProLeague &&
@@ -706,7 +707,7 @@ export function SeasonTab() {
                 >
                   <p className="text-[12px] text-[var(--t-g600)] bg-[var(--t-g100)] rounded-2xl px-3.5 py-2.5 leading-relaxed">
                     {career.tradeRequestedThisYear
-                      ? '이번 오프시즌 트레이드 요청이 프런트에 의해 반려되었습니다. 현 소속팀 잔류 탭에서 기존 계약으로 시즌을 시작해 주세요.'
+                      ? '이번 오프시즌 트레이드 요청이 구단에 의해 반려되었습니다. 현 소속팀 잔류 탭에서 기존 계약으로 시즌을 시작해 주세요.'
                       : '원하는 행선지 구단을 선택해 프런트에 트레이드를 요청합니다. 구단 심사 결과에 따라 성사되거나 반려될 수 있습니다 (오프시즌 1회).'}
                   </p>
 
