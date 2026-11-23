@@ -21,9 +21,7 @@ export function HeroSection({ onRequestResetModal }: HeroSectionProps = {}) {
       <section className="t-card space-y-6">
         <div className="space-y-2">
           <h1 className="text-[28px] sm:text-[32px] font-bold tracking-[-0.03em] text-[var(--t-g900)] leading-[1.24] text-balance">
-            벤치 끝자락에서
-            <br />
-            <span className="text-[var(--t-accent)]">NBA MVP까지</span>
+            로드 투 <span className="text-[var(--t-accent)]">MVP</span>
           </h1>
           <p className="text-[14px] text-[var(--t-g600)] leading-relaxed">
             고교 신입생으로 시작해 드래프트와 파이널 우승, 영구결번에 도전하는 농구 커리어 시뮬레이션

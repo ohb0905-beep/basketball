@@ -780,7 +780,7 @@ export function SaveAndGuideModal({
     const a = document.createElement('a');
     const dateStamp = new Date().toISOString().slice(0, 10);
     a.href = url;
-    a.download = `bench-to-mvp-save-${dateStamp}.json`;
+    a.download = `road-to-mvp-save-${dateStamp}.json`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('백업 저장 완료', 'JSON 파일로 저장되었습니다.', 'emerald');

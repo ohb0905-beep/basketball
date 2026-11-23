@@ -152,7 +152,7 @@ export function Header({
           className="min-h-[44px] flex items-center text-left cursor-pointer min-w-0 t-tap"
         >
           <span className="font-bold tracking-[-0.03em] text-[17px] text-[var(--t-g900)] whitespace-nowrap truncate">
-            벤치에서 MVP까지
+            로드 투 MVP
           </span>
         </button>
 

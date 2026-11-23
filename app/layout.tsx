@@ -2,20 +2,20 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: '벤치에서 MVP까지 (From Bench to MVP)',
+  title: '로드 투 MVP',
   description:
-    '고교 농구 벤치 끝자리에서 시작해 대학, KBL, 해외 리그, G리그, NCAA를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 커리어 시뮬레이션',
+    '고교 신입생으로 시작해 대학, KBL, 해외 리그, G리그, NCAA를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 커리어 시뮬레이션',
   openGraph: {
-    title: '벤치에서 MVP까지 (From Bench to MVP)',
+    title: '로드 투 MVP',
     description:
-      '고교 농구 벤치 끝자리에서 시작해 대학, KBL, 해외 리그, G리그, NCAA를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 커리어 시뮬레이션',
+      '고교 신입생으로 시작해 대학, KBL, 해외 리그, G리그, NCAA를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 커리어 시뮬레이션',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: '벤치에서 MVP까지 (From Bench to MVP)',
+    title: '로드 투 MVP',
     description:
-      '고교 농구 벤치 끝자리에서 시작해 대학, KBL, 해외 리그, G리그, NCAA를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 커리어 시뮬레이션',
+      '고교 신입생으로 시작해 대학, KBL, 해외 리그, G리그, NCAA를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 커리어 시뮬레이션',
   },
 };
 

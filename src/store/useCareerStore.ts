@@ -824,7 +824,7 @@ export const useCareerStore = create<CareerStoreState>()(
           get();
         return JSON.stringify(
           {
-            app: 'bench-to-mvp',
+            app: 'road-to-mvp',
             version: 2,
             exportedAt: new Date().toISOString(),
             career,
