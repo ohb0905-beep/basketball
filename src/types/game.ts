@@ -749,6 +749,7 @@ export interface OffseasonOption {
     | 'RETIRE_VOLUNTARY'
     | 'START_FAREWELL_TOUR'
     | 'RETIRE_OUT_OF_LEAGUE'
+    | 'RETIRE_AGE_40'
     | 'RETURN_KBL_FAREWELL';
   isExistingContract?: boolean;
   tradeAcceptChancePct?: number;
@@ -1059,6 +1060,7 @@ export interface CareerState {
   draftPedigreePick?: number | null;
   draftPedigreeRound?: 1 | 2 | null;
   draftPedigreeSeasonsLeft?: number;
+  hasEnteredNbaDraft?: boolean;
   promisedRole?: RolePromiseType;
   brokenRolePromise?: boolean;
   role: string;

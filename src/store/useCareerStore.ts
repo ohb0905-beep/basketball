@@ -60,6 +60,7 @@ import {
   createInitialStoryArcs,
   getEffectiveRelationships,
   getEffectiveStoryArcs,
+  syncCareerRelationships,
 } from '../engine/progressionEngine';
 import { checkEncounterChoiceUnlock } from '../engine/storyArcEngine';
 import {
@@ -380,7 +381,6 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
   }
 
   const offseasonOptions = generateOffseasonOptions(settledBase);
-  const { isOutOfLeague } = checkRetirementEligibility(settledBase);
   const hasNoActiveOffers =
     offseasonOptions.length === 1 &&
     offseasonOptions[0].actionType === 'RETIRE_OUT_OF_LEAGUE';
@@ -397,7 +397,7 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
       veteranReinventionOffered:
         settledBase.veteranReinventionOffered ||
         rolledEvent?.id === 'EVT_VETERAN_REINVENTION',
-      isOutOfLeagueWarning: isOutOfLeague || hasNoActiveOffers,
+      isOutOfLeagueWarning: hasNoActiveOffers,
       offseasonOptions,
       pendingEvent: rolledEvent,
     },
@@ -539,7 +539,7 @@ function applyCompletedLiveGameOutcome(
       };
     }
 
-    const intlRel = applyRelationshipDelta(getEffectiveRelationships(career), {
+    const syncedIntl = syncCareerRelationships(career, {
       mediaFan: medal === 'GOLD' ? 10 : medal === 'SILVER' ? 7 : medal === 'BRONZE' ? 5 : 2,
       lockerRoom: 3,
     });
@@ -556,7 +556,8 @@ function applyCompletedLiveGameOutcome(
       ...nextCareer,
       militaryExempt: career.militaryExempt || earnedNewExemption,
       draftStock: Math.min(100, career.draftStock + stockGain),
-      relationships: intlRel,
+      coachTrust: syncedIntl.coachTrust,
+      relationships: syncedIntl.relationships,
       seasonLogs: logs,
       internationalHistory: [record, ...existingHistory],
       lastInternationalSummary: record,
@@ -1181,8 +1182,10 @@ export const useCareerStore = create<CareerStoreState>()(
         const switchCheck = canSwitchToPosition(
           career.primaryPos,
           newPos,
-          career.heightCm,
-          career.secondaryPos
+          {
+            heightCm: career.heightCm,
+            secondaryPos: career.secondaryPos,
+          }
         );
         if (!switchCheck.allowed) {
           get().showToast(
@@ -1277,13 +1280,15 @@ export const useCareerStore = create<CareerStoreState>()(
           secondaryPos: secPos,
         });
 
+        const syncedDual = syncCareerRelationships(career, undefined, 5);
         set({
           career: {
             ...career,
             secondaryPos: secPos,
             badges,
             role,
-            coachTrust: Math.min(100, career.coachTrust + 5),
+            coachTrust: syncedDual.coachTrust,
+            relationships: syncedDual.relationships,
             milestones: [
               ...career.milestones,
               {
@@ -1468,14 +1473,13 @@ export const useCareerStore = create<CareerStoreState>()(
 
         const meta = careMeta[careId];
         const nextCareIds = [...currentCare, careId];
-        const nextCareTrust = Math.min(100, career.coachTrust + meta.trustBoost);
-        const nextCareRelationships = applyRelationshipDelta(
-          getEffectiveRelationships(career),
+        const syncedCare = syncCareerRelationships(
+          career,
           {
             mediaFan: careId === 'SIGNATURE_SNEAKER_MARKETING' ? 6 : 0,
             frontOffice: careId === 'BIOMECH_SKILL_LAB' ? 3 : 0,
           },
-          nextCareTrust - career.coachTrust
+          meta.trustBoost
         );
         set({
           lastPersonalCareIds: nextCareIds,
@@ -1486,8 +1490,8 @@ export const useCareerStore = create<CareerStoreState>()(
             purchasedPersonalCareCount: (career.purchasedPersonalCareCount || 0) + 1,
             fanPopularity: (career.fanPopularity || 0) + meta.popBoost,
             draftStock: Math.min(100, career.draftStock + meta.stockBoost),
-            coachTrust: nextCareTrust,
-            relationships: nextCareRelationships,
+            coachTrust: syncedCare.coachTrust,
+            relationships: syncedCare.relationships,
             milestones: [
               ...career.milestones,
               {
@@ -1559,14 +1563,13 @@ export const useCareerStore = create<CareerStoreState>()(
         }
 
         const nextActive = [...currentCare, ...appliedNow];
-        const nextReapplyTrust = Math.min(100, career.coachTrust + trustBoost);
-        const nextReapplyRel = applyRelationshipDelta(
-          getEffectiveRelationships(career),
+        const syncedReapply = syncCareerRelationships(
+          career,
           {
             mediaFan: appliedNow.includes('SIGNATURE_SNEAKER_MARKETING') ? 6 : 0,
             frontOffice: appliedNow.includes('BIOMECH_SKILL_LAB') ? 3 : 0,
           },
-          nextReapplyTrust - career.coachTrust
+          trustBoost
         );
         set({
           lastPersonalCareIds: nextActive,
@@ -1578,8 +1581,8 @@ export const useCareerStore = create<CareerStoreState>()(
               (career.purchasedPersonalCareCount || 0) + appliedNow.length,
             fanPopularity: (career.fanPopularity || 0) + popBoost,
             draftStock: Math.min(100, career.draftStock + stockBoost),
-            coachTrust: nextReapplyTrust,
-            relationships: nextReapplyRel,
+            coachTrust: syncedReapply.coachTrust,
+            relationships: syncedReapply.relationships,
           },
           toast: {
             id: `TOAST_${Date.now()}`,
@@ -1631,11 +1634,21 @@ export const useCareerStore = create<CareerStoreState>()(
         );
 
         if (Math.random() >= acceptProb) {
+          const nextRejectedTrust = Math.max(
+            15,
+            career.coachTrust + trCfg.rejectedTrustPenalty
+          );
+          const syncedRejected = syncCareerRelationships(
+            career,
+            { frontOffice: -6 },
+            nextRejectedTrust - career.coachTrust
+          );
           set({
             career: {
               ...career,
               tradeRequestedThisYear: true,
-              coachTrust: Math.max(15, career.coachTrust + trCfg.rejectedTrustPenalty),
+              coachTrust: syncedRejected.coachTrust,
+              relationships: syncedRejected.relationships,
             },
             toast: {
               id: `TOAST_${Date.now()}`,
@@ -1669,13 +1682,19 @@ export const useCareerStore = create<CareerStoreState>()(
           coachTrust: nextTrust,
           promisedRole: promise.promisedRole,
         });
+        const syncedTrade = syncCareerRelationships(
+          career,
+          undefined,
+          nextTrust - career.coachTrust
+        );
 
         set({
           career: {
             ...career,
             team: target,
             seasonsOnCurrentTeam: 0,
-            coachTrust: nextTrust,
+            coachTrust: syncedTrade.coachTrust,
+            relationships: syncedTrade.relationships,
             promisedRole: promise.promisedRole,
             brokenRolePromise: false,
             tradeRequestedThisYear: true,
@@ -3114,6 +3133,10 @@ export const useCareerStore = create<CareerStoreState>()(
           get().triggerRetirement('VOLUNTARY_HONOR');
           return;
         }
+        if (option.actionType === 'RETIRE_AGE_40') {
+          get().triggerRetirement('AGE_40_MANDATORY');
+          return;
+        }
         if (option.actionType === 'RETIRE_OUT_OF_LEAGUE') {
           get().triggerRetirement('OUT_OF_LEAGUE');
           return;
@@ -3124,7 +3147,13 @@ export const useCareerStore = create<CareerStoreState>()(
             career: {
               ...career,
               isFarewellTour: true,
+              contractType: option.contractType ?? career.contractType,
               contractYearsLeft: 1,
+              annualSalary:
+                option.annualSalary !== undefined
+                  ? option.annualSalary
+                  : career.annualSalary,
+              isOutOfLeagueWarning: false,
               offseasonLocked: false,
               offseasonOptions: [],
               seasonPhase: 'REGULAR_SEASON',
@@ -3258,8 +3287,8 @@ export const useCareerStore = create<CareerStoreState>()(
               15,
               career.coachTrust + trCfg.rejectedTrustPenalty
             );
-            const nextRejectedRel = applyRelationshipDelta(
-              getEffectiveRelationships(career),
+            const syncedOffseasonReject = syncCareerRelationships(
+              career,
               { frontOffice: -6 },
               nextRejectedTrust - career.coachTrust
             );
@@ -3276,8 +3305,8 @@ export const useCareerStore = create<CareerStoreState>()(
               career: {
                 ...career,
                 tradeRequestedThisYear: true,
-                coachTrust: nextRejectedTrust,
-                relationships: nextRejectedRel,
+                coachTrust: syncedOffseasonReject.coachTrust,
+                relationships: syncedOffseasonReject.relationships,
                 offseasonOptions: lockedOptions,
               },
               toast: {
@@ -3402,6 +3431,10 @@ export const useCareerStore = create<CareerStoreState>()(
             tradeRequestedThisYear: false,
             rivals: nextRivals,
             coachTrust: nextTrust,
+            relationships: {
+              ...getEffectiveRelationships(career),
+              coachTrust: nextTrust,
+            },
             role,
             isOutOfLeagueWarning: false,
             offseasonLocked: false,
@@ -3488,10 +3521,12 @@ export const useCareerStore = create<CareerStoreState>()(
           newBonus
         );
 
+        const syncedInterview = syncCareerRelationships(career, undefined, 4);
         set({
           career: {
             ...career,
-            coachTrust: Math.min(100, career.coachTrust + 4),
+            coachTrust: syncedInterview.coachTrust,
+            relationships: syncedInterview.relationships,
             combineState: {
               ...career.combineState,
               interviewCompleted: true,
@@ -3566,6 +3601,7 @@ export const useCareerStore = create<CareerStoreState>()(
         set({
           career: {
             ...career,
+            hasEnteredNbaDraft: true,
             draftResult,
           },
           view: 'DRAFT_LIVE',
@@ -3726,6 +3762,12 @@ export const useCareerStore = create<CareerStoreState>()(
             tradeRequestedThisYear: false,
             rivals: nextRivals,
             coachTrust: nextInitialTrust,
+            relationships: {
+              ...getEffectiveRelationships(career),
+              coachTrust: nextInitialTrust,
+            },
+            hasEnteredNbaDraft:
+              career.hasEnteredNbaDraft || dr.draftType === 'NBA',
             role,
             combineState: null,
             draftResult: null,

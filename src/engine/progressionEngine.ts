@@ -5,10 +5,7 @@ import {
   StoryArcId,
   StoryArcState,
 } from '../types/game';
-
-function clamp(val: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, val));
-}
+import { clampNum } from '../config/balanceConfig';
 
 export const RELATIONSHIP_LABELS: Record<RelationshipAxis, string> = {
   coachTrust: '감독 신뢰도',
@@ -21,26 +18,48 @@ export function createInitialRelationships(
   coachTrust: number = 50,
   fanPopularity: number = 15
 ): RelationshipMetrics {
+  const safeCoachTrust = Number.isFinite(coachTrust) ? coachTrust : 50;
+  const safeFanPop = Number.isFinite(fanPopularity) ? fanPopularity : 15;
   return {
-    coachTrust: clamp(Math.round(coachTrust), 15, 100),
+    coachTrust: clampNum(Math.round(safeCoachTrust), 15, 100),
     lockerRoom: 54,
     frontOffice: 52,
-    mediaFan: clamp(Math.round(40 + fanPopularity * 0.4), 25, 95),
+    mediaFan: clampNum(Math.round(40 + safeFanPop * 0.4), 25, 95),
   };
 }
 
 export function getEffectiveRelationships(
   career: Pick<CareerState, 'relationships' | 'coachTrust' | 'fanPopularity'>
 ): RelationshipMetrics {
-  if (career.relationships) {
-    return {
-      coachTrust: clamp(Math.round(career.coachTrust), 15, 100),
-      lockerRoom: clamp(Math.round(career.relationships.lockerRoom), 15, 100),
-      frontOffice: clamp(Math.round(career.relationships.frontOffice), 15, 100),
-      mediaFan: clamp(Math.round(career.relationships.mediaFan), 15, 100),
-    };
+  const base = createInitialRelationships(
+    career.coachTrust,
+    career.fanPopularity || 15
+  );
+  if (!career.relationships) {
+    return base;
   }
-  return createInitialRelationships(career.coachTrust, career.fanPopularity || 15);
+  const rel = career.relationships;
+  const resolvedCoachTrust = Number.isFinite(career.coachTrust)
+    ? career.coachTrust
+    : Number.isFinite(rel.coachTrust)
+    ? rel.coachTrust
+    : base.coachTrust;
+  const resolvedLocker = Number.isFinite(rel.lockerRoom)
+    ? rel.lockerRoom
+    : base.lockerRoom;
+  const resolvedFront = Number.isFinite(rel.frontOffice)
+    ? rel.frontOffice
+    : base.frontOffice;
+  const resolvedMedia = Number.isFinite(rel.mediaFan)
+    ? rel.mediaFan
+    : base.mediaFan;
+
+  return {
+    coachTrust: clampNum(Math.round(resolvedCoachTrust), 15, 100),
+    lockerRoom: clampNum(Math.round(resolvedLocker), 15, 100),
+    frontOffice: clampNum(Math.round(resolvedFront), 15, 100),
+    mediaFan: clampNum(Math.round(resolvedMedia), 15, 100),
+  };
 }
 
 export function applyRelationshipDelta(
@@ -48,27 +67,47 @@ export function applyRelationshipDelta(
   delta?: Partial<RelationshipMetrics>,
   coachTrustDelta: number = 0
 ): RelationshipMetrics {
+  const baseCoach = Number.isFinite(current.coachTrust) ? current.coachTrust : 50;
+  const baseLocker = Number.isFinite(current.lockerRoom) ? current.lockerRoom : 54;
+  const baseFront = Number.isFinite(current.frontOffice) ? current.frontOffice : 52;
+  const baseMedia = Number.isFinite(current.mediaFan) ? current.mediaFan : 46;
   return {
-    coachTrust: clamp(
-      Math.round(current.coachTrust + (delta?.coachTrust ?? 0) + coachTrustDelta),
+    coachTrust: clampNum(
+      Math.round(baseCoach + (delta?.coachTrust ?? 0) + coachTrustDelta),
       15,
       100
     ),
-    lockerRoom: clamp(
-      Math.round(current.lockerRoom + (delta?.lockerRoom ?? 0)),
+    lockerRoom: clampNum(
+      Math.round(baseLocker + (delta?.lockerRoom ?? 0)),
       15,
       100
     ),
-    frontOffice: clamp(
-      Math.round(current.frontOffice + (delta?.frontOffice ?? 0)),
+    frontOffice: clampNum(
+      Math.round(baseFront + (delta?.frontOffice ?? 0)),
       15,
       100
     ),
-    mediaFan: clamp(
-      Math.round(current.mediaFan + (delta?.mediaFan ?? 0)),
+    mediaFan: clampNum(
+      Math.round(baseMedia + (delta?.mediaFan ?? 0)),
       15,
       100
     ),
+  };
+}
+
+/**
+ * career.coachTrust와 career.relationships.coachTrust의 단일 진실 원천 동기화 헬퍼
+ */
+export function syncCareerRelationships(
+  career: Pick<CareerState, 'relationships' | 'coachTrust' | 'fanPopularity'>,
+  delta?: Partial<RelationshipMetrics>,
+  coachTrustDelta: number = 0
+): { relationships: RelationshipMetrics; coachTrust: number } {
+  const current = getEffectiveRelationships(career);
+  const next = applyRelationshipDelta(current, delta, coachTrustDelta);
+  return {
+    relationships: next,
+    coachTrust: next.coachTrust,
   };
 }
 

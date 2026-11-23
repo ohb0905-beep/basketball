@@ -1,5 +1,12 @@
 import { getHeightModifiers, POSITION_ARCHETYPES } from '../data/archetypes';
 import {
+  ECONOMY_CONFIG,
+  GROWTH_DNA_CONFIG,
+  INITIAL_STAT_CREATION_CONFIG,
+  LEAGUE_BALANCE_META,
+  clampNum,
+} from '../config/balanceConfig';
+import {
   BiomechanicalProfile,
   CareerState,
   GrowthDna,
@@ -24,8 +31,7 @@ export function calculateBiomechanicalProfile(
   heightCm: number,
   pos: Position
 ): BiomechanicalProfile {
-  const clampVal = (v: number, min: number, max: number) =>
-    Math.max(min, Math.min(max, v));
+  const clampVal = clampNum;
 
   const [minH, maxH] = POSITION_ARCHETYPES[pos].recommendedHeightRange;
   const optCenterH = (minH + maxH) / 2;
@@ -130,13 +136,13 @@ export function calculateBiomechanicalProfile(
     ).toFixed(2)
   );
 
-  // 거구 선수의 풀코트 트랜지션 가감속 시 체력 소모 및 하체 부하 배율
+  // 거구 선수의 풀코트 트랜지션 가감속 시 체력 소모 및 하체 부하 배율 (항상 1.0 이상)
   const staminaDrainMultiplier = Number(
     clampVal(
       1.0 +
         Math.max(0, (heightCm - 200) / 35) * 0.28 +
         positionalPhysicsStrain * 0.32,
-      0.92,
+      1.0,
       1.65
     ).toFixed(2)
   );
@@ -164,7 +170,7 @@ export function getBiomechanicalGrowthElasticity(
   currentStats: PlayerStats
 ): PlayerStats {
   const bio = calculateBiomechanicalProfile(heightCm, pos);
-  const clampE = (v: number) => Number(Math.max(0.14, Math.min(1.18, v)).toFixed(3));
+  const clampE = (v: number) => Number(clampNum(v, 0.14, 1.18).toFixed(3));
 
   // 신장 기반 자연 평형점 (이 지점 위로는 신체 한계 극복에 훨씬 많은 노력이 필요하여 수확체감 발생)
   const insEquilibrium = 52 + bio.reachLeverage * 36;
@@ -196,13 +202,16 @@ export function getBiomechanicalGrowthElasticity(
 
 /**
  * 생체역학 평형 한계선 (연속 수확체감 적용 후 극단적 오버플로우만 완만하게 제어)
+ * - PHY 상한은 성장 탄력성(phyEquilibrium)과 일관되게 타점(reachLeverage 0.45) + 기민성(agility 0.55) 혼합식을 사용하며,
+ *   체력/물리 페널티는 극단적 포지션 미스매치(positionalPhysicsStrain)에만 한정 적용
  */
 export function getBiomechanicalStatCaps(
   heightCm: number,
   pos: Position
 ): PlayerStats {
   const bio = calculateBiomechanicalProfile(heightCm, pos);
-  const clampCap = (v: number) => Math.max(54, Math.min(99, Math.round(v)));
+  const clampCap = (v: number) => clampNum(Math.round(v), 54, 99);
+  const phyBlend = bio.reachLeverage * 0.45 + bio.centerOfGravityAgility * 0.55;
 
   return {
     ins: clampCap(58 + bio.reachLeverage * 38 - bio.positionalPhysicsStrain * 14),
@@ -210,7 +219,7 @@ export function getBiomechanicalStatCaps(
     ply: clampCap(58 + bio.centerOfGravityAgility * 38 - bio.tovRatePenalty * 4.2),
     def: clampCap(60 + (bio.reachLeverage + bio.centerOfGravityAgility) * 22 - bio.perimeterDefPenalty * 1.2),
     reb: clampCap(54 + bio.reachLeverage * 41 - bio.positionalPhysicsStrain * 15),
-    phy: clampCap(60 + bio.centerOfGravityAgility * 34 - (bio.staminaDrainMultiplier - 1) * 22),
+    phy: clampCap(58 + phyBlend * 37 - bio.positionalPhysicsStrain * 14),
   };
 }
 
@@ -293,11 +302,9 @@ const ADJACENT_POSITIONS: Record<Position, Position[]> = {
 export function canSwitchToPosition(
   currentPrimary: Position,
   targetPos: Position,
-  arg3: number | Position | null,
-  arg4: Position | null | number = null
+  options: { heightCm: number; secondaryPos?: Position | null }
 ): { allowed: boolean; reason?: string } {
-  const heightCm = typeof arg3 === 'number' ? arg3 : typeof arg4 === 'number' ? arg4 : 190;
-  const secondaryPos = typeof arg3 === 'string' ? arg3 : typeof arg4 === 'string' ? arg4 : null;
+  const { heightCm, secondaryPos = null } = options;
 
   if (currentPrimary === targetPos) {
     return { allowed: true };
@@ -504,7 +511,13 @@ export function evaluateAcquiredTraits(
     tryAdd('BENCH_ACE');
   }
 
-  const allLogsWithLatest = [...(career.seasonLogs || []), latestBox];
+  const existingLogs = career.seasonLogs || [];
+  const alreadyIncluded = existingLogs.some(
+    (l) => l.year === latestBox.year && l.seasonNumber === latestBox.seasonNumber
+  );
+  const allLogsWithLatest = alreadyIncluded
+    ? existingLogs
+    : [...existingLogs, latestBox];
   const sameTeamSeasons = allLogsWithLatest.filter(
     (l) => l.teamId === latestBox.teamId
   ).length;
@@ -514,9 +527,7 @@ export function evaluateAcquiredTraits(
 
   if (
     career.contractYearsLeft <= 1 &&
-    career.league !== 'HIGH_SCHOOL' &&
-    career.league !== 'U_LEAGUE' &&
-    career.league !== 'NCAA' &&
+    LEAGUE_BALANCE_META[career.league].isPro &&
     latestBox.fgPct >= 47.0 &&
     latestBox.mpg >= 20.0
   ) {
@@ -537,17 +548,18 @@ export function getSpecialCampOptions(career: CareerState): {
   costUsd: number;
   effectText: string;
   isVeteranMode?: boolean;
+  capWarning?: string;
 }[] {
   const baseUnit =
-    career.league === 'NBA'
-      ? 250000
-      : career.league === 'EUROLEAGUE'
-      ? 90000
-      : career.league === 'NBL'
-      ? 55000
-      : career.league === 'B_LEAGUE' || career.league === 'KBL'
-      ? 45000
-      : 15000;
+    ECONOMY_CONFIG.specialCampBaseCostByLeague[career.league] ?? 15000;
+  const caps = getBiomechanicalStatCaps(career.heightCm, career.primaryPos);
+  const getCapWarning = (keys: (keyof PlayerStats)[]): string | undefined => {
+    const capped = keys
+      .filter((k) => career.stats[k] >= caps[k])
+      .map((k) => k.toUpperCase());
+    if (capped.length === 0) return undefined;
+    return `${capped.join('·')} 신체 상한 도달 (실제 상승분만큼만 반대 스탯 조정)`;
+  };
 
   if (career.age >= 31) {
     return [
@@ -571,6 +583,7 @@ export function getSpecialCampOptions(career: CareerState): {
         costUsd: Math.round(baseUnit * 0.85),
         effectText: 'INS +1, REB +1 · PLY -1, OUT -1 (제로섬 조정)',
         isVeteranMode: true,
+        capWarning: getCapWarning(['ins', 'reb']),
       },
       {
         id: 'LEAN_MASS',
@@ -580,6 +593,7 @@ export function getSpecialCampOptions(career: CareerState): {
         costUsd: Math.round(baseUnit * 0.85),
         effectText: 'OUT +1, DEF +1 · REB -1, INS -1 (제로섬 조정)',
         isVeteranMode: true,
+        capWarning: getCapWarning(['out', 'def']),
       },
     ];
   }
@@ -602,6 +616,7 @@ export function getSpecialCampOptions(career: CareerState): {
       costUsd: Math.round(baseUnit * 0.85),
       effectText: 'INS +2, REB +2, PHY +1 · PLY -1, OUT -1',
       isVeteranMode: false,
+      capWarning: getCapWarning(['ins', 'reb', 'phy']),
     },
     {
       id: 'LEAN_MASS',
@@ -611,8 +626,44 @@ export function getSpecialCampOptions(career: CareerState): {
       costUsd: Math.round(baseUnit * 0.85),
       effectText: 'PLY +2, OUT +2, DEF +1 · REB -1, INS -1',
       isVeteranMode: false,
+      capWarning: getCapWarning(['ply', 'out', 'def']),
     },
   ];
+}
+
+function applyCappedBodyRebalance(
+  prevStats: PlayerStats,
+  caps: PlayerStats,
+  gains: Array<[keyof PlayerStats, number]>,
+  losses: Array<[keyof PlayerStats, number]>
+): { stats: PlayerStats; totalGain: number; totalLoss: number; cappedAny: boolean } {
+  const clamp = (v: number) => clampNum(Math.round(v), 35, 99);
+  const next: PlayerStats = { ...prevStats };
+  let totalGain = 0;
+  let cappedAny = false;
+
+  for (const [k, amt] of gains) {
+    const target = Math.min(caps[k], clamp(next[k] + amt));
+    const actual = Math.max(0, target - next[k]);
+    if (actual < amt) cappedAny = true;
+    next[k] = next[k] + actual;
+    totalGain += actual;
+  }
+
+  // 상한 도달로 상승분이 막혔을 때 반대 스탯만 깎여 순손실이 나지 않도록 실제 상승 총량 이내로만 차감
+  let remainingLossBudget = totalGain;
+  let totalLoss = 0;
+  for (const [k, amt] of losses) {
+    if (remainingLossBudget <= 0) break;
+    const allowedDrop = Math.min(amt, remainingLossBudget);
+    const target = clamp(next[k] - allowedDrop);
+    const actualDrop = Math.max(0, next[k] - target);
+    next[k] = target;
+    totalLoss += actualDrop;
+    remainingLossBudget -= actualDrop;
+  }
+
+  return { stats: next, totalGain, totalLoss, cappedAny };
 }
 
 export function applySpecialCampProgram(
@@ -628,16 +679,14 @@ export function applySpecialCampProgram(
 } {
   const options = getSpecialCampOptions(career);
   const chosen = options.find((o) => o.id === campType) || options[0];
-  const clamp = (v: number) => Math.max(35, Math.min(99, Math.round(v)));
+  const clamp = (v: number) => clampNum(Math.round(v), 35, 99);
+  const caps = getBiomechanicalStatCaps(career.heightCm, career.primaryPos);
   let nextStats: PlayerStats = { ...career.stats };
   let nextPotential = career.potential;
   let summary = '';
   let grantsAgingShield = false;
 
-  const isAmateur =
-    career.league === 'HIGH_SCHOOL' ||
-    career.league === 'U_LEAGUE' ||
-    career.league === 'NCAA';
+  const isAmateur = !LEAGUE_BALANCE_META[career.league].isPro;
 
   // 만 31세+ 베테랑 구간: 스탯 무한 우상향 차단 → 기량 유지 · 노쇠화 방어 전환
   if (career.age >= 31) {
@@ -660,27 +709,42 @@ export function applySpecialCampProgram(
         summary =
           '베테랑 컨디셔닝 캠프 수료: 차기 시즌 노쇠화 하락 방어(-25%) 버프를 확보하며 최상의 컨디션 유지에 집중했습니다.';
       }
+      nextStats = enforceBiomechanicalCaps(nextStats, career.heightCm, career.primaryPos);
     } else if (campType === 'BULK_UP') {
-      nextStats.ins = clamp(nextStats.ins + 1);
-      nextStats.reb = clamp(nextStats.reb + 1);
-      nextStats.ply = clamp(nextStats.ply - 1);
-      nextStats.out = clamp(nextStats.out - 1);
-      summary =
-        '베테랑 코어 밸런스 조정 완료: 골밑(INS +1)·리바운드(REB +1) 비중을 높이고 외곽·패스(OUT -1, PLY -1)를 재분배했습니다.';
+      const rebal = applyCappedBodyRebalance(
+        nextStats,
+        caps,
+        [
+          ['ins', 1],
+          ['reb', 1],
+        ],
+        [
+          ['ply', 1],
+          ['out', 1],
+        ]
+      );
+      nextStats = rebal.stats;
+      summary = rebal.cappedAny
+        ? `베테랑 코어 밸런스 조정 완료: 신체 상한을 고려해 순손실 없이 총 +${rebal.totalGain}/-${rebal.totalLoss} 범위로 재분배했습니다.`
+        : '베테랑 코어 밸런스 조정 완료: 골밑(INS +1)·리바운드(REB +1) 비중을 높이고 외곽·패스(OUT -1, PLY -1)를 재분배했습니다.';
     } else {
-      nextStats.out = clamp(nextStats.out + 1);
-      nextStats.def = clamp(nextStats.def + 1);
-      nextStats.reb = clamp(nextStats.reb - 1);
-      nextStats.ins = clamp(nextStats.ins - 1);
-      summary =
-        '베테랑 체중 감량 · 기동 유지 완료: 외곽(OUT +1)·수비(DEF +1) 밸런스를 다듬고 골밑(INS -1, REB -1) 부하를 줄였습니다.';
+      const rebal = applyCappedBodyRebalance(
+        nextStats,
+        caps,
+        [
+          ['out', 1],
+          ['def', 1],
+        ],
+        [
+          ['reb', 1],
+          ['ins', 1],
+        ]
+      );
+      nextStats = rebal.stats;
+      summary = rebal.cappedAny
+        ? `베테랑 체중 감량 · 기동 유지 완료: 신체 상한을 고려해 순손실 없이 총 +${rebal.totalGain}/-${rebal.totalLoss} 범위로 재분배했습니다.`
+        : '베테랑 체중 감량 · 기동 유지 완료: 외곽(OUT +1)·수비(DEF +1) 밸런스를 다듬고 골밑(INS -1, REB -1) 부하를 줄였습니다.';
     }
-
-    nextStats = enforceBiomechanicalCaps(
-      nextStats,
-      career.heightCm,
-      career.primaryPos
-    );
 
     return {
       nextStats,
@@ -713,6 +777,8 @@ export function applySpecialCampProgram(
       nextStats.def = clamp(nextStats.def + 1);
     }
 
+    nextStats = enforceBiomechanicalCaps(nextStats, career.heightCm, career.primaryPos);
+
     // 아마추어 시절에는 잠재력 폭등 차단, 프로 무대에서만 낮은 확률로 +1 확장
     const potGain = !isAmateur && rng() < 0.35 ? 1 : 0;
     nextPotential = Math.min(97, career.potential + potGain);
@@ -721,29 +787,42 @@ export function applySpecialCampProgram(
         ? `베테랑 스킬 워크아웃 수료: 핵심 능력치 상승 및 잠재력 상한이 ${nextPotential}(+${potGain})로 확장되었습니다.`
         : '베테랑 스킬 워크아웃 수료: 중점 기술 완성도가 한 단계 올라갔습니다.';
   } else if (campType === 'BULK_UP') {
-    nextStats.ins = clamp(nextStats.ins + 2);
-    nextStats.reb = clamp(nextStats.reb + 2);
-    nextStats.phy = clamp(nextStats.phy + 1);
-    nextStats.ply = clamp(nextStats.ply - 1);
-    nextStats.out = clamp(nextStats.out - 1);
-    summary =
-      '벌크업 프로그램 완료: 골밑 득점(INS +2), 리바운드(REB +2), 피지컬(PHY +1)이 강화되었습니다.';
+    const rebal = applyCappedBodyRebalance(
+      nextStats,
+      caps,
+      [
+        ['ins', 2],
+        ['reb', 2],
+        ['phy', 1],
+      ],
+      [
+        ['ply', 1],
+        ['out', 1],
+      ]
+    );
+    nextStats = rebal.stats;
+    summary = rebal.cappedAny
+      ? `벌크업 프로그램 완료: 신체 상한을 고려해 순손실 없이 총 +${rebal.totalGain}/-${rebal.totalLoss} 범위로 강화되었습니다.`
+      : '벌크업 프로그램 완료: 골밑 득점(INS +2), 리바운드(REB +2), 피지컬(PHY +1)이 강화되었습니다.';
   } else {
-    nextStats.ply = clamp(nextStats.ply + 2);
-    nextStats.out = clamp(nextStats.out + 2);
-    nextStats.def = clamp(nextStats.def + 1);
-    nextStats.reb = clamp(nextStats.reb - 1);
-    nextStats.ins = clamp(nextStats.ins - 1);
-    summary =
-      '린매스업 프로그램 완료: 패스·핸들링(PLY +2), 외곽 슈팅(OUT +2), 수비력(DEF +1)이 향상되었습니다.';
+    const rebal = applyCappedBodyRebalance(
+      nextStats,
+      caps,
+      [
+        ['ply', 2],
+        ['out', 2],
+        ['def', 1],
+      ],
+      [
+        ['reb', 1],
+        ['ins', 1],
+      ]
+    );
+    nextStats = rebal.stats;
+    summary = rebal.cappedAny
+      ? `린매스업 프로그램 완료: 신체 상한을 고려해 순손실 없이 총 +${rebal.totalGain}/-${rebal.totalLoss} 범위로 향상되었습니다.`
+      : '린매스업 프로그램 완료: 패스·핸들링(PLY +2), 외곽 슈팅(OUT +2), 수비력(DEF +1)이 향상되었습니다.';
   }
-
-  // 생체역학적 물리 상한선 적용
-  nextStats = enforceBiomechanicalCaps(
-    nextStats,
-    career.heightCm,
-    career.primaryPos
-  );
 
   return {
     nextStats,
@@ -859,27 +938,30 @@ export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
         id: 'EARLY_BLOOMER',
         label: '조숙형',
         badge: '조숙형 성장',
-        description: '10대 후반~20대 초반 성장 속도가 빠르지만, 30대 진입 전후로 에이징 커브가 다소 빠르게 찾아옵니다.',
+        description:
+          '10대 후반~20대 초반 성장 속도가 빠르지만, 만 28~29세 전후로 에이징 커브가 다소 빠르게 찾아옵니다.',
         peakAgeRange: [24, 27],
-        agingOnsetOffset: -1.2,
+        agingOnsetOffset: GROWTH_DNA_CONFIG.EARLY_BLOOMER.agingOnsetOffset,
       };
     case 'LATE_BLOOMER':
       return {
         id: 'LATE_BLOOMER',
         label: '대기만성형',
         badge: '대기만성형',
-        description: '초기 성장은 완만하지만 20대 중후반부터 30~31세 정점까지 꾸준히 기량이 올라갑니다.',
+        description:
+          '초기 성장은 완만하지만 20대 중후반부터 30~31세 정점까지 꾸준히 기량이 올라갑니다.',
         peakAgeRange: [28, 31],
-        agingOnsetOffset: 0.6,
+        agingOnsetOffset: GROWTH_DNA_CONFIG.LATE_BLOOMER.agingOnsetOffset,
       };
     case 'IRONMAN':
       return {
         id: 'IRONMAN',
         label: '내구도 특화형',
         badge: '고내구도형',
-        description: '부상 위험이 낮고 30대 초반 이후에도 신체 능력 하락 폭이 완만하게 유지됩니다.',
+        description:
+          '부상 위험이 낮고 만 31세 전후 노쇠화 시작 이후에도 신체 능력 하락 폭이 완만하게 유지됩니다.',
         peakAgeRange: [28, 31],
-        agingOnsetOffset: 1.2,
+        agingOnsetOffset: GROWTH_DNA_CONFIG.IRONMAN.agingOnsetOffset,
       };
     case 'STANDARD':
     default:
@@ -887,9 +969,10 @@ export function getGrowthDnaInfo(dna: GrowthDna = 'STANDARD'): {
         id: 'STANDARD',
         label: '표준 균형형',
         badge: '표준 성장형',
-        description: '20대 후반~30세에 전성기 정점을 찍고 32세부터 현실적인 에이징 커브를 따릅니다.',
+        description:
+          '20대 후반~30세에 전성기 정점을 찍고 만 30세 전후(누적 출전 시간 반영)부터 현실적인 에이징 커브를 따릅니다.',
         peakAgeRange: [27, 30],
-        agingOnsetOffset: 0,
+        agingOnsetOffset: GROWTH_DNA_CONFIG.STANDARD.agingOnsetOffset,
       };
   }
 }
@@ -1125,29 +1208,36 @@ export function getPreviewStatsAndOvrRange(
 } {
   const base = POSITION_ARCHETYPES[pos].baseStats;
   const { statModifiers } = getHeightModifiers(heightCm);
-  const clamp = (v: number) => Math.max(35, Math.min(82, Math.round(v)));
-
+  const cfg = INITIAL_STAT_CREATION_CONFIG;
+  const clampInit = (v: number) => clampNum(Math.round(v), cfg.minStat, cfg.maxStat);
   const adj = STARTING_POSITION_BASELINE_ADJUSTMENT[pos];
-  const rawBaseline: PlayerStats = {
-    ins: clamp(base.ins + statModifiers.ins - adj),
-    out: clamp(base.out + statModifiers.out - adj),
-    ply: clamp(base.ply + statModifiers.ply - adj),
-    def: clamp(base.def + statModifiers.def - adj),
-    reb: clamp(base.reb + statModifiers.reb - adj),
-    phy: clamp(base.phy + statModifiers.phy - adj),
-  };
 
-  const baselineStats = enforceBiomechanicalCaps(rawBaseline, heightCm, pos);
-  const baseOvr = calculateOvr(baselineStats, pos);
-  const minOvr = Math.max(46, baseOvr - 5);
-  const maxOvr = Math.min(61, baseOvr + 5);
+  const buildAtOffset = (offset: number): PlayerStats =>
+    enforceBiomechanicalCaps(
+      {
+        ins: clampInit(base.ins + statModifiers.ins + offset - adj),
+        out: clampInit(base.out + statModifiers.out + offset - adj),
+        ply: clampInit(base.ply + statModifiers.ply + offset - adj),
+        def: clampInit(base.def + statModifiers.def + offset - adj),
+        reb: clampInit(base.reb + statModifiers.reb + offset - adj),
+        phy: clampInit(base.phy + statModifiers.phy + offset - adj),
+      },
+      heightCm,
+      pos
+    );
+
+  const baselineStats = buildAtOffset(0);
+  const minStats = buildAtOffset(cfg.talentOffsetMin + cfg.statVarianceMin);
+  const maxStats = buildAtOffset(cfg.talentOffsetMax + cfg.statVarianceMax);
+  const minOvr = calculateOvr(minStats, pos, heightCm);
+  const maxOvr = calculateOvr(maxStats, pos, heightCm);
 
   return { baselineStats, minOvr, maxOvr };
 }
 
 /**
  * 캐릭터 생성 시 기본 포지션 아키타입 + 신장(cm) 물리 보정 +
- * 개체별 무작위 편차(-4 ~ +5) + 생체역학적 상한선 적용
+ * 개체별 무작위 편차(INITIAL_STAT_CREATION_CONFIG) + 생체역학적 상한선 적용
  */
 export function createInitialStats(
   pos: Position,
@@ -1156,20 +1246,24 @@ export function createInitialStats(
 ): PlayerStats {
   const base = POSITION_ARCHETYPES[pos].baseStats;
   const { statModifiers } = getHeightModifiers(heightCm);
+  const cfg = INITIAL_STAT_CREATION_CONFIG;
 
-  const talentOffset = Math.floor(rng() * 5) - 2;
-  const randStatVariance = () => Math.floor(rng() * 10) - 4;
-  const clamp = (v: number) => Math.max(36, Math.min(72, Math.round(v)));
+  const talentSpan = cfg.talentOffsetMax - cfg.talentOffsetMin + 1;
+  const varianceSpan = cfg.statVarianceMax - cfg.statVarianceMin + 1;
+  const talentOffset = Math.floor(rng() * talentSpan) + cfg.talentOffsetMin;
+  const randStatVariance = () =>
+    Math.floor(rng() * varianceSpan) + cfg.statVarianceMin;
+  const clampInit = (v: number) => clampNum(Math.round(v), cfg.minStat, cfg.maxStat);
 
   const adj = STARTING_POSITION_BASELINE_ADJUSTMENT[pos];
 
   const rawStats: PlayerStats = {
-    ins: clamp(base.ins + statModifiers.ins + talentOffset + randStatVariance() - adj),
-    out: clamp(base.out + statModifiers.out + talentOffset + randStatVariance() - adj),
-    ply: clamp(base.ply + statModifiers.ply + talentOffset + randStatVariance() - adj),
-    def: clamp(base.def + statModifiers.def + talentOffset + randStatVariance() - adj),
-    reb: clamp(base.reb + statModifiers.reb + talentOffset + randStatVariance() - adj),
-    phy: clamp(base.phy + statModifiers.phy + talentOffset + randStatVariance() - adj),
+    ins: clampInit(base.ins + statModifiers.ins + talentOffset + randStatVariance() - adj),
+    out: clampInit(base.out + statModifiers.out + talentOffset + randStatVariance() - adj),
+    ply: clampInit(base.ply + statModifiers.ply + talentOffset + randStatVariance() - adj),
+    def: clampInit(base.def + statModifiers.def + talentOffset + randStatVariance() - adj),
+    reb: clampInit(base.reb + statModifiers.reb + talentOffset + randStatVariance() - adj),
+    phy: clampInit(base.phy + statModifiers.phy + talentOffset + randStatVariance() - adj),
   };
 
   return enforceBiomechanicalCaps(rawStats, heightCm, pos);
@@ -1221,11 +1315,14 @@ export function analyzePositionFit(
     ranked.find(
       (r) =>
         r.pos !== currentPrimary &&
-        canSwitchToPosition(currentPrimary, r.pos, heightCm, r.pos).allowed
+        canSwitchToPosition(currentPrimary, r.pos, {
+          heightCm,
+          secondaryPos: currentSecondary,
+        }).allowed
     ) ||
     ranked.find((r) => r.pos !== currentPrimary) ||
     ranked[1];
-  const currentPosOvr = calculateOvr(stats, currentPrimary);
+  const currentPosOvr = calculateOvr(stats, currentPrimary, heightCm);
   const currentMismatch = calculateHeightMismatchPenalty(heightCm, currentPrimary);
 
   const canUnlockSecondary =

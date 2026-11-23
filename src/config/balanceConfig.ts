@@ -1,5 +1,6 @@
 import {
   ContractType,
+  GrowthDna,
   InternationalTournamentType,
   LeagueId,
   LiveTacticId,
@@ -160,6 +161,17 @@ export const ECONOMY_CONFIG = {
   amateurAnnualStipendUsd: 8000,
   proNetCashRatio: 0.58, // 세금·에이전트 수수료·생활비 제외 가용 자산 적립 비율
   sangmuAnnualSalaryUsd: 5400,
+  specialCampBaseCostByLeague: {
+    NBA: 250000,
+    EUROLEAGUE: 90000,
+    NBL: 55000,
+    B_LEAGUE: 45000,
+    KBL: 45000,
+    GLEAGUE: 15000,
+    NCAA: 15000,
+    U_LEAGUE: 15000,
+    HIGH_SCHOOL: 15000,
+  } as Record<LeagueId, number>,
   personalCare: {
     BIOMECH_SKILL_LAB: {
       proOnly: false,
@@ -346,7 +358,6 @@ export const LIVE_GAME_CONFIG = {
   replacementStaminaFactor: 0.95, // 리그 평균 선수의 기준 체력 효율 (이보다 지치면 손해)
   fouledOutLiftPenalty: 1.5, // 5/6반칙 퇴장 후 쿼터당 공격 손실
   fouledOutDefPenalty: 1.2, // 5/6반칙 퇴장 후 쿼터당 수비 손실
-  asianGamesLdr: 67,
   asianGamesFoulLimit: 5,
   clutchProbMin: 0.2,
   clutchProbMax: 0.85,
@@ -379,10 +390,10 @@ export const LIVE_GAME_CONFIG = {
       label: '이타적 조율 (팀플레이)',
     },
     PACE_CONSERVE: {
-      usageMult: 0.78,
-      fgBonus: 0.03,
-      defBonus: 1.15,
-      astBonus: 0.9,
+      usageMult: 0.84,
+      fgBonus: 0.024,
+      defBonus: 0.42,
+      astBonus: 0.98,
       staminaDrain: 8,
       foulRisk: 0.1,
       label: '체력 안배 (페이스 조절)',
@@ -617,7 +628,52 @@ export const AWARD_VOTING_CONFIG = {
   minMpgForMajorAward: 18.0,
 };
 
+export const INITIAL_STAT_CREATION_CONFIG = {
+  minStat: 36,
+  maxStat: 72,
+  talentOffsetMin: -2,
+  talentOffsetMax: 2,
+  statVarianceMin: -4,
+  statVarianceMax: 5,
+};
+
+export const GROWTH_DNA_CONFIG: Record<
+  GrowthDna,
+  {
+    maxGrowthAge: number;
+    agingOnsetOffset: number;
+    agingSeverityMult: number;
+    minPrimeYearsAfterGrowth: number;
+  }
+> = {
+  EARLY_BLOOMER: {
+    maxGrowthAge: 25,
+    agingOnsetOffset: -1.2,
+    agingSeverityMult: 1.18,
+    minPrimeYearsAfterGrowth: 1,
+  },
+  STANDARD: {
+    maxGrowthAge: 26,
+    agingOnsetOffset: 0,
+    agingSeverityMult: 1.0,
+    minPrimeYearsAfterGrowth: 1,
+  },
+  LATE_BLOOMER: {
+    maxGrowthAge: 28,
+    agingOnsetOffset: 0.6,
+    agingSeverityMult: 0.9,
+    minPrimeYearsAfterGrowth: 1,
+  },
+  IRONMAN: {
+    maxGrowthAge: 27,
+    agingOnsetOffset: 1.2,
+    agingSeverityMult: 0.78,
+    minPrimeYearsAfterGrowth: 1,
+  },
+};
+
 export const DRAFT_SCOUTING_CONFIG = {
+  nbaDraftTotalPicks: 60,
   // 고교 유망주 1~5성 연속 종합 스코어 컷 (득점 PPG 단일 하드 컷오프 완전 폐기!)
   hsStarThresholds: {
     fiveStar: 76.0,

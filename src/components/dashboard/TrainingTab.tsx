@@ -405,6 +405,11 @@ export function TrainingTab() {
                   <div className="text-[12px] text-[var(--t-g500)] tabular-nums truncate">
                     {camp.effectText} · {formatCurrencyDetailed(camp.costUsd)}
                   </div>
+                  {camp.capWarning && (
+                    <div className="text-[11px] font-medium text-[var(--t-warn)] truncate">
+                      {camp.capWarning}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -477,8 +482,10 @@ export function TrainingTab() {
                 canSwitchToPosition(
                   career.primaryPos,
                   rec.bestPrimaryPos,
-                  career.heightCm,
-                  career.secondaryPos
+                  {
+                    heightCm: career.heightCm,
+                    secondaryPos: career.secondaryPos,
+                  }
                 ).allowed && (
                   <button
                     type="button"
@@ -526,8 +533,10 @@ export function TrainingTab() {
             const check = canSwitchToPosition(
               career.primaryPos,
               pos,
-              career.heightCm,
-              career.secondaryPos
+              {
+                heightCm: career.heightCm,
+                secondaryPos: career.secondaryPos,
+              }
             );
 
             return (

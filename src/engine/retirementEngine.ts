@@ -14,21 +14,14 @@ import {
 import {
   AGING_RETIREMENT_CONFIG,
   ECONOMY_CONFIG,
+  GROWTH_DNA_CONFIG,
   INTERNATIONAL_TOURNAMENT_CONFIG,
+  LEAGUE_BALANCE_META,
   clampNum,
 } from '../config/balanceConfig';
 import { getTeamById } from '../data/teams';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import { buildCareerRetrospective } from './retrospectiveEngine';
-
-const PRO_LEAGUES: LeagueId[] = [
-  'NBA',
-  'KBL',
-  'B_LEAGUE',
-  'NBL',
-  'EUROLEAGUE',
-  'GLEAGUE',
-];
 
 export interface AgingCurveOptions {
   growthDna?: GrowthDna;
@@ -44,35 +37,44 @@ export interface AgingPhaseInfo {
   description: string;
 }
 
-export function getAgingPhaseInfo(
-  age: number,
+/**
+ * DNA별 성장 종료 나이 및 노쇠화 시작 나이(onsetAge) 단일 진실 원천 산출
+ * - 고마일리지 대기만성형이라도 성장기 직후 최소 1시즌의 전성기(PRIME) 구간을 보장
+ */
+export function computeEffectiveAgingOnset(
   growthDna: GrowthDna = 'STANDARD',
   careerMinutes: number = 0
-): AgingPhaseInfo {
-  const maxGrowthAge =
-    growthDna === 'LATE_BLOOMER'
-      ? 28
-      : growthDna === 'EARLY_BLOOMER'
-      ? 25
-      : growthDna === 'IRONMAN'
-      ? 27
-      : 26;
-  const dnaOnsetOffset =
-    growthDna === 'IRONMAN'
-      ? 1.2
-      : growthDna === 'LATE_BLOOMER'
-      ? 0.6
-      : growthDna === 'EARLY_BLOOMER'
-      ? -1.2
-      : 0;
+): { maxGrowthAge: number; onsetAge: number; mileageOffset: number; dnaSeverityMult: number } {
+  const dnaCfg = GROWTH_DNA_CONFIG[growthDna] || GROWTH_DNA_CONFIG.STANDARD;
   const mileageOffset = clampNum(
     (AGING_RETIREMENT_CONFIG.mileageReferenceMinutes - careerMinutes) /
       AGING_RETIREMENT_CONFIG.mileageScaleDivisor,
     -1.8,
     1.0
   );
-  const onsetAge =
-    AGING_RETIREMENT_CONFIG.baseOnsetAge + dnaOnsetOffset + mileageOffset;
+  const rawOnsetAge =
+    AGING_RETIREMENT_CONFIG.baseOnsetAge + dnaCfg.agingOnsetOffset + mileageOffset;
+  const minOnsetForPrime =
+    dnaCfg.maxGrowthAge + dnaCfg.minPrimeYearsAfterGrowth + 0.5;
+  const onsetAge = Math.max(minOnsetForPrime, rawOnsetAge);
+
+  return {
+    maxGrowthAge: dnaCfg.maxGrowthAge,
+    onsetAge,
+    mileageOffset,
+    dnaSeverityMult: dnaCfg.agingSeverityMult,
+  };
+}
+
+export function getAgingPhaseInfo(
+  age: number,
+  growthDna: GrowthDna = 'STANDARD',
+  careerMinutes: number = 0
+): AgingPhaseInfo {
+  const { maxGrowthAge, onsetAge } = computeEffectiveAgingOnset(
+    growthDna,
+    careerMinutes
+  );
 
   if (age <= maxGrowthAge) {
     return {
@@ -103,8 +105,8 @@ export function getAgingPhaseInfo(
 }
 
 /**
- * 4-1. 현실 NBA 평균형 에이징 커브 (28~31세 정점, 32세+ 가속 하락)
- * - 성장 DNA, 실제 누적 출전 마일리지, PHY 관리, 바이오메카닉스 랩, 31세+ 캠프 방어 버프 반영
+ * 4-1. 단조 증가 연속 에이징 커브 (만 30세 전후 기준, DNA·마일리지·자기관리 반영)
+ * - 구간 경계 불연속 점프 및 2단계→3단계 하락폭 역전 버그 제거
  * - 곱연산 방어 배율 하한선(0.58x)으로 무적화 차단, 신체(PHY/DEF/INS/REB) vs 기술(OUT/PLY) 이원화 하락
  */
 export function applyAgingCurve(
@@ -113,7 +115,7 @@ export function applyAgingCurve(
   rng: () => number = Math.random,
   options?: AgingCurveOptions
 ): { nextStats: PlayerStats; delta: StatDelta } {
-  const clamp = (v: number) => Math.max(35, Math.min(99, Math.round(v)));
+  const clampStat = (v: number) => clampNum(Math.round(v), 35, 99);
 
   const dna: GrowthDna = options?.growthDna || 'STANDARD';
   const careerMinutes = options?.careerMinutes ?? 15000;
@@ -121,31 +123,12 @@ export function applyAgingCurve(
   const hasCampAgingShield = Boolean(options?.hasCampAgingShield);
   const veteranReinvented = Boolean(options?.veteranReinvented);
 
-  // DNA별 노쇠화 시작 나이 오프셋 및 하락 배율
-  const dnaOnsetOffset =
-    dna === 'IRONMAN'
-      ? 1.2
-      : dna === 'LATE_BLOOMER'
-      ? 0.6
-      : dna === 'EARLY_BLOOMER'
-      ? -1.2
-      : 0;
-  const dnaSeverityMult =
-    dna === 'IRONMAN'
-      ? 0.78
-      : dna === 'LATE_BLOOMER'
-      ? 0.9
-      : dna === 'EARLY_BLOOMER'
-      ? 1.18
-      : 1.0;
-
-  // 실제 통산 누적 출전 시간(마일리지) 연속 오프셋 (18,000분 기준, 많을수록 조기 노쇠화 + 하락 가속)
-  const mileageOffset = clampNum(
-    (AGING_RETIREMENT_CONFIG.mileageReferenceMinutes - careerMinutes) /
-      AGING_RETIREMENT_CONFIG.mileageScaleDivisor,
-    -1.8,
-    1.0
+  const { onsetAge, dnaSeverityMult } = computeEffectiveAgingOnset(
+    dna,
+    careerMinutes
   );
+
+  // 누적 출전 마일리지 가속 계수
   const mileageSeverityMult =
     careerMinutes > AGING_RETIREMENT_CONFIG.mileageReferenceMinutes
       ? 1.0 +
@@ -173,8 +156,6 @@ export function applyAgingCurve(
     : 1.0;
 
   // 개인별 실질 노쇠화 진행 연차 (연속 실수)
-  const onsetAge =
-    AGING_RETIREMENT_CONFIG.baseOnsetAge + dnaOnsetOffset + mileageOffset;
   const agingYears = age - onsetAge;
 
   const nextStats: PlayerStats = { ...prev };
@@ -183,7 +164,7 @@ export function applyAgingCurve(
   if (agingYears < 0) {
     // 개인 노쇠화 시작 전(전성기 후반): 기량 유지, 만 30세 이하에서만 노련미(PLY) 제한적 보정
     if (age <= 30 && rng() < 0.35 && prev.ply < 95) {
-      nextStats.ply = clamp(prev.ply + 1);
+      nextStats.ply = clampStat(prev.ply + 1);
       delta.ply = nextStats.ply - prev.ply;
     }
     return { nextStats, delta };
@@ -199,124 +180,68 @@ export function applyAgingCurve(
       mileageSeverityMult
   );
 
-  if (agingYears <= 2.0) {
-    // 1단계 초기 노쇠기 (대략 30~32세): 운동능력(PHY/DEF/INS) 완만 하락, 기술(OUT/PLY) 유지 (순 OVR 역상승 차단)
-    const earlyScale = 1.0 + agingYears * 0.22;
-    const phyDrop = Math.max(
-      1,
-      Math.round((1.15 + rng() * 0.95) * earlyScale * combinedMult)
-    );
-    const defDrop = Math.max(
-      agingYears >= 0.8 ? 1 : 0,
-      Math.round((0.55 + rng() * 0.75) * earlyScale * combinedMult)
-    );
-    const insDrop = Math.max(
-      agingYears >= 1.1 ? 1 : 0,
-      Math.round((0.5 + rng() * 0.7) * earlyScale * combinedMult)
-    );
-    const rebDrop =
-      agingYears >= 1.0
-        ? Math.round((0.4 + rng() * 0.65) * earlyScale * combinedMult)
-        : 0;
+  // 모든 agingYears >= 0 구간에서 엄격히 단조 증가하는 단일 연속 에이징 곡선
+  const continuousSeverity = 1.0 + Math.pow(agingYears, 1.15) * 0.23;
+  const athleticRamp = 0.35 + clampNum(agingYears / 3.2, 0, 0.65);
+  const skillRamp = clampNum((agingYears - 1.8) / 3.2, 0, 1.0);
+  const agingSpan6 = clampNum(agingYears / 6.0, 0, 1.0);
+  const skillSpan5 = clampNum((agingYears - 2.0) / 5.0, 0, 1.0);
 
-    nextStats.phy = clamp(prev.phy - phyDrop);
-    nextStats.def = clamp(prev.def - defDrop);
-    nextStats.ins = clamp(prev.ins - insDrop);
-    nextStats.reb = clamp(prev.reb - rebDrop);
+  const phyDrop = Math.max(
+    1,
+    Math.round(
+      (1.2 + clampNum(agingYears / 10, 0, 0.78) + rng() * 0.9) *
+        continuousSeverity *
+        combinedMult
+    )
+  );
+  const insDrop = Math.round(
+    (0.68 + agingSpan6 * 0.55 + rng() * 0.75) *
+      athleticRamp *
+      continuousSeverity *
+      combinedMult
+  );
+  const defDrop = Math.round(
+    (0.68 + agingSpan6 * 0.55 + rng() * 0.75) *
+      athleticRamp *
+      continuousSeverity *
+      combinedMult *
+      (veteranReinvented ? 0.8 : 1.0)
+  );
+  const rebDrop = Math.round(
+    (0.58 + agingSpan6 * 0.52 + rng() * 0.7) *
+      athleticRamp *
+      continuousSeverity *
+      combinedMult
+  );
+  const outDrop = Math.round(
+    (0.52 + skillSpan5 * 0.45 + rng() * 0.65) *
+      skillRamp *
+      continuousSeverity *
+      combinedMult *
+      (veteranReinvented ? 0.42 : 0.72)
+  );
+  const plyDrop = Math.round(
+    (0.46 + skillSpan5 * 0.42 + rng() * 0.6) *
+      skillRamp *
+      continuousSeverity *
+      combinedMult *
+      (veteranReinvented ? 0.32 : 0.62)
+  );
 
-    delta.phy = nextStats.phy - prev.phy;
-    delta.def = nextStats.def - prev.def;
-    delta.ins = nextStats.ins - prev.ins;
-    delta.reb = nextStats.reb - prev.reb;
-  } else if (agingYears <= 5.0) {
-    // 2단계 가속 하락기 (대략 32~35세): 운동능력·공수 기동력 본격 하락, 기술(OUT/PLY)은 소폭 하락 또는 진화 방어
-    const continuousSeverity = 1.0 + Math.pow(agingYears, 1.18) * 0.26;
-    const phyDrop = Math.max(
-      2,
-      Math.round((1.45 + rng() * 0.95) * continuousSeverity * combinedMult)
-    );
-    const insDrop = Math.max(
-      1,
-      Math.round((1.05 + rng() * 0.85) * continuousSeverity * combinedMult)
-    );
-    const defDrop = veteranReinvented
-      ? Math.max(
-          1,
-          Math.round(
-            (0.75 + rng() * 0.65) * continuousSeverity * combinedMult * 0.85
-          )
-        )
-      : Math.max(
-          1,
-          Math.round((1.05 + rng() * 0.85) * continuousSeverity * combinedMult)
-        );
-    const rebDrop = Math.max(
-      1,
-      Math.round((0.95 + rng() * 0.8) * continuousSeverity * combinedMult)
-    );
-    const outDrop = veteranReinvented
-      ? agingYears > 3.5 && rng() < 0.35 * combinedMult
-        ? 1
-        : 0
-      : Math.max(
-          0,
-          Math.round(
-            (0.45 + rng() * 0.55) * continuousSeverity * combinedMult * 0.68
-          )
-        );
-    const plyDrop = veteranReinvented
-      ? 0
-      : agingYears > 3.2 && rng() < 0.5 * combinedMult
-      ? 1
-      : 0;
+  nextStats.phy = clampStat(prev.phy - phyDrop);
+  nextStats.ins = clampStat(prev.ins - insDrop);
+  nextStats.def = clampStat(prev.def - defDrop);
+  nextStats.reb = clampStat(prev.reb - rebDrop);
+  nextStats.out = clampStat(prev.out - outDrop);
+  nextStats.ply = clampStat(prev.ply - plyDrop);
 
-    nextStats.phy = clamp(prev.phy - phyDrop);
-    nextStats.ins = clamp(prev.ins - insDrop);
-    nextStats.def = clamp(prev.def - defDrop);
-    nextStats.reb = clamp(prev.reb - rebDrop);
-    nextStats.out = clamp(prev.out - outDrop);
-    nextStats.ply = clamp(prev.ply - plyDrop);
-
-    delta.phy = nextStats.phy - prev.phy;
-    delta.ins = nextStats.ins - prev.ins;
-    delta.def = nextStats.def - prev.def;
-    delta.reb = nextStats.reb - prev.reb;
-    delta.out = nextStats.out - prev.out;
-    delta.ply = nextStats.ply - prev.ply;
-  } else {
-    // 3단계 황혼기 (대략 35~40세+): 신체 능력 급격 하락, 기술 스탯도 완만 하락 (베테랑 진화 시 OUT/PLY 방어)
-    const twilightSeverity =
-      1.0 + Math.pow(Math.max(1, agingYears - 3.5), 1.15) * 0.28;
-    const athleticKeys: (keyof PlayerStats)[] = ['phy', 'ins', 'def', 'reb'];
-    for (const k of athleticKeys) {
-      const base = k === 'phy' ? 2.0 : 1.55;
-      const drop = Math.max(
-        2,
-        Math.round((base + rng() * 1.35) * twilightSeverity * combinedMult)
-      );
-      nextStats[k] = clamp(prev[k] - drop);
-      delta[k] = nextStats[k] - prev[k];
-    }
-
-    const skillKeys: (keyof PlayerStats)[] = ['out', 'ply'];
-    for (const k of skillKeys) {
-      const drop = veteranReinvented
-        ? Math.max(
-            0,
-            Math.round(
-              (0.6 + rng() * 0.7) * twilightSeverity * combinedMult * 0.55
-            )
-          )
-        : Math.max(
-            1,
-            Math.round(
-              (1.1 + rng() * 0.9) * twilightSeverity * combinedMult * 0.72
-            )
-          );
-      nextStats[k] = clamp(prev[k] - drop);
-      delta[k] = nextStats[k] - prev[k];
-    }
-  }
+  delta.phy = nextStats.phy - prev.phy;
+  delta.ins = nextStats.ins - prev.ins;
+  delta.def = nextStats.def - prev.def;
+  delta.reb = nextStats.reb - prev.reb;
+  delta.out = nextStats.out - prev.out;
+  delta.ply = nextStats.ply - prev.ply;
 
   return { nextStats, delta };
 }
@@ -430,7 +355,7 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
   for (const log of career.seasonLogs) {
     const teamObj = getTeamById(log.teamId, career.teamRatingsMap);
     const isProEligible =
-      PRO_LEAGUES.includes(log.league) && !teamObj?.isMilitaryTeam;
+      LEAGUE_BALANCE_META[log.league].isPro && !teamObj?.isMilitaryTeam;
 
     const prev = teamMap.get(log.teamId) || {
       teamId: log.teamId,
@@ -461,18 +386,49 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     teamMap.set(log.teamId, prev);
   }
 
+  const jerseyCfg = AGING_RETIREMENT_CONFIG.jerseyRetirement;
+  const meetsTeamJerseyRetirement = (rec: {
+    league: LeagueId;
+    seasons: number;
+    points: number;
+    championships: number;
+    mvps: number;
+    allStars: number;
+    isProEligible: boolean;
+  }): boolean => {
+    if (!rec.isProEligible) return false;
+    const reqPts =
+      rec.league === 'NBA'
+        ? jerseyCfg.nbaMinPoints
+        : jerseyCfg.otherProMinPoints;
+    const commitment = rec.seasons >= jerseyCfg.minSeasons && rec.points >= reqPts;
+    const achievement =
+      rec.mvps >= 2 ||
+      (rec.championships >= 2 && rec.allStars >= 5) ||
+      (rec.seasons >= 10 && rec.championships >= 1 && rec.allStars >= 6);
+    return commitment && achievement;
+  };
+
   let honoredTeam: TeamInfo = career.team;
   let honoredTeamSeasons = 0;
   let honoredTeamPoints = 0;
   let honoredTeamMvps = 0;
   let honoredTeamChamps = 0;
   let honoredTeamAllStars = 0;
+  let jerseyRetired = false;
 
   if (teamMap.size > 0) {
-    // 프로 구단 기록이 있다면 프로 구단을 최우선으로 대표 구단 선정
+    // 1순위: 영구결번 자격을 충족하는 프로 구단 중 최고 기여 구단
+    // 2순위: 자격 미충족 시 프로 구단 중 최고 기여 구단 (프로 기록 없으면 전체 구단)
     const allRecords = Array.from(teamMap.values());
     const proRecords = allRecords.filter((r) => r.isProEligible);
-    const pool = proRecords.length > 0 ? proRecords : allRecords;
+    const qualifiedProRecords = proRecords.filter(meetsTeamJerseyRetirement);
+    const pool =
+      qualifiedProRecords.length > 0
+        ? qualifiedProRecords
+        : proRecords.length > 0
+        ? proRecords
+        : allRecords;
     const sorted = pool.sort((a, b) => b.impactScore - a.impactScore);
     const top = sorted[0];
     const foundTeam = getTeamById(top.teamId, career.teamRatingsMap);
@@ -484,33 +440,10 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     honoredTeamMvps = top.mvps;
     honoredTeamChamps = top.championships;
     honoredTeamAllStars = top.allStars;
+    jerseyRetired = qualifiedProRecords.length > 0;
   }
 
-  // 프로 구단 여부 확인 (HIGH_SCHOOL, U_LEAGUE, NCAA 및 군팀 영구결번 절대 불가)
-  const isProFranchise =
-    PRO_LEAGUES.includes(honoredTeam.league) && !honoredTeam.isMilitaryTeam;
-
-  const jerseyCfg = AGING_RETIREMENT_CONFIG.jerseyRetirement;
-  const requiredFranchisePoints =
-    honoredTeam.league === 'NBA'
-      ? jerseyCfg.nbaMinPoints
-      : jerseyCfg.otherProMinPoints;
-
-  const meetsCommitment =
-    isProFranchise &&
-    honoredTeamSeasons >= jerseyCfg.minSeasons &&
-    honoredTeamPoints >= requiredFranchisePoints;
-
-  const meetsDominantAchievement =
-    honoredTeamMvps >= 2 ||
-    (honoredTeamChamps >= 2 && honoredTeamAllStars >= 5) ||
-    (honoredTeamSeasons >= 10 &&
-      honoredTeamChamps >= 1 &&
-      honoredTeamAllStars >= 6);
-
-  const jerseyRetired = meetsCommitment && meetsDominantAchievement;
-
-  // 레거시 점수 계산 (신규 어워드 파이널 MVP, DPOY, 식스맨, MIP, 올-리그 팀, 국제대회 메달/MVP 및 마케팅 보너스 반영)
+  // 레거시 점수 계산 (리그 티어 가중치를 반영한 어워드 점수 + 국제대회/마케팅 보너스)
   const marketingLegacyBonus =
     (career.fanPopularity || 0) * 10 +
     (career.purchasedPersonalCareCount || 0) * 80;
@@ -527,22 +460,75 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     },
     0
   );
+
+  const hasSeasonLogs = career.seasonLogs.length > 0;
+  const proLogs = career.seasonLogs.filter(
+    (l) => LEAGUE_BALANCE_META[l.league].isPro
+  );
+  const currentIsPro = LEAGUE_BALANCE_META[career.league].isPro;
+
+  const awardTierWeight = (league: LeagueId) =>
+    league === 'NBA'
+      ? 1.0
+      : LEAGUE_BALANCE_META[league].isPro
+      ? 0.55
+      : 0.15;
+
+  const weightedAwardLegacyPoints = hasSeasonLogs
+    ? career.seasonLogs.reduce((sum, l) => {
+        const w = awardTierWeight(l.league);
+        return (
+          sum +
+          (l.wonFinalsMvp ? 550 * w : 0) +
+          (l.wonDpoy ? 420 * w : 0) +
+          (l.wonSixthMan ? 220 * w : 0) +
+          (l.wonMip ? 200 * w : 0) +
+          (l.allLeagueTeam ? 180 * w : 0)
+        );
+      }, 0)
+    : (career.totals.finalsMvps || 0) * 550 +
+      (career.totals.dpoys || 0) * 420 +
+      (career.totals.sixthManAwards || 0) * 220 +
+      (career.totals.mips || 0) * 200 +
+      (career.totals.allLeagueSelections || 0) * 180;
+
+  // 프로 기록 전용 집계 (고교·대학 아마추어 우승/MVP/득점이 프로 레전드 등급을 오염시키지 않도록 분리)
+  const proPoints = hasSeasonLogs
+    ? proLogs.reduce((s, l) => s + Math.round(l.ppg * l.gp), 0)
+    : currentIsPro
+    ? career.totals.points
+    : 0;
+  const proChamps = hasSeasonLogs
+    ? proLogs.filter((l) => l.wonChampionship).length
+    : currentIsPro
+    ? career.totals.championships
+    : 0;
+  const proMvps = hasSeasonLogs
+    ? proLogs.filter((l) => l.wonMvp).length
+    : currentIsPro
+    ? career.totals.mvps
+    : 0;
+  const proSeasons = hasSeasonLogs
+    ? proLogs.length
+    : currentIsPro
+    ? career.seasonsPlayed
+    : 0;
+
+  const nonNbaProChamps = Math.max(0, proChamps - career.totals.nbaChampionships);
+  const nonNbaProMvps = Math.max(0, proMvps - career.totals.nbaMvps);
+
   const legacyScore = Math.round(
-    career.totals.points * 0.12 +
+    proPoints * 0.12 +
       career.totals.nbaPoints * 0.18 +
       career.totals.rebounds * 0.08 +
       career.totals.assists * 0.12 +
       career.totals.nbaChampionships * 850 +
-      (career.totals.championships - career.totals.nbaChampionships) * 260 +
+      nonNbaProChamps * 260 +
       career.totals.nbaMvps * 1100 +
-      (career.totals.mvps - career.totals.nbaMvps) * 300 +
-      (career.totals.finalsMvps || 0) * 550 +
-      (career.totals.dpoys || 0) * 420 +
-      (career.totals.sixthManAwards || 0) * 220 +
-      (career.totals.mips || 0) * 200 +
-      (career.totals.allLeagueSelections || 0) * 180 +
+      nonNbaProMvps * 300 +
+      weightedAwardLegacyPoints +
       career.totals.nbaAllStars * 300 +
-      (career.totals.allStars - career.totals.nbaAllStars) * 100 +
+      Math.max(0, career.totals.allStars - career.totals.nbaAllStars) * 100 +
       career.peakOvr * 15 +
       marketingLegacyBonus +
       internationalLegacyBonus
@@ -552,7 +538,7 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
   let tierTitle = '코트의 도전자';
   const tierEmoji = '';
   let summaryComment =
-    '벤치에서 출발해 끝까지 코트를 지키며 자신의 커리어를 완주했습니다.';
+    '끝까지 코트를 지키며 자신만의 농구 커리어를 완주했습니다.';
 
   const finalsMvps = career.totals.finalsMvps || 0;
   const nbaMvpsFromLogs = career.seasonLogs.filter(
@@ -589,6 +575,25 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     nbaAllStars >= hofReq.minNbaAllStars ||
     career.totals.nbaPoints >= hofReq.minNbaPoints;
 
+  // 주 활동 프로 리그 판별 (비아시아 프로 vs 아시아 프로 칭호 분기)
+  const nonNbaProLeagueWeights = new Map<LeagueId, number>();
+  for (const l of proLogs) {
+    if (l.league === 'NBA') continue;
+    nonNbaProLeagueWeights.set(
+      l.league,
+      (nonNbaProLeagueWeights.get(l.league) || 0) + 100 + Math.round(l.ppg * l.gp) * 0.05
+    );
+  }
+  let primaryNonNbaProLeague: LeagueId =
+    career.league !== 'NBA' && currentIsPro ? career.league : 'KBL';
+  let bestLeagueWeight = -1;
+  for (const [lg, weight] of nonNbaProLeagueWeights.entries()) {
+    if (weight > bestLeagueWeight) {
+      bestLeagueWeight = weight;
+      primaryNonNbaProLeague = lg;
+    }
+  }
+
   // GOAT 필수 조건: NBA MVP >= 3 AND NBA 우승 >= 3 AND 파이널 MVP >= 2 (점수 합산 우회 진입 완전 금지)
   if (
     nbaMvps >= goatReq.minNbaMvps &&
@@ -622,16 +627,34 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     summaryComment =
       '치열한 NBA 로스터 경쟁을 뚫고 다년간 정식 로테이션 멤버로 활약했습니다.';
   } else if (
-    career.totals.championships >= 2 ||
-    career.totals.mvps >= 1 ||
-    career.totals.points >= 6500 ||
-    legacyScore >= 2600
+    proSeasons >= 1 &&
+    (proChamps >= 2 ||
+      proMvps >= 1 ||
+      proPoints >= 6500 ||
+      (proSeasons >= 4 && legacyScore >= 2600))
   ) {
     tierId = 'ASIA_KBL_LEGEND';
-    tierTitle = 'KBL · 아시아 최정상급 선수';
-    summaryComment =
-      'KBL과 아시아 프로 무대에서 리그를 대표하는 간판 선수로 오랜 기간 정상급 성적을 남겼습니다.';
-  } else if (career.seasonsPlayed >= 6 || career.totals.points >= 2200) {
+    if (primaryNonNbaProLeague === 'EUROLEAGUE') {
+      tierTitle = '유로리그 · 유럽 최정상급 선수';
+      summaryComment =
+        '유럽 최상위 프로 무대인 유로리그에서 리그를 대표하는 간판 선수로 정상급 커리어를 남겼습니다.';
+    } else if (
+      primaryNonNbaProLeague === 'NBL' ||
+      primaryNonNbaProLeague === 'GLEAGUE'
+    ) {
+      tierTitle = '해외 프로 최정상급 선수';
+      summaryComment =
+        '해외 프로 무대에서 압도적인 경쟁력과 꾸준한 활약으로 정상급 커리어를 완성했습니다.';
+    } else {
+      tierTitle = 'KBL · 아시아 최정상급 선수';
+      summaryComment =
+        'KBL과 아시아 프로 무대에서 리그를 대표하는 간판 선수로 오랜 기간 정상급 성적을 남겼습니다.';
+    }
+  } else if (
+    proSeasons >= 4 ||
+    proPoints >= 2200 ||
+    (!hasSeasonLogs && currentIsPro && (career.seasonsPlayed >= 6 || career.totals.points >= 2200))
+  ) {
     tierId = 'PRO_VETERAN';
     tierTitle = '프로 베테랑';
     summaryComment =
