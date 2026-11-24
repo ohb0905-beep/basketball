@@ -5,6 +5,7 @@ import {
   LEAGUE_AWARD_QUOTAS,
   LEAGUE_BALANCE_META,
   LeagueAwardQuotaConfig,
+  REGULAR_SEASON_WIN_CONFIG,
   ROLE_MPG_CONFIG,
   canUseProTradeSystem,
   clampNum,
@@ -70,6 +71,35 @@ export function getLeagueBaselineTeamRating(
   if (teams.length === 0) return LEAGUE_CONFIG[league].ldr;
   const sum = teams.reduce((acc, t) => acc + t.rating, 0);
   return Number((sum / teams.length).toFixed(2));
+}
+
+/**
+ * 컨퍼런스 리그(NBA·G리그·B.리그)의 실제 일정 비중(동일 컨퍼런스 63% + 타 컨퍼런스 37%)을 반영한
+ * 상대 구단 평균 전력 기준선 산출 (seasonSimulator와 generateLeagueStandings 공용)
+ */
+export function getScheduleAdjustedTeamMeanRating(
+  league: LeagueId,
+  ratingsMap?: Record<string, number>,
+  conference?: 'EAST' | 'WEST'
+): number {
+  const leagueMean = getLeagueBaselineTeamRating(league, ratingsMap);
+  if (
+    (league !== 'NBA' && league !== 'GLEAGUE' && league !== 'B_LEAGUE') ||
+    (conference !== 'EAST' && conference !== 'WEST')
+  ) {
+    return leagueMean;
+  }
+  const teams = getTeamsByLeague(league, ratingsMap);
+  const ownConf = teams.filter((t) => t.conference === conference);
+  const otherConf = teams.filter(
+    (t) => t.conference && t.conference !== conference
+  );
+  if (ownConf.length === 0 || otherConf.length === 0) return leagueMean;
+  const ownMean = ownConf.reduce((s, t) => s + t.rating, 0) / ownConf.length;
+  const otherMean =
+    otherConf.reduce((s, t) => s + t.rating, 0) / otherConf.length;
+  const w = REGULAR_SEASON_WIN_CONFIG.conferenceScheduleWeight;
+  return Number((ownMean * w + otherMean * (1 - w)).toFixed(2));
 }
 
 const AWARD_LEAGUE_PRIORITY: LeagueId[] = [
@@ -1969,43 +1999,67 @@ export function simulateSeason(
     Math.min(72, Math.round(ppg * burstFactor + (career.stats.out >= 84 ? 5 : 2)))
   );
 
-  // 🏆 팀 승패 공식 통일 (playoffEngine.ts의 AI 구단 순위표 생성 공식과 100% 동일한 리그 평균 구단 전력 기준선 사용!)
-  // - 신인/벤치 선수가 강팀(예: 보스턴 92, 덴버 90)으로 이적했다고 해서 우승후보가 24위로 추락하는 버그를 원천 해결!
-  // - 선수가 리그 평균 이상이면 팀 승률 보너스를 주고, 신인/벤치일 때는 기존 주전 로스터가 팀 승률을 방어(-0.015 하한)하되,
-  //   생체역학 미스매치(168cm C, 220cm PG 등)를 고집하면 코트 마진이 하락함.
-  const leagueMeanRating = getLeagueBaselineTeamRating(
+  // 🏆 팀 승패 공식 통일 (playoffEngine.ts의 AI 구단 순위표 생성 공식과 100% 대칭 파라미터 공유!)
+  // - 플레이어·AI 모두 동일한 directionMod(±2.5%p) 및 컨퍼런스 일정 보정 상대 평균 사용
+  // - 선수 기여도는 구단 평균이 아닌 리그별 표준 주전 기준선(playerBaselineOvr) 대비 산출해 고교·대학·KBL 에이스 캐리 복원
+  // - 팀 전력 연동 수확체감 곡선으로 약팀 리빌딩 캐리 상향(최대 +20%p) & 강팀 슈퍼팀 70승 과잉 독주 완화
+  const effectiveOpponentMean = getScheduleAdjustedTeamMeanRating(
     career.league,
-    career.teamRatingsMap
+    career.teamRatingsMap,
+    career.team.conference
   );
   const dynamicTeamRating =
     career.teamRatingsMap?.[career.team.id] ?? career.team.rating;
   const directionMod =
     career.team.direction === 'CONTENDER'
-      ? 0.055
+      ? REGULAR_SEASON_WIN_CONFIG.contenderDirectionMod
       : career.team.direction === 'REBUILDING'
-      ? -0.055
+      ? REGULAR_SEASON_WIN_CONFIG.rebuildingDirectionMod
       : 0;
-  const clutchWinBonus = traits.includes('CLUTCH_PERFORMER') ? 0.025 : 0;
+  const teamBaseOffset =
+    (dynamicTeamRating - effectiveOpponentMean) *
+      REGULAR_SEASON_WIN_CONFIG.teamRatingSlope +
+    directionMod;
 
-  const rawPlayerMargin = (career.ovr - leagueMeanRating) * (mpg / 36) * 0.0085;
+  const baselinePlayerOvr = LEAGUE_BALANCE_META[career.league].playerBaselineOvr;
+  const rawPlayerMargin =
+    (career.ovr - baselinePlayerOvr) *
+    (mpg / 36) *
+    REGULAR_SEASON_WIN_CONFIG.playerMarginSlope;
+
+  // 약팀(teamBaseOffset < 0)일수록 에이스 캐리 여지가 커지고, 우승권 강팀(teamBaseOffset > 0)일수록 수확체감 적용
+  const carryScale = clampNum(1.0 - teamBaseOffset * 2.1, 0.52, 1.32);
+  const maxPositiveBoost = clampNum(0.145 - teamBaseOffset * 0.30, 0.09, 0.20);
   const effectivePlayerBoost =
     rawPlayerMargin >= 0
-      ? Math.min(0.14, rawPlayerMargin + (roleIndex >= 2 ? 0.02 : 0))
-      : Math.max(-0.015, rawPlayerMargin * 0.2);
+      ? Math.min(
+          maxPositiveBoost,
+          (rawPlayerMargin +
+            (roleIndex >= 2 ? REGULAR_SEASON_WIN_CONFIG.starterSynergyBonus : 0)) *
+            carryScale
+        )
+      : Math.max(
+          REGULAR_SEASON_WIN_CONFIG.negativeMarginFloor,
+          rawPlayerMargin * 0.2
+        );
+  const clutchWinBonus = traits.includes('CLUTCH_PERFORMER')
+    ? clampNum(
+        (mpg / 34) * REGULAR_SEASON_WIN_CONFIG.maxClutchWinBonus,
+        0.003,
+        REGULAR_SEASON_WIN_CONFIG.maxClutchWinBonus
+      ) * carryScale
+    : 0;
   const bioCourtDrag = bio.positionalPhysicsStrain * (mpg / 32) * 0.1;
 
-  const winRate = Math.max(
-    0.16,
-    Math.min(
-      0.86,
-      0.5 +
-        (dynamicTeamRating - leagueMeanRating) * 0.022 +
-        directionMod +
-        effectivePlayerBoost -
-        bioCourtDrag +
-        clutchWinBonus +
-        (rng() - 0.5) * 0.09
-    )
+  const winRate = clampNum(
+    0.5 +
+      teamBaseOffset +
+      effectivePlayerBoost -
+      bioCourtDrag +
+      clutchWinBonus +
+      (rng() - 0.5) * (REGULAR_SEASON_WIN_CONFIG.playerRandomHalfSpread * 2),
+    REGULAR_SEASON_WIN_CONFIG.minWinPct,
+    REGULAR_SEASON_WIN_CONFIG.maxWinPct
   );
   const wins = Math.max(1, Math.min(leagueConfig.games - 1, Math.round(leagueConfig.games * winRate)));
   const losses = leagueConfig.games - wins;

@@ -28,16 +28,56 @@ import {
   INTERNATIONAL_TOURNAMENT_CONFIG,
   LEAGUE_BALANCE_META,
   LIVE_GAME_CONFIG,
+  PLAYOFF_SERIES_CONFIG,
+  REGULAR_SEASON_WIN_CONFIG,
 } from '../config/balanceConfig';
 import {
   calculateBiomechanicalProfile,
   calculateHeightMismatchPenalty,
   calculateOvr,
 } from './statCalculator';
-import { getLeagueBaselineTeamRating } from './seasonSimulator';
+import {
+  getScheduleAdjustedTeamMeanRating,
+} from './seasonSimulator';
 
 function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
+}
+
+/**
+ * 시리즈 포맷(BO7/BO5/BO3/BO1)과 경기 번호에 따른 실제 홈코트 이점 반환 (상위 시드 기준)
+ * - BO7: 1·2·5·7차전 상위 시드 홈(+1.2), 3·4·6차전 하위 시드 홈(-1.2)
+ * - BO5: 1·2·5차전 상위 시드 홈(+1.2), 3·4차전 하위 시드 홈(-1.2)
+ * - BO3: 1·3차전 상위 시드 홈(+1.2), 2차전 하위 시드 홈(-1.2)
+ */
+export function getHigherSeedHomeAdvantage(
+  bestOf: number,
+  gameNo: number
+): number {
+  if (bestOf <= 1) return PLAYOFF_SERIES_CONFIG.singleElimHigherSeedEdge;
+  const edge = PLAYOFF_SERIES_CONFIG.homeCourtRatingEdge;
+  if (bestOf === 7) {
+    return gameNo === 1 || gameNo === 2 || gameNo === 5 || gameNo === 7
+      ? edge
+      : -edge;
+  }
+  if (bestOf === 5) {
+    return gameNo === 1 || gameNo === 2 || gameNo === 5 ? edge : -edge;
+  }
+  if (bestOf === 3) {
+    return gameNo === 1 || gameNo === 3 ? edge : -edge;
+  }
+  return gameNo % 2 === 1 ? edge : -edge;
+}
+
+/**
+ * 리그별 파이널(결승전) 시리즈 포맷(BO7 / BO5 / BO3 / BO1) 반환
+ */
+export function getFinalsSeriesBestOf(league: LeagueId): number {
+  if (league === 'NBA' || league === 'KBL') return 7;
+  if (league === 'NBL') return 5;
+  if (league === 'B_LEAGUE' || league === 'GLEAGUE') return 3;
+  return 1;
 }
 
 export function getPlayoffCutoffByLeague(
@@ -90,9 +130,57 @@ export function generateLeagueStandings(
 
   const leagueGames = LEAGUE_CONFIG[career.league].games;
   const totalGames = Math.max(1, playerWins + playerLosses || leagueGames);
-  const leagueMeanRating = getLeagueBaselineTeamRating(
-    career.league,
-    career.teamRatingsMap
+
+  // 리그 구단 레이팅 편차에 비례해 AI 랜덤 변동폭 조정 (압축 리그의 과잉 주사위 운 완화)
+  const ratings = fullPool.map(
+    (t) => career.teamRatingsMap?.[t.id] ?? t.rating
+  );
+  const ratingSpread =
+    ratings.length > 1 ? Math.max(...ratings) - Math.min(...ratings) : 10;
+  const aiHalfSpread = clamp(
+    0.036 + ratingSpread * 0.002,
+    REGULAR_SEASON_WIN_CONFIG.aiMinHalfSpread,
+    REGULAR_SEASON_WIN_CONFIG.aiMaxHalfSpread
+  );
+
+  // 1차 기대 승률 산출 (플레이어와 동일한 directionMod ±2.5%p 및 컨퍼런스 일정 보정 기준선 적용)
+  const aiRawWinPctMap = new Map<string, number>();
+  let aiRawSum = 0;
+  let aiCount = 0;
+  for (const team of fullPool) {
+    if (team.id === career.team.id) continue;
+    const dynamicRating = career.teamRatingsMap?.[team.id] ?? team.rating;
+    const teamOppMean = getScheduleAdjustedTeamMeanRating(
+      career.league,
+      career.teamRatingsMap,
+      team.conference
+    );
+    const directionMod =
+      team.direction === 'CONTENDER'
+        ? REGULAR_SEASON_WIN_CONFIG.contenderDirectionMod
+        : team.direction === 'REBUILDING'
+        ? REGULAR_SEASON_WIN_CONFIG.rebuildingDirectionMod
+        : 0;
+    const rawExpected = clamp(
+      0.5 +
+        (dynamicRating - teamOppMean) *
+          REGULAR_SEASON_WIN_CONFIG.teamRatingSlope +
+        directionMod +
+        (rng() - 0.5) * (aiHalfSpread * 2),
+      REGULAR_SEASON_WIN_CONFIG.minWinPct,
+      REGULAR_SEASON_WIN_CONFIG.maxWinPct - 0.01
+    );
+    aiRawWinPctMap.set(team.id, rawExpected);
+    aiRawSum += rawExpected;
+    aiCount++;
+  }
+
+  // 제로섬 평균 보정: AI 팀 전체 평균 승률이 50%에 수렴하도록 균일 평행이동 (상대 순위·단조성 보존)
+  const rawAiMean = aiCount > 0 ? aiRawSum / aiCount : 0.5;
+  const zeroSumShift = clamp(
+    0.5 - rawAiMean,
+    -REGULAR_SEASON_WIN_CONFIG.zeroSumMaxShift,
+    REGULAR_SEASON_WIN_CONFIG.zeroSumMaxShift
   );
 
   const rawEntries: StandingEntry[] = fullPool.map((team) => {
@@ -119,20 +207,10 @@ export function generateLeagueStandings(
       };
     }
 
-    const directionMod =
-      team.direction === 'CONTENDER'
-        ? 0.022
-        : team.direction === 'REBUILDING'
-        ? -0.022
-        : 0;
-    // 플레이어 팀 승률 기대치 공식과 동일한 기준선(leagueMeanRating) 적용 + 현실적 시즌 변동폭(±8%)
     const expectedWinPct = clamp(
-      0.5 +
-        (dynamicRating - leagueMeanRating) * 0.021 +
-        directionMod +
-        (rng() - 0.5) * 0.16,
-      0.16,
-      0.84
+      (aiRawWinPctMap.get(team.id) ?? 0.5) + zeroSumShift,
+      REGULAR_SEASON_WIN_CONFIG.minWinPct,
+      REGULAR_SEASON_WIN_CONFIG.maxWinPct - 0.01
     );
     const wins = clamp(
       Math.round(totalGames * expectedWinPct),
@@ -1189,6 +1267,16 @@ export function createPlayoffBracket(
   };
 }
 
+function estimateFallbackMpgByRole(role?: string): number {
+  if (!role) return 26;
+  if (role.includes('에이스') || role.includes('1옵션')) return 34;
+  if (role.includes('주전') || role.includes('스타터')) return 29;
+  if (role.includes('식스맨')) return 22;
+  if (role.includes('로테이션')) return 15;
+  if (role.includes('벤치') || role.includes('후보')) return 9;
+  return 26;
+}
+
 function simulateSingleSeries(
   series: PlayoffSeriesMatchup,
   career: CareerState,
@@ -1198,30 +1286,55 @@ function simulateSingleSeries(
   if (series.winnerId) return series;
 
   const ovr = calculateOvr(career.stats, career.primaryPos, career.heightCm);
-  const leagueMean = getLeagueBaselineTeamRating(
-    career.league,
-    career.teamRatingsMap
-  );
+  const baselinePlayerOvr =
+    LEAGUE_BALANCE_META[career.league].playerBaselineOvr;
   const bio = calculateBiomechanicalProfile(career.heightCm, career.primaryPos);
   const clutchBonus = (career.traits || []).includes('CLUTCH_PERFORMER')
-    ? 1.8
+    ? PLAYOFF_SERIES_CONFIG.clutchBonus
     : 0;
 
-  // 플레이어 보너스: 에이스면 시리즈 전력 상승, 벤치/신인이면 기본 구단 전력 유지(-1.0 하한), 물리 미스매치 시 감점
-  const rawBonus = (ovr - leagueMean) * 0.35 + clutchBonus;
+  // 출전 비중(MPG) 및 시즌 출장률(장기 부상 감쇠) 반영: 벤치·장기 결장자의 과대 기여 및 과도한 부하 페널티 차단
+  const latestLog = career.seasonLogs?.[career.seasonLogs.length - 1];
+  const hasMatchingLog = Boolean(latestLog && latestLog.league === career.league);
+  const playerMpg = hasMatchingLog
+    ? latestLog!.mpg
+    : estimateFallbackMpgByRole(career.role);
+  const mpgWeight = clamp(
+    playerMpg / 32,
+    PLAYOFF_SERIES_CONFIG.minMpgWeight,
+    PLAYOFF_SERIES_CONFIG.maxMpgWeight
+  );
+
+  let gpWeight = 1.0;
+  if (hasMatchingLog && latestLog!.injuredGamesMissed > 0) {
+    const leagueGames = Math.max(1, LEAGUE_CONFIG[career.league].games);
+    const gpRatio = latestLog!.gp / leagueGames;
+    gpWeight =
+      latestLog!.injurySeverity === 'MAJOR' || gpRatio < 0.55
+        ? clamp(gpRatio / 0.72, 0.2, 1.0)
+        : clamp(gpRatio / 0.78, 0.45, 1.0);
+  }
+  const availabilityWeight = mpgWeight * gpWeight;
+
+  // 플레이어 보너스: 리그 표준 주전 기준선(playerBaselineOvr) 대비 기여도 × 출전·부상 가중치
+  const rawBonus =
+    ((ovr - baselinePlayerOvr) * PLAYOFF_SERIES_CONFIG.playerOvrSlope +
+      clutchBonus) *
+    availabilityWeight;
   const playerBonus =
-    (rawBonus >= 0 ? clamp(rawBonus, 0, 8.5) : Math.max(-1.0, rawBonus * 0.25)) -
-    bio.positionalPhysicsStrain * 4.5;
+    (rawBonus >= 0
+      ? clamp(rawBonus, 0, PLAYOFF_SERIES_CONFIG.maxPositivePlayerBonus)
+      : Math.max(PLAYOFF_SERIES_CONFIG.minNegativePlayerBonus, rawBonus * 0.25)) -
+    bio.positionalPhysicsStrain *
+      PLAYOFF_SERIES_CONFIG.bioStrainWeight *
+      availabilityWeight;
 
   const hiEffective =
     series.higherSeed.team.rating +
-    1.0 +
     (series.higherSeed.team.id === career.team.id ? playerBonus : 0);
   const loEffective =
     series.lowerSeed.team.rating +
     (series.lowerSeed.team.id === career.team.id ? playerBonus : 0);
-
-  const hiWinProb = clamp(0.5 + (hiEffective - loEffective) * 0.024, 0.24, 0.78);
 
   let hiWins = series.higherSeedWins;
   let loWins = series.lowerSeedWins;
@@ -1248,6 +1361,16 @@ function simulateSingleSeries(
         summaryLog: logs,
       };
     }
+
+    // 실제 홈/원정 경기 번호 기반 홈코트 이점 교대 적용 (BO7 1·2·5·7 상위 홈 vs 3·4·6 하위 홈)
+    const homeAdv = getHigherSeedHomeAdvantage(series.bestOf, gameNo);
+    const hiWinProb = clamp(
+      0.5 +
+        (hiEffective - loEffective + homeAdv) *
+          PLAYOFF_SERIES_CONFIG.gameWinProbSlope,
+      PLAYOFF_SERIES_CONFIG.minGameWinProb,
+      PLAYOFF_SERIES_CONFIG.maxGameWinProb
+    );
 
     const hiWonGame = rng() < hiWinProb;
     if (hiWonGame) {
@@ -2205,7 +2328,7 @@ export function calculateKoreaTeamEffectiveRating(
   const cfg = INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType];
   const ovr = calculateOvr(career.stats, career.primaryPos, career.heightCm);
   const bio = calculateBiomechanicalProfile(career.heightCm, career.primaryPos);
-  const clutchBonus = (career.traits || []).includes('CLUTCH_PERFORMER') ? 2.5 : 0;
+  const clutchBonus = (career.traits || []).includes('CLUTCH_PERFORMER') ? 1.5 : 0;
   const aceContribution = clamp(
     (ovr - 71) * cfg.aceRatingWeight + clutchBonus,
     -3.5,
@@ -2213,7 +2336,7 @@ export function calculateKoreaTeamEffectiveRating(
   );
   const rating =
     cfg.baseKorRating + aceContribution - bio.positionalPhysicsStrain * 3.8;
-  return Number(clamp(rating, 69, 95).toFixed(1));
+  return Number(clamp(rating, 68, 87).toFixed(1));
 }
 
 /**
@@ -2288,7 +2411,7 @@ export function simulateInternationalTournament(
 
   const matches: AsianGamesMatchLog[] = [];
   const winSlope = tournamentType === 'ASIAN_GAMES' ? 0.048 : 0.042;
-  const baseWinBias = tournamentType === 'ASIAN_GAMES' ? 0.56 : 0.52;
+  const baseWinBias = 0.5;
 
   const playMatch = (
     stage: 'GROUP' | 'QUARTERFINAL' | 'SEMIFINAL',
@@ -2491,6 +2614,10 @@ export function createLiveFinalGame(
     career.militaryServiceSeasonsLeft === 0 &&
     ((tournamentType === 'ASIAN_GAMES' && !isBronzeMatch) ||
       tournamentType === 'OLYMPICS');
+  const finalsBestOf = getFinalsSeriesBestOf(career.league);
+  const tiedSeriesWins = Math.floor(finalsBestOf / 2);
+  const leagueShort = LEAGUE_CONFIG[career.league].shortName;
+
   const title = isInternational
     ? isBronzeMatch
       ? `${displayYear} ${tourneyCfg?.name || '국제대회'} 3·4위전 (동메달 결정전${
@@ -2500,8 +2627,18 @@ export function createLiveFinalGame(
           showExemptionFinalTag ? ' (병역특례 결정전)' : ''
         }`
     : gameType === 'CONF_FINALS_GAME7'
-    ? `${LEAGUE_CONFIG[career.league].shortName} 컨퍼런스 파이널 7차전`
-    : `${LEAGUE_CONFIG[career.league].shortName} 챔피언십 파이널 최종전`;
+    ? `${leagueShort} 컨퍼런스 파이널 7차전`
+    : finalsBestOf > 1
+    ? `${leagueShort} 파이널 ${finalsBestOf}차전 (최종 매치포인트)`
+    : `${leagueShort} 챔피언십 파이널 결승전`;
+
+  const subtitle = isInternational
+    ? `${playerTeam.name} vs ${opponentTeam.name}`
+    : gameType === 'CONF_FINALS_GAME7'
+    ? `${playerTeam.name} vs ${opponentTeam.name} · 시리즈 3승 3패 동률 최종전`
+    : finalsBestOf > 1
+    ? `${playerTeam.name} vs ${opponentTeam.name} · 시리즈 ${tiedSeriesWins}승 ${tiedSeriesWins}패 동률 최종전`
+    : `${playerTeam.name} vs ${opponentTeam.name} · 단판 우승 결정전`;
 
   const foulLimit = isInternational
     ? LIVE_GAME_CONFIG.asianGamesFoulLimit
@@ -2519,7 +2656,7 @@ export function createLiveFinalGame(
     internationalTournamentYear: tournamentYear,
     internationalPreMatches: options?.preMatches,
     title,
-    subtitle: `${playerTeam.name} vs ${opponentTeam.name}`,
+    subtitle,
     playerTeam,
     opponentTeam,
     quarter: 0,
@@ -3222,7 +3359,7 @@ export function simulateLiveQuarter(
   const ldr =
     tournamentType
       ? INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType].ldr
-      : LEAGUE_CONFIG[career.league].ldr;
+      : leagueMeta.playerBaselineOvr;
   const mismatch = calculateHeightMismatchPenalty(
     career.heightCm,
     career.primaryPos

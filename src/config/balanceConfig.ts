@@ -20,6 +20,7 @@ export interface LeagueBalanceMeta {
   isPro: boolean;
   isAmateur: boolean;
   foulLimit: number;
+  playerBaselineOvr: number;
   liveQuarterBasePts: number;
   liveOppQuarterBasePts: number;
   liveOvertimeBasePts: number;
@@ -34,6 +35,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: false,
     isAmateur: true,
     foulLimit: 5,
+    playerBaselineOvr: 53,
     liveQuarterBasePts: 17,
     liveOppQuarterBasePts: 17,
     liveOvertimeBasePts: 8,
@@ -46,6 +48,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: false,
     isAmateur: true,
     foulLimit: 5,
+    playerBaselineOvr: 61,
     liveQuarterBasePts: 18,
     liveOppQuarterBasePts: 18,
     liveOvertimeBasePts: 8,
@@ -58,6 +61,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: false,
     isAmateur: true,
     foulLimit: 5,
+    playerBaselineOvr: 71,
     liveQuarterBasePts: 18,
     liveOppQuarterBasePts: 18,
     liveOvertimeBasePts: 9,
@@ -70,6 +74,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: true,
     isAmateur: false,
     foulLimit: 5,
+    playerBaselineOvr: 68,
     liveQuarterBasePts: 19,
     liveOppQuarterBasePts: 19,
     liveOvertimeBasePts: 9,
@@ -82,6 +87,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: true,
     isAmateur: false,
     foulLimit: 5,
+    playerBaselineOvr: 70,
     liveQuarterBasePts: 19,
     liveOppQuarterBasePts: 19,
     liveOvertimeBasePts: 9,
@@ -94,6 +100,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: true,
     isAmateur: false,
     foulLimit: 5,
+    playerBaselineOvr: 72,
     liveQuarterBasePts: 21,
     liveOppQuarterBasePts: 21,
     liveOvertimeBasePts: 9,
@@ -106,6 +113,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: true,
     isAmateur: false,
     foulLimit: 5,
+    playerBaselineOvr: 78,
     liveQuarterBasePts: 20,
     liveOppQuarterBasePts: 20,
     liveOvertimeBasePts: 9,
@@ -118,6 +126,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: true,
     isAmateur: false,
     foulLimit: 6,
+    playerBaselineOvr: 73,
     liveQuarterBasePts: 24,
     liveOppQuarterBasePts: 24,
     liveOvertimeBasePts: 11,
@@ -130,6 +139,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: true,
     isAmateur: false,
     foulLimit: 6,
+    playerBaselineOvr: 84,
     liveQuarterBasePts: 25,
     liveOppQuarterBasePts: 25,
     liveOvertimeBasePts: 11,
@@ -138,6 +148,44 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     royBoardTitle: 'NBA 신인왕(ROY) 투표 레이스 TOP 5',
     allStarLabel: 'NBA 올스타',
   },
+};
+
+/**
+ * 정규시즌 승률 대칭 파라미터 (플레이어 팀 & AI 팀 100% 동일 기준)
+ */
+export const REGULAR_SEASON_WIN_CONFIG = {
+  contenderDirectionMod: 0.025,
+  rebuildingDirectionMod: -0.025,
+  teamRatingSlope: 0.021,
+  playerRandomHalfSpread: 0.055, // ±5.5%p
+  aiMinHalfSpread: 0.042,        // 압축 리그(고교·G리그·NCAA) 과잉 로또화 방지
+  aiMaxHalfSpread: 0.062,        // NBA·유로리그 등 ±6.2%p
+  conferenceScheduleWeight: 0.63, // 컨퍼런스 리그 동일 컨퍼런스 경기 비중
+  zeroSumMaxShift: 0.045,        // AI 팀 제로섬 평균 보정 상한
+  minWinPct: 0.16,
+  maxWinPct: 0.85,
+  playerMarginSlope: 0.0115,
+  starterSynergyBonus: 0.015,
+  maxClutchWinBonus: 0.018,
+  negativeMarginFloor: -0.015,
+};
+
+/**
+ * 플레이오프 시리즈 승률 파라미터 (출전 비중·부상 감쇠·경기별 홈/원정 교대·왕조 수확체감)
+ */
+export const PLAYOFF_SERIES_CONFIG = {
+  gameWinProbSlope: 0.020,
+  minGameWinProb: 0.24,
+  maxGameWinProb: 0.75,
+  homeCourtRatingEdge: 1.2,      // 실제 홈 경기 개최 팀 가산 (+1.2 / 원정 -1.2)
+  singleElimHigherSeedEdge: 0.5, // 단판 토너먼트 상위 시드 소폭 이점
+  playerOvrSlope: 0.30,
+  clutchBonus: 1.0,
+  maxPositivePlayerBonus: 5.5,
+  minNegativePlayerBonus: -0.9,
+  bioStrainWeight: 4.2,
+  minMpgWeight: 0.15,
+  maxMpgWeight: 1.1,
 };
 
 /**
@@ -270,10 +318,10 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     yearMod4: 1,
     minOvr: 68,
     ldr: 72,
-    baseKorRating: 75.0,
-    aceRatingWeight: 0.56,
-    aceRatingMaxBonus: 14.0,
-    winProbCap: 0.91,
+    baseKorRating: 73.5,
+    aceRatingWeight: 0.50,
+    aceRatingMaxBonus: 10.0,
+    winProbCap: 0.84,
     liveQuarterBasePts: 19,
     liveOvertimeBasePts: 9,
     militaryExemptionMinMedal: null,
@@ -288,10 +336,10 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     yearMod4: 2,
     minOvr: 65,
     ldr: 67,
-    baseKorRating: 77.8,
-    aceRatingWeight: 0.72,
-    aceRatingMaxBonus: 15.5,
-    winProbCap: 0.93,
+    baseKorRating: 73.2,
+    aceRatingWeight: 0.58,
+    aceRatingMaxBonus: 10.5,
+    winProbCap: 0.86,
     liveQuarterBasePts: 19,
     liveOvertimeBasePts: 9,
     militaryExemptionMinMedal: 'GOLD',
@@ -306,10 +354,10 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     yearMod4: 3,
     minOvr: 72,
     ldr: 82,
-    baseKorRating: 75.5,
-    aceRatingWeight: 0.68,
-    aceRatingMaxBonus: 18.0,
-    winProbCap: 0.89,
+    baseKorRating: 74.0,
+    aceRatingWeight: 0.48,
+    aceRatingMaxBonus: 10.0,
+    winProbCap: 0.80,
     liveQuarterBasePts: 19,
     liveOvertimeBasePts: 9,
     militaryExemptionMinMedal: null,
@@ -324,10 +372,10 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     yearMod4: 0,
     minOvr: 75,
     ldr: 85,
-    baseKorRating: 76.0,
-    aceRatingWeight: 0.72,
-    aceRatingMaxBonus: 19.5,
-    winProbCap: 0.88,
+    baseKorRating: 74.5,
+    aceRatingWeight: 0.50,
+    aceRatingMaxBonus: 11.0,
+    winProbCap: 0.78,
     liveQuarterBasePts: 20,
     liveOvertimeBasePts: 9,
     militaryExemptionMinMedal: 'BRONZE',
@@ -374,10 +422,10 @@ export const LIVE_GAME_CONFIG = {
   tacticMods: {
     ACE_HERO: {
       usageMult: 1.32,
-      fgBonus: 0.005,
-      defBonus: -0.3,
-      astBonus: 0.86,
-      staminaDrain: 21,
+      fgBonus: 0.008,
+      defBonus: -0.25,
+      astBonus: 0.88,
+      staminaDrain: 18,
       foulRisk: 0.24,
       label: '에이스 모드 (공격 주도)',
     },
@@ -393,7 +441,7 @@ export const LIVE_GAME_CONFIG = {
     UNSELFISH_PASS: {
       usageMult: 0.9,
       fgBonus: 0.014,
-      defBonus: -0.95,
+      defBonus: -0.45,
       astBonus: 1.22,
       staminaDrain: 15,
       foulRisk: 0.17,
@@ -401,8 +449,8 @@ export const LIVE_GAME_CONFIG = {
     },
     PACE_CONSERVE: {
       usageMult: 0.86,
-      fgBonus: 0.008,
-      defBonus: 0.12,
+      fgBonus: 0.005,
+      defBonus: 0.0,
       astBonus: 0.98,
       staminaDrain: 8,
       foulRisk: 0.1,
@@ -585,8 +633,8 @@ export const AWARD_VOTING_CONFIG = {
   mvpGuaranteesAllStarAndFirstTeam: true,
   // 리그별 NPC 주전·스타 득점 기준 보정 (구단별 전체 풀 생성 시 주인공의 리그 LDR 대비 커브와 대칭 정렬)
   npcMvpPpgOffsetByLeague: {
-    HIGH_SCHOOL: -0.8,
-    U_LEAGUE: 0.4,
+    HIGH_SCHOOL: 1.4,
+    U_LEAGUE: 2.0,
     NCAA: -1.4,
     KBL: 2.5,
     B_LEAGUE: 1.2,

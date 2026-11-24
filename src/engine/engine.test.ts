@@ -70,6 +70,7 @@ import {
   generateDraftRivals,
   getAwardsByLeague,
   getLeagueBaselineTeamRating,
+  getScheduleAdjustedTeamMeanRating,
   getSangmuDischargeContractType,
   isEligibleForLeagueRookieAward,
   selectPositionBalancedAllStars,
@@ -139,6 +140,8 @@ import {
   createPlayoffBracket,
   evaluateRealisticFinalsMvp,
   generateLeagueStandings,
+  getFinalsSeriesBestOf,
+  getHigherSeedHomeAdvantage,
   isInternationalLiveGame,
   resolveClutchPossession,
   resolveConfFinalsGame7InBracket,
@@ -154,6 +157,8 @@ import {
   LEAGUE_AWARD_QUOTAS,
   LEAGUE_BALANCE_META,
   LIVE_GAME_CONFIG,
+  PLAYOFF_SERIES_CONFIG,
+  REGULAR_SEASON_WIN_CONFIG,
   ROLE_MPG_CONFIG,
   canUseProTradeSystem,
   getInternationalTournamentByYear,
@@ -2587,11 +2592,11 @@ test('33. 4년 주기 국제대회, 아시안게임 난이도 완화, NBA/KBL �
   const evt2028 = rollSeasonEvent({ ...nbaStarForIntl, seasonYear: 2028 }, () => 0.1);
   assert.equal(evt2028?.id, 'EVT_INTL_OLYMPICS_2028');
 
-  // 3) Asian Games difficulty rebalancing: KBL Ace (OVR 77) comfortably competes for Gold
+  // 3) Asian Games realistic difficulty: KBL Ace (OVR 77) genuinely contends for Gold (~35~55%) without auto-exemption
   const korRatingAg = calculateKoreaTeamEffectiveRating(kblAce, 'ASIAN_GAMES');
   assert.ok(
-    korRatingAg >= 81,
-    `KBL Ace (OVR 77) should lift Korea Asian Games rating to >= 81, got ${korRatingAg}`
+    korRatingAg >= 75.5 && korRatingAg <= 81.0,
+    `KBL Ace (OVR 77) should put Korea Asian Games rating in realistic 75.5~81.0 band, got ${korRatingAg}`
   );
   let agFinalsCount = 0;
   let agGoldCount = 0;
@@ -2618,12 +2623,12 @@ test('33. 4년 주기 국제대회, 아시안게임 난이도 완화, NBA/KBL �
   const finalsRate = agFinalsCount / trials;
   const goldRate = agGoldCount / trials;
   assert.ok(
-    finalsRate >= 0.65,
-    `KBL Ace (OVR 77) Asian Games Finals reach rate must be >= 65%, got ${(finalsRate * 100).toFixed(1)}%`
+    finalsRate >= 0.30 && finalsRate <= 0.72,
+    `KBL Ace (OVR 77) Asian Games Finals reach rate must stay in competitive 30~72% range, got ${(finalsRate * 100).toFixed(1)}%`
   );
   assert.ok(
-    goldRate >= 0.45,
-    `KBL Ace (OVR 77) Asian Games Gold rate must be >= 45%, got ${(goldRate * 100).toFixed(1)}%`
+    goldRate >= 0.20 && goldRate <= 0.62,
+    `KBL Ace (OVR 77) Asian Games Gold rate must stay in tense 20~62% range (no auto-exemption), got ${(goldRate * 100).toFixed(1)}%`
   );
 
   // 4) Bronze match live game flow & Olympic Bronze military exemption
@@ -7504,6 +7509,325 @@ test('65. 4차 정밀 진단 보고서 26건(P0~P2) 전수 수정 회귀 검증'
     );
   }
 });
+
+test('66. 리그별 승률·플레이오프·라이브 결승·국제대회 정량 밸런스 개선(P0~P1) 검증', () => {
+  // [P0-1] 정규시즌 directionMod 대칭(±2.5%p), 컨퍼런스 일정 보정, AI 순위표 제로섬 수렴 검증
+  assert.equal(REGULAR_SEASON_WIN_CONFIG.contenderDirectionMod, 0.025);
+  assert.equal(REGULAR_SEASON_WIN_CONFIG.rebuildingDirectionMod, -0.025);
+
+  const nbaEastOppMean = getScheduleAdjustedTeamMeanRating('NBA', undefined, 'EAST');
+  const nbaWestOppMean = getScheduleAdjustedTeamMeanRating('NBA', undefined, 'WEST');
+  assert.ok(
+    nbaEastOppMean < nbaWestOppMean,
+    `NBA East schedule-adjusted opponent mean (${nbaEastOppMean}) should be lower than West (${nbaWestOppMean})`
+  );
+
+  for (const [lg, team, w, l] of [
+    ['HIGH_SCHOOL', HIGH_SCHOOL_TEAMS[0], 15, 15],
+    ['GLEAGUE', GLEAGUE_TEAMS[0], 25, 25],
+    ['NBA', NBA_TEAMS[0], 41, 41],
+  ] as const) {
+    let s = 20261126;
+    const rng = () => {
+      s = (s * 16807) % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+    const st = generateLeagueStandings(
+      createBaseCareer({ league: lg, team }),
+      w,
+      l,
+      rng
+    );
+    const meanWinPct = st.reduce((acc, e) => acc + e.winPct, 0) / st.length;
+    assert.ok(
+      meanWinPct >= 0.48 && meanWinPct <= 0.52,
+      `${lg} zero-sum standings mean winPct must converge near 0.50 (got ${meanWinPct.toFixed(3)})`
+    );
+  }
+
+  // [P0-2] 전 리그 playerBaselineOvr < growthCap 통일 → 고교·U리그·KBL 에이스 양(+)의 승리 기여 복원
+  for (const lg of Object.keys(LEAGUE_CONFIG) as Array<keyof typeof LEAGUE_CONFIG>) {
+    assert.ok(
+      LEAGUE_BALANCE_META[lg].playerBaselineOvr < LEAGUE_CONFIG[lg].growthCap,
+      `${lg} playerBaselineOvr (${LEAGUE_BALANCE_META[lg].playerBaselineOvr}) must be strictly below growthCap (${LEAGUE_CONFIG[lg].growthCap})`
+    );
+  }
+  const hsTeamAvg = { ...HIGH_SCHOOL_TEAMS[0], rating: 60, direction: 'PLAYOFF_HUNT' as const };
+  const hsAvgPlayer = createBaseCareer({
+    league: 'HIGH_SCHOOL',
+    team: hsTeamAvg,
+    age: 16,
+    ovr: 52,
+    stats: { ins: 52, out: 52, ply: 52, def: 52, reb: 52, phy: 52 },
+    coachTrust: 65,
+  });
+  const hsAcePlayer = createBaseCareer({
+    ...hsAvgPlayer,
+    age: 18,
+    ovr: 60,
+    stats: { ins: 60, out: 60, ply: 60, def: 60, reb: 60, phy: 60 },
+    coachTrust: 85,
+  });
+  const hsAvgSim = simulateSeason(hsAvgPlayer, () => 0.5);
+  const hsAceSim = simulateSeason(hsAcePlayer, () => 0.5);
+  assert.ok(
+    hsAceSim.boxScore.wins >= hsAvgSim.boxScore.wins + 2,
+    `HS 5-star ace (OVR 60, ${hsAceSim.boxScore.wins}W) must clearly carry above average peer (OVR 52, ${hsAvgSim.boxScore.wins}W)`
+  );
+
+  const kblMidTeam = { ...KBL_TEAMS[0], rating: 74, direction: 'PLAYOFF_HUNT' as const };
+  const kblAvgSim = simulateSeason(
+    createBaseCareer({
+      league: 'KBL',
+      team: kblMidTeam,
+      age: 24,
+      ovr: 68,
+      stats: { ins: 68, out: 68, ply: 68, def: 68, reb: 68, phy: 68 },
+      coachTrust: 70,
+    }),
+    () => 0.5
+  );
+  const kblStarSim = simulateSeason(
+    createBaseCareer({
+      league: 'KBL',
+      team: kblMidTeam,
+      age: 26,
+      ovr: 76,
+      stats: { ins: 76, out: 76, ply: 76, def: 76, reb: 76, phy: 76 },
+      coachTrust: 88,
+    }),
+    () => 0.5
+  );
+  assert.ok(
+    kblStarSim.boxScore.wins >= kblAvgSim.boxScore.wins + 4,
+    `KBL star (OVR 76, ${kblStarSim.boxScore.wins}W) must provide strong positive win carry over OVR 68 starter (${kblAvgSim.boxScore.wins}W)`
+  );
+
+  // [P0-3] 4대 국제대회 현실화: 올림픽·월드컵 최대 한국 전력 <= 87 (미국 94 미만), 아시안게임 기본 전력 현실화
+  assert.ok(
+    INTERNATIONAL_TOURNAMENT_CONFIG.ASIAN_GAMES.baseKorRating <= 74.0,
+    'Asian Games baseKorRating must be <= 74.0 to prevent automatic military exemption'
+  );
+  const nbaGoat = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 28,
+    ovr: 99,
+    stats: { ins: 99, out: 99, ply: 99, def: 95, reb: 90, phy: 96 },
+    traits: ['CLUTCH_PERFORMER'],
+  });
+  const olympicMaxKor = calculateKoreaTeamEffectiveRating(nbaGoat, 'OLYMPICS');
+  const wcMaxKor = calculateKoreaTeamEffectiveRating(nbaGoat, 'FIBA_WORLD_CUP');
+  assert.ok(
+    olympicMaxKor <= 87.0 && wcMaxKor <= 87.0,
+    `Even with OVR 99 NBA GOAT, Korea Olympics (${olympicMaxKor}) and World Cup (${wcMaxKor}) ratings must stay <= 87 (below USA 94)`
+  );
+
+  // [P1-4] 플레이오프 홈/원정 경기별 교대 + MPG/부상 감쇠 + 왕조 상한 검증
+  assert.equal(getHigherSeedHomeAdvantage(7, 1), PLAYOFF_SERIES_CONFIG.homeCourtRatingEdge);
+  assert.equal(getHigherSeedHomeAdvantage(7, 3), -PLAYOFF_SERIES_CONFIG.homeCourtRatingEdge);
+  assert.equal(getHigherSeedHomeAdvantage(7, 5), PLAYOFF_SERIES_CONFIG.homeCourtRatingEdge);
+  assert.equal(getHigherSeedHomeAdvantage(7, 6), -PLAYOFF_SERIES_CONFIG.homeCourtRatingEdge);
+  assert.equal(getHigherSeedHomeAdvantage(7, 7), PLAYOFF_SERIES_CONFIG.homeCourtRatingEdge);
+  assert.equal(getHigherSeedHomeAdvantage(5, 3), -PLAYOFF_SERIES_CONFIG.homeCourtRatingEdge);
+  assert.equal(getHigherSeedHomeAdvantage(3, 2), -PLAYOFF_SERIES_CONFIG.homeCourtRatingEdge);
+
+  // 벤치 루키(6 MPG + CLUTCH) vs 풀출전 슈퍼스타(36 MPG + CLUTCH) 플레이오프 시리즈 승률 격차 확인
+  const teamA = { ...NBA_TEAMS[0], rating: 85 };
+  const teamB = { ...NBA_TEAMS[1], rating: 85 };
+  const makePoTest = (careerOverride: Partial<CareerState>) => {
+    const c = createBaseCareer({
+      league: 'NBA',
+      team: teamA,
+      ...careerOverride,
+    });
+    const baseBracket = createPlayoffBracket(
+      c,
+      generateLeagueStandings(c, 50, 32, () => 0.5),
+      () => 0.5
+    );
+    // 단일 BO7 시리즈 직접 반복 검증 (동일 팀 레이팅 85 vs 85)
+    const entryA = {
+      rank: 1,
+      conference: 'EAST' as const,
+      conferenceRank: 1,
+      team: teamA,
+      wins: 50,
+      losses: 32,
+      winPct: 0.61,
+      gb: 0,
+      isPlayerTeam: true,
+      qualifiedPlayoffs: true,
+      playInQualified: false,
+    };
+    const entryB = {
+      ...entryA,
+      rank: 2,
+      conferenceRank: 2,
+      team: teamB,
+      isPlayerTeam: false,
+    };
+    const singleRoundBracket = {
+      ...baseBracket,
+      totalRounds: 4,
+      currentRound: 1,
+      stageType: 'MAIN_PLAYOFF' as const,
+      playerReachedFinals: false,
+      rounds: [
+        [
+          {
+            id: 'TEST_BO7',
+            round: 1,
+            roundLabel: '테스트 BO7',
+            bestOf: 7,
+            winsNeeded: 4,
+            higherSeed: entryA,
+            lowerSeed: entryB,
+            higherSeedWins: 0,
+            lowerSeedWins: 0,
+            winnerId: null,
+            involvesPlayer: true,
+            summaryLog: [],
+          },
+          {
+            id: 'TEST_BO7_OTHER',
+            round: 1,
+            roundLabel: '테스트 BO7 B',
+            bestOf: 7,
+            winsNeeded: 4,
+            higherSeed: entryB,
+            lowerSeed: entryA,
+            higherSeedWins: 0,
+            lowerSeedWins: 0,
+            winnerId: null,
+            involvesPlayer: false,
+            summaryLog: [],
+          },
+        ],
+      ],
+    };
+    let wins = 0;
+    let seed = 424242;
+    const rng = () => {
+      seed = (seed * 16807) % 2147483647;
+      return (seed - 1) / 2147483646;
+    };
+    const N = 400;
+    for (let i = 0; i < N; i++) {
+      const done = advancePlayoffRound(singleRoundBracket, c, [entryA, entryB], rng);
+      if (done.rounds[0][0].winnerId === teamA.id) wins++;
+    }
+    return wins / N;
+  };
+
+  const benchRookiePoWinRate = makePoTest({
+    ovr: 84,
+    stats: { ins: 84, out: 84, ply: 84, def: 84, reb: 84, phy: 84 },
+    traits: ['CLUTCH_PERFORMER'],
+    role: '벤치 후보',
+    seasonLogs: [createSeasonLog({ league: 'NBA', gp: 60, mpg: 6.0 })],
+  });
+  const healthyAcePoWinRate = makePoTest({
+    heightCm: 195,
+    primaryPos: 'SG',
+    ovr: 96,
+    stats: { ins: 99, out: 99, ply: 98, def: 95, reb: 90, phy: 98 },
+    traits: ['CLUTCH_PERFORMER'],
+    role: '에이스',
+    seasonLogs: [createSeasonLog({ league: 'NBA', gp: 80, mpg: 36.0 })],
+  });
+  const injuredAcePoWinRate = makePoTest({
+    heightCm: 195,
+    primaryPos: 'SG',
+    ovr: 96,
+    stats: { ins: 99, out: 99, ply: 98, def: 95, reb: 90, phy: 98 },
+    traits: ['CLUTCH_PERFORMER'],
+    role: '에이스',
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        gp: 28,
+        mpg: 36.0,
+        injuredGamesMissed: 54,
+        injurySeverity: 'MAJOR',
+      }),
+    ],
+  });
+  assert.ok(
+    benchRookiePoWinRate >= 0.45 && benchRookiePoWinRate <= 0.58,
+    `6-MPG bench rookie with CLUTCH on equal team must stay near ~51% BO7 win rate, got ${(benchRookiePoWinRate * 100).toFixed(1)}%`
+  );
+  assert.ok(
+    healthyAcePoWinRate > injuredAcePoWinRate + 0.08,
+    `Healthy 36-MPG ace (${(healthyAcePoWinRate * 100).toFixed(1)}%) must significantly outperform severely injured ace (${(injuredAcePoWinRate * 100).toFixed(1)}%)`
+  );
+
+  // [P1-5] NBA 리빌딩 약팀(78) 캐리 상향 vs 최강 슈퍼팀(92) 수확체감 검증
+  const weakNbaTeam = { ...NBA_TEAMS.find((t) => t.rating <= 79)!, rating: 78, direction: 'REBUILDING' as const };
+  const strongNbaTeam = { ...NBA_TEAMS.find((t) => t.rating >= 90)!, rating: 92, direction: 'CONTENDER' as const };
+  const rebuildingGoatSim = simulateSeason(
+    createBaseCareer({
+      league: 'NBA',
+      team: weakNbaTeam,
+      age: 27,
+      ovr: 96,
+      stats: { ins: 96, out: 96, ply: 95, def: 92, reb: 86, phy: 95 },
+      traits: ['CLUTCH_PERFORMER'],
+      coachTrust: 95,
+    }),
+    () => 0.5
+  );
+  const superteamGoatSim = simulateSeason(
+    createBaseCareer({
+      league: 'NBA',
+      team: strongNbaTeam,
+      age: 28,
+      ovr: 98,
+      stats: { ins: 98, out: 98, ply: 96, def: 94, reb: 88, phy: 96 },
+      traits: ['CLUTCH_PERFORMER'],
+      coachTrust: 95,
+    }),
+    () => 0.5
+  );
+  assert.ok(
+    rebuildingGoatSim.boxScore.wins >= 42,
+    `OVR 96 GOAT carrying a 78-rated rebuilding NBA team must reach >= 42 wins at median RNG, got ${rebuildingGoatSim.boxScore.wins}`
+  );
+  assert.ok(
+    superteamGoatSim.boxScore.wins <= 66,
+    `OVR 98 GOAT on a 92-rated contender must face diminishing returns (<= 66 wins at median RNG), got ${superteamGoatSim.boxScore.wins}`
+  );
+
+  // [P1-6] 라이브 전술 밸런스 & 다전제 파이널 매치포인트 서사 연결 검증
+  assert.equal(LIVE_GAME_CONFIG.tacticMods.PACE_CONSERVE.defBonus, 0);
+  assert.equal(LIVE_GAME_CONFIG.tacticMods.ACE_HERO.staminaDrain, 18);
+  assert.equal(getFinalsSeriesBestOf('NBA'), 7);
+  assert.equal(getFinalsSeriesBestOf('NBL'), 5);
+  assert.equal(getFinalsSeriesBestOf('B_LEAGUE'), 3);
+  assert.equal(getFinalsSeriesBestOf('HIGH_SCHOOL'), 1);
+
+  const nbaLiveFinal = createLiveFinalGame(
+    createBaseCareer({ league: 'NBA', team: NBA_TEAMS[0] }),
+    NBA_TEAMS[1],
+    'LEAGUE_FINALS'
+  );
+  assert.ok(nbaLiveFinal.title.includes('7차전') && nbaLiveFinal.subtitle.includes('3승 3패'));
+
+  const nblLiveFinal = createLiveFinalGame(
+    createBaseCareer({ league: 'NBL', team: NBL_TEAMS[0] }),
+    NBL_TEAMS[1],
+    'LEAGUE_FINALS'
+  );
+  assert.ok(nblLiveFinal.title.includes('5차전') && nblLiveFinal.subtitle.includes('2승 2패'));
+
+  const hsLiveFinal = createLiveFinalGame(
+    createBaseCareer({ league: 'HIGH_SCHOOL', team: HIGH_SCHOOL_TEAMS[0] }),
+    HIGH_SCHOOL_TEAMS[1],
+    'LEAGUE_FINALS'
+  );
+  assert.ok(hsLiveFinal.subtitle.includes('단판 우승 결정전'));
+});
+
 
 
 

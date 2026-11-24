@@ -765,14 +765,32 @@ function applyCompletedLiveGameOutcome(
   }
 
   const updatedBracket = career.playoffBracket
-    ? {
-        ...career.playoffBracket,
-        championTeamId: outcome.won
+    ? (() => {
+        const champTeamId = outcome.won
           ? career.team.id
-          : finishedLive.opponentTeam.id,
-        playerEliminated: !outcome.won,
-        playoffResultLabel: outcome.won ? '리그 우승' : '파이널 준우승',
-      }
+          : finishedLive.opponentTeam.id;
+        const nextRounds = career.playoffBracket.rounds.map((roundList, rIdx) => {
+          if (rIdx !== career.playoffBracket!.rounds.length - 1) return roundList;
+          return roundList.map((s) => {
+            if (!s.involvesPlayer) return s;
+            const tiedWins = Math.max(0, s.winsNeeded - 1);
+            const hiWon = s.higherSeed.team.id === champTeamId;
+            return {
+              ...s,
+              higherSeedWins: hiWon ? s.winsNeeded : tiedWins,
+              lowerSeedWins: hiWon ? tiedWins : s.winsNeeded,
+              winnerId: champTeamId,
+            };
+          });
+        });
+        return {
+          ...career.playoffBracket,
+          rounds: nextRounds,
+          championTeamId: champTeamId,
+          playerEliminated: !outcome.won,
+          playoffResultLabel: outcome.won ? '리그 우승' : '파이널 준우승',
+        };
+      })()
     : null;
 
   return {
