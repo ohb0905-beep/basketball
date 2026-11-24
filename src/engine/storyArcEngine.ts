@@ -12,6 +12,10 @@ import {
   getEffectiveRelationships,
   getEffectiveStoryArcs,
 } from './progressionEngine';
+import {
+  LEAGUE_BALANCE_META,
+  canUseProTradeSystem,
+} from '../config/balanceConfig';
 import { PLAYER_TRAIT_META } from './statCalculator';
 
 const STAT_SHORT_LABEL: Record<keyof PlayerStats, string> = {
@@ -93,16 +97,7 @@ export function checkEncounterChoiceUnlock(
   };
 }
 
-function isProLeague(league: CareerState['league']): boolean {
-  return (
-    league === 'KBL' ||
-    league === 'B_LEAGUE' ||
-    league === 'NBL' ||
-    league === 'EUROLEAGUE' ||
-    league === 'GLEAGUE' ||
-    league === 'NBA'
-  );
-}
+
 
 function buildCoachTacticsArcEvent(
   career: CareerState,
@@ -308,10 +303,13 @@ function buildCoachTacticsArcEvent(
       {
         label: '우승 로스터 보강을 프런트에 공개 요구',
         description: '에이스의 발언권을 행사해 즉전감 영입과 공격 자유도를 강하게 압박합니다.',
-        effectSummary: '잠재력 +1 · OUT +1 · 언론·팬심 +8 · 프런트 -5',
+        effectSummary:
+          career.age >= 31
+            ? 'OUT +2 · 언론·팬심 +8 · 프런트 -5'
+            : '잠재력 +1 · OUT +1 · 언론·팬심 +8 · 프런트 -5',
         riskTier: 'SAFE',
-        statChanges: { out: 1 },
-        potentialDelta: 1,
+        statChanges: career.age >= 31 ? { out: 2 } : { out: 1 },
+        ...(career.age >= 31 ? {} : { potentialDelta: 1 }),
         relationshipChanges: { mediaFan: 8, frontOffice: -5 },
         arcAdvance: {
           arcId: 'COACH_TACTICS_ARC',
@@ -351,7 +349,8 @@ function buildRivalDestinyArcEvent(
   career: CareerState,
   nextStage: number
 ): CareerEvent {
-  const rival = career.rivals?.[0];
+  const rival =
+    career.rivals?.find((r) => r.league === career.league) ?? career.rivals?.[0];
   const rivalName = rival?.name || '동기 에이스';
   const rivalTeam = rival?.teamShortName || '라이벌 구단';
 
@@ -372,7 +371,8 @@ function buildRivalDestinyArcEvent(
           effectSummary: 'DEF +1 · 라커룸 +5 · 감독 신뢰 +4',
           riskTier: 'SAFE',
           statChanges: { def: 1 },
-          relationshipChanges: { lockerRoom: 5, coachTrust: 4 },
+          trustDelta: 4,
+          relationshipChanges: { lockerRoom: 5 },
           arcAdvance: {
             arcId: 'RIVAL_DESTINY_ARC',
             nextStage: 1,
@@ -546,11 +546,12 @@ function buildRivalDestinyArcEvent(
       {
         label: '결국 우승 반지가 시대의 주인을 가린다며 정면 선언',
         description: '우승 타이틀로 라이벌리에 마침표를 찍겠다고 못 박습니다.',
-        effectSummary: 'INS +1 · 언론·팬심 +12 · 스카우트 평가 +5',
+        effectSummary: 'INS +1 · 언론·팬심 +12 · 감독 신뢰 +5 · 스카우트 평가 +5',
         riskTier: 'SAFE',
         statChanges: { ins: 1 },
         draftStockDelta: 5,
-        relationshipChanges: { mediaFan: 12, coachTrust: 5 },
+        trustDelta: 5,
+        relationshipChanges: { mediaFan: 12 },
         arcAdvance: {
           arcId: 'RIVAL_DESTINY_ARC',
           nextStage: 3,
@@ -974,14 +975,19 @@ function buildNationalTorchArcEvent(
       {
         label: '세대를 잇는 대한민국 농구의 상징으로 등극',
         description: '완벽한 라커룸 신뢰와 위상으로 한국 농구 황금기를 선도합니다.',
-        effectSummary: '라커룸 +12 · 언론·팬심 +12 · 프런트 +6 · 잠재력 +1 확정',
+        effectSummary:
+          career.age >= 31
+            ? '라커룸 +12 · 언론·팬심 +12 · 프런트 +6 · PLY +1, OUT +1 확정'
+            : '라커룸 +12 · 언론·팬심 +12 · 프런트 +6 · 잠재력 +1 확정',
         riskTier: 'SAFE',
         isExclusiveChoice: true,
         requirements: {
           minRelationship: { lockerRoom: 74 },
           label: '전용 분기 · 라커룸 74+',
         },
-        potentialDelta: 1,
+        ...(career.age >= 31
+          ? { statChanges: { ply: 1, out: 1 } }
+          : { potentialDelta: 1 }),
         relationshipChanges: { lockerRoom: 12, mediaFan: 12, frontOffice: 6 },
         arcAdvance: {
           arcId: 'NATIONAL_TORCH_ARC',
@@ -998,13 +1004,23 @@ function buildNationalTorchArcEvent(
 /**
  * 현재 커리어 상태에 따라 다음 단계로 진입 가능한 멀티 시즌 스토리 아크 이벤트를 선정합니다.
  * - 동일 아크는 최소 1시즌 이상 간격을 두고 진행
- * - 프로 무대 및 대표팀 경력 조건에 자연스럽게 연동
+ * - 프로 무대 및 대표팀 경력 조건에 자연스럽게 연동 (상무 군 복무 중에는 제외)
  */
 export function rollStoryArcEvent(
   career: CareerState,
   rng: () => number = Math.random
 ): CareerEvent | null {
-  if (!isProLeague(career.league)) return null;
+  if (!LEAGUE_BALANCE_META[career.league]?.isPro) return null;
+  if (
+    !canUseProTradeSystem({
+      league: career.league,
+      contractType: career.contractType,
+      isMilitaryTeam: career.team.isMilitaryTeam,
+      teamId: career.team.id,
+    })
+  ) {
+    return null;
+  }
 
   const arcs = getEffectiveStoryArcs(career);
   const seenIds = career.seenEventIds || [];
@@ -1050,9 +1066,12 @@ export function rollStoryArcEvent(
     });
   }
 
+  const hasSameLeagueRival = (career.rivals || []).some(
+    (r) => r.league === career.league
+  );
   if (
     canAdvance(arcs.RIVAL_DESTINY_ARC, 1) &&
-    (career.rivals?.length || 0) > 0 &&
+    hasSameLeagueRival &&
     career.ovr >= 72
   ) {
     eligible.push({

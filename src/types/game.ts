@@ -185,6 +185,7 @@ export interface LeagueConfig {
   id: LeagueId;
   name: string;
   shortName: string;
+  gamesPerSeason: number;
   games: number;
   ldr: number;        // League Defensive Resistance (수비 저항치)
   growthCap: number;  // 리그 성장 상한선
@@ -219,7 +220,7 @@ export interface AsianGamesMatchLog {
 
 export interface AsianGamesTournamentResult {
   reachedFinals: boolean;
-  eliminatedStage: 'QUARTERFINAL' | 'SEMIFINAL' | null;
+  eliminatedStage: 'GROUP' | 'QUARTERFINAL' | 'SEMIFINAL' | null;
   finalOpponent: TeamInfo;
   matches: AsianGamesMatchLog[];
   summaryHeadline: string;
@@ -409,14 +410,15 @@ export type InternationalMedalType =
   | 'SILVER'
   | 'BRONZE'
   | 'FOURTH'
-  | 'QUARTERFINAL';
+  | 'QUARTERFINAL'
+  | 'GROUP';
 
 export interface InternationalTournamentResult {
   tournamentType: InternationalTournamentType;
   tournamentName: string;
   reachedFinals: boolean;
   reachedBronzeMatch: boolean;
-  eliminatedStage: 'QUARTERFINAL' | 'SEMIFINAL' | null;
+  eliminatedStage: 'GROUP' | 'QUARTERFINAL' | 'SEMIFINAL' | null;
   finalOpponent: TeamInfo | null;
   bronzeOpponent: TeamInfo | null;
   korEffectiveRating: number;
@@ -459,6 +461,7 @@ export interface LiveGameState {
   opponentTeam: TeamInfo;
   quarter: number; // 현재 진행 완료된 쿼터 (0 = 시작 전, 1~4, 5=OT)
   isFinished: boolean;
+  wasSkipped?: boolean;
   teamScore: number;
   oppScore: number;
   currentTactic: LiveTacticId;
@@ -578,6 +581,7 @@ export interface CareerHighs {
   steals: number;
   blocks: number;
   pointsContext: string;
+  pointsLeague?: LeagueId;
 }
 
 export interface CareerMilestone {
@@ -702,6 +706,7 @@ export interface CareerEventChoice {
   negotiateMidSeasonTrade?: boolean;
   markAgentAdviceDismissed?: boolean;
   triggerVeteranReinvention?: boolean;
+  bypassAgeStatCap?: boolean;
   nextChainEvent?: CareerEvent;
 }
 
@@ -971,6 +976,7 @@ export interface HallOfFameEntry {
   secondaryPos: Position | null;
   peakOvr: number;
   finalAge: number;
+  finalSeasonYear?: number;
   seasonsPlayed: number;
   retirementReason: RetirementReason;
   legacyTierId: LegacyTierId;
@@ -1016,6 +1022,7 @@ export interface HallOfFameEntry {
     apg: number;
   };
   careerHighPts: number;
+  leagueCareerHighPts?: Partial<Record<LeagueId, number>>;
   epitaph: string;
   retrospective?: CareerRetrospective;
 }
@@ -1027,6 +1034,8 @@ export interface CombineState {
   projectedPick: number;
   scoutingReport: string;
   undraftedRisk: boolean;
+  statGains?: Partial<PlayerStats>;
+  trustGain?: number;
 }
 
 export interface CareerState {
@@ -1148,6 +1157,7 @@ export interface CareerState {
   offseasonLocked: boolean;
   offseasonOptions: OffseasonOption[];
   pendingEvent: CareerEvent | null;
+  pendingEventQueue?: CareerEvent[];
   combineState: CombineState | null;
   draftResult: {
     draftType: 'NBA' | 'KBL';

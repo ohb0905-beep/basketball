@@ -5,34 +5,39 @@ import { CareerState } from '../types/game';
  * 달러 금액 축약 포맷 (예: $12.5M, $450K, $800)
  */
 export function formatCurrencyCompact(amountUsd?: number | null): string {
-  if (!amountUsd || amountUsd <= 0) return '$0';
-  if (amountUsd >= 1_000_000) {
-    return `$${(amountUsd / 1_000_000).toFixed(1)}M`;
+  if (!amountUsd || amountUsd === 0) return '$0';
+  const sign = amountUsd < 0 ? '-' : '';
+  const abs = Math.abs(amountUsd);
+  if (abs >= 1_000_000) {
+    return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
   }
-  if (amountUsd >= 1_000) {
-    return `$${Math.round(amountUsd / 1_000).toLocaleString()}K`;
+  if (abs >= 1_000) {
+    return `${sign}$${Math.round(abs / 1_000).toLocaleString()}K`;
   }
-  return `$${Math.round(amountUsd).toLocaleString()}`;
+  return `${sign}$${Math.round(abs).toLocaleString()}`;
 }
 
 /**
  * 달러 금액 정밀 포맷 (계약·자산·캠프 비용 표시용, 예: $12.50M, $450K)
  */
 export function formatCurrencyDetailed(amountUsd?: number | null): string {
-  if (!amountUsd || amountUsd <= 0) return '$0';
-  if (amountUsd >= 1_000_000) {
-    return `$${(amountUsd / 1_000_000).toFixed(2)}M`;
+  if (!amountUsd || amountUsd === 0) return '$0';
+  const sign = amountUsd < 0 ? '-' : '';
+  const abs = Math.abs(amountUsd);
+  if (abs >= 1_000_000) {
+    return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
   }
-  if (amountUsd >= 1_000) {
-    return `$${Math.round(amountUsd / 1_000).toLocaleString()}K`;
+  if (abs >= 1_000) {
+    return `${sign}$${Math.round(abs / 1_000).toLocaleString()}K`;
   }
-  return `$${Math.round(amountUsd).toLocaleString()}`;
+  return `${sign}$${Math.round(abs).toLocaleString()}`;
 }
 
 /**
- * 증감 금액 포맷 (예: +$250K, -$1.20M)
+ * 증감 금액 포맷 (예: +$250K, -$1.20M, $0)
  */
 export function formatCashDelta(delta: number): string {
+  if (!delta || delta === 0) return '$0';
   const sign = delta > 0 ? '+' : '-';
   const abs = Math.abs(delta);
   if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
@@ -169,10 +174,7 @@ export function getMilitaryStatusDisplay(
   const yearsLeft = enlistAge - career.age;
   return {
     status: 'UNFULFILLED',
-    label:
-      career.league === 'NBA'
-        ? `미필 (만 ${enlistAge}세)`
-        : `미필 (만 ${enlistAge}세)`,
+    label: `미필 (만 ${enlistAge}세)`,
     tone: yearsLeft <= 2 ? 'gold' : 'muted',
   };
 }

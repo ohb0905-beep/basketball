@@ -45,7 +45,10 @@ import {
   getPlayoffCutoffByLeague,
 } from './playoffEngine';
 import { getEffectiveRelationships } from './progressionEngine';
-import { applyAgingCurve } from './retirementEngine';
+import {
+  applyAgingCurve,
+  computeEffectiveAgingOnset,
+} from './retirementEngine';
 import {
   calculateBiomechanicalProfile,
   calculateHeightMismatchPenalty,
@@ -638,7 +641,7 @@ export function simulateRivalsSeason(
 
     const sameLeague = r.league === playerBox.league;
     const headline = `${r.teamShortName}의 동기 라이벌 ${r.name}(${r.pos}, OVR ${nextOvr}) 선수가 이번 시즌 평균 ${ppg}점 ${rpg}리바운드 ${apg}도움을 기록했습니다.`;
-    if (idx === 0 && sameLeague) {
+    if (!rivalNarrative && sameLeague) {
       const diffPpg = (playerBox.ppg - ppg).toFixed(1);
       rivalNarrative = `라이벌 매치업 · 드래프트 동기 ${r.name}(${r.teamShortName}) 평균 ${ppg}점 ${rpg}리바운드 ${apg}도움 (내 득점 대비 ${
         Number(diffPpg) >= 0 ? `+${diffPpg}` : diffPpg
@@ -666,7 +669,13 @@ export function simulateRivalsSeason(
 
   const foreignAwardMap = new Map<
     string,
-    { wonMvp: boolean; allStar: boolean; wonRoy: boolean; leagueLabel: string }
+    {
+      wonMvp: boolean;
+      allStar: boolean;
+      wonRoy: boolean;
+      wonChampionship: boolean;
+      leagueLabel: string;
+    }
   >();
 
   for (const [foreignLeague, leagueRivals] of foreignLeagueBuckets.entries()) {
@@ -678,6 +687,34 @@ export function simulateRivalsSeason(
       teamRatingsMap,
       rng
     );
+
+    // 타 리그 플레이오프 우승 구단 시뮬레이션 (PO 진출권 팀 전력·정규 순위 가중 추첨)
+    const poCutoff = Math.max(
+      2,
+      Math.min(
+        foreignStandings.length,
+        getPlayoffCutoffByLeague(foreignLeague, foreignStandings.length)
+      )
+    );
+    const poContenders = foreignStandings.slice(0, poCutoff);
+    let foreignChampionTeamId: string | null = null;
+    if (poContenders.length > 0) {
+      const weights = poContenders.map((st, sIdx) => {
+        const seedWeight = Math.max(1, poCutoff - sIdx);
+        const ratingBoost = Math.max(1, st.team.rating - foreignCfg.ldr + 10);
+        return seedWeight * ratingBoost * ratingBoost;
+      });
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      let roll = rng() * totalWeight;
+      foreignChampionTeamId = poContenders[0].team.id;
+      for (let i = 0; i < poContenders.length; i++) {
+        roll -= weights[i];
+        if (roll <= 0) {
+          foreignChampionTeamId = poContenders[i].team.id;
+          break;
+        }
+      }
+    }
 
     const occupiedSlots = new Map<string, number>();
     const pool: LeagueAwardCandidate[] = [];
@@ -693,6 +730,7 @@ export function simulateRivalsSeason(
       const rSpg = snap?.spg ?? 1.1;
       const rBpg = snap?.bpg ?? (r.pos === 'C' || r.pos === 'PF' ? 1.2 : 0.4);
       const rFgPct = snap?.fgPct ?? (r.pos === 'C' ? 52.5 : 46.5);
+      const rDefStat = Math.round(clampNum(r.ovr + (rng() * 6 - 3), 50, 96));
       const rEligible =
         rGp / Math.max(1, foreignCfg.games) >= foreignMeta.minAttendanceRatio &&
         rMpg >= AWARD_VOTING_CONFIG.minMpgForMajorAward;
@@ -715,6 +753,7 @@ export function simulateRivalsSeason(
         spg: rSpg,
         bpg: rBpg,
         fgPct: rFgPct,
+        defStat: rDefStat,
         wins: rWins,
         losses: rLosses,
         eligible: rEligible,
@@ -745,6 +784,15 @@ export function simulateRivalsSeason(
           spg: rSpg,
           bpg: rBpg,
           fgPct: rFgPct,
+          wins: rWins,
+          losses: rLosses,
+        }),
+        dpoyScore: calcUnifiedDpoyScore({
+          pos: r.pos,
+          defStat: rDefStat,
+          spg: rSpg,
+          bpg: rBpg,
+          rpg: r.rpg,
           wins: rWins,
           losses: rLosses,
         }),
@@ -790,6 +838,7 @@ export function simulateRivalsSeason(
         wonMvp: mvpWinner?.id === candId,
         allStar: allStarIds.has(candId),
         wonRoy: royWinnerId === candId,
+        wonChampionship: foreignChampionTeamId === r.teamId,
         leagueLabel: foreignMeta.allStarLabel,
       });
     }
@@ -799,12 +848,14 @@ export function simulateRivalsSeason(
     const foreignRes = foreignAwardMap.get(r.id);
     if (!foreignRes) return r;
     const awardTags: string[] = [];
+    if (foreignRes.wonChampionship) awardTags.push('리그 우승');
     if (foreignRes.wonMvp) awardTags.push('정규시즌 MVP');
     if (foreignRes.allStar) awardTags.push(foreignRes.leagueLabel);
     if (foreignRes.wonRoy) awardTags.push('신인왕');
     const suffix = awardTags.length > 0 ? ` (${awardTags.join(' · ')} 선정)` : '';
     return {
       ...r,
+      championships: r.championships + (foreignRes.wonChampionship ? 1 : 0),
       allStars: r.allStars + (foreignRes.allStar ? 1 : 0),
       mvps: r.mvps + (foreignRes.wonMvp ? 1 : 0),
       roys: r.roys + (foreignRes.wonRoy ? 1 : 0),
@@ -943,45 +994,23 @@ export function calculateRoleAndMpg(
     ).toFixed(2)
   );
 
-  if (career.contractType === 'TWO_WAY') {
-    const gp = Math.min(50, Math.round(18 + rng() * 24));
-    const role = '투웨이 콜업 로테이션';
-    const effBoostMpg = Math.max(0, efficiencyMomentum * 0.9);
-    const mpg = Number(
-      Math.min(
-        24.5,
-        8.5 + Math.max(0, (career.ovr - (leagueConfig.ldr - 14)) * 1.1) + effBoostMpg
-      ).toFixed(1)
-    );
-    return {
-      roleIndex,
-      role,
-      mpg,
-      gp,
-      injuredGamesMissed: 0,
-      injurySeverity: 'NONE',
-      injuryPermanentPhyPenalty: 0,
-      veteranLoadManaged: false,
-      basePer36: 12.8,
-    };
-  }
-
   let role = '가비지 타임 (벤치 끝자리)';
   let mpg = 6.0;
   let healthyGp = leagueConfig.games;
   let basePer36 = 10.0;
 
-  if (isFirstRoundPedigree && roleIndex < 7 && rawOvrDiff < 2) {
-    const isTopLottery =
-      pick !== null && (career.league === 'KBL' ? pick <= 3 : pick <= 10);
-    role = isTopLottery
-      ? '주전급 코어 유망주 (1라운드 픽)'
-      : '핵심 유망주 로테이션 (1라운드 픽)';
-    const minMpg = isTopLottery ? 23.5 : 20.0;
-    const maxMpg = isTopLottery ? 28.0 : 25.5;
-    mpg = Number((minMpg + rng() * (maxMpg - minMpg)).toFixed(1));
-    healthyGp = Math.max(1, Math.round(leagueConfig.games * (0.9 + rng() * 0.1)));
-    basePer36 = isTopLottery ? 16.5 : 14.8;
+  if (career.contractType === 'TWO_WAY') {
+    // 투웨이 계약도 아래 노장 로드매니지먼트·부상 판정 파이프라인을 그대로 통과하도록 통합
+    healthyGp = Math.min(50, Math.round(18 + rng() * 24));
+    role = '투웨이 콜업 로테이션';
+    const effBoostMpg = Math.max(0, efficiencyMomentum * 0.9);
+    mpg = Number(
+      Math.min(
+        24.5,
+        8.5 + Math.max(0, (career.ovr - (leagueConfig.ldr - 14)) * 1.1) + effBoostMpg
+      ).toFixed(1)
+    );
+    basePer36 = 12.8;
   } else {
     // [연속 시그모이드 보간] 계단식 절벽 점프 없이 roleIndex에 따라 출전시간/볼륨/출전비율이 매끄럽게 상승
     const roleFactor = sigmoid((roleIndex + 1.2) / 4.3);
@@ -1009,7 +1038,27 @@ export function calculateRoleAndMpg(
     );
     healthyGp = Math.max(1, Math.round(leagueConfig.games * healthyRatio));
 
-    if (mpg < 10.0) {
+    // 1라운드 드래프트 위상(Pedigree) 보호: 별도 if-override 대신 연속 곡선 위에 하한선(floor)으로 매끄럽게 적용
+    if (isFirstRoundPedigree) {
+      const isTopLottery =
+        pick !== null && (career.league === 'KBL' ? pick <= 3 : pick <= 10);
+      const minPedigreeMpg = isTopLottery ? 23.5 : 20.0;
+      const minPedigreePer36 = isTopLottery ? 16.5 : 14.8;
+      const minPedigreeGp = Math.max(1, Math.round(leagueConfig.games * 0.88));
+      const pedigreeFloorApplied = mpg < minPedigreeMpg;
+      mpg = Number(Math.max(mpg, minPedigreeMpg).toFixed(1));
+      basePer36 = Number(Math.max(basePer36, minPedigreePer36).toFixed(2));
+      healthyGp = Math.max(healthyGp, minPedigreeGp);
+      if (pedigreeFloorApplied || mpg < 27.5) {
+        role = isTopLottery
+          ? '주전급 코어 유망주 (1라운드 픽)'
+          : '핵심 유망주 로테이션 (1라운드 픽)';
+      } else if (mpg < 31.8) {
+        role = '주전 스타터';
+      } else {
+        role = '프랜차이즈 1옵션 에이스';
+      }
+    } else if (mpg < 10.0) {
       role = '가비지 타임 (벤치 끝자리)';
     } else if (mpg < 17.5) {
       role = '벤치 로테이션';
@@ -1153,11 +1202,13 @@ export function calculateRoleAndMpg(
         : rehabCfg.injuryGamesMultiplier
       : 1.0;
 
+    const injuryBaseGames =
+      career.contractType === 'TWO_WAY' ? healthyGp : leagueConfig.games;
     injuredGamesMissed = Math.max(
       1,
       Math.min(
         Math.max(1, healthyGp - 1),
-        Math.round(leagueConfig.games * rawMissRatio * careGamesMult)
+        Math.round(injuryBaseGames * rawMissRatio * careGamesMult)
       )
     );
 
@@ -1202,18 +1253,25 @@ export function calculatePpg(
   const ppgCfg = ROLE_MPG_CONFIG.ppg;
   const attackStat = stats.ins * 0.52 + stats.out * 0.48;
   const diff = attackStat - ldr;
+  const generationalBonus = Math.max(0, attackStat - 93) * 0.012;
   const offEdge =
     (diff >= 0
       ? Math.max(
           0.28,
-          1.0 + (diff <= 11 ? diff / 35 : 11 / 35 + (diff - 11) / 85)
+          1.0 + (diff <= 11 ? diff / 35 : 11 / 35 + (diff - 11) / 85) + generationalBonus
         )
       : Math.max(0.28, 1.0 + diff / 26)) * traitMultiplier;
 
   const rawPpg = (mpg / 36) * basePer36 * offEdge + (rng() * 1.8 - 0.9);
+  // 초정상급 득점원(attackStat > 89) 구간에서는 소프트캡 기울기를 완만하게 완화해 역대급 NBA 득점 기록(34.0+ PPG) 도전을 허용
+  const effectiveSlope = clampNum(
+    ppgCfg.softCapSlope + Math.max(0, attackStat - 89) * 0.06,
+    ppgCfg.softCapSlope,
+    0.94
+  );
   const finalPpg =
     rawPpg > ppgCfg.softCapStart
-      ? ppgCfg.softCapStart + (rawPpg - ppgCfg.softCapStart) * ppgCfg.softCapSlope
+      ? ppgCfg.softCapStart + (rawPpg - ppgCfg.softCapStart) * effectiveSlope
       : rawPpg;
   const ppg = clampNum(Number(finalPpg.toFixed(1)), ppgCfg.minPpg, ppgCfg.maxPpg);
 
@@ -1287,14 +1345,15 @@ export function calculateSeasonStatGrowth(
     };
   };
 
-  const maxGrowthAge =
-    dna === 'LATE_BLOOMER' || isSlowStarter
-      ? 29
-      : dna === 'EARLY_BLOOMER'
-      ? 26
-      : dna === 'IRONMAN'
-      ? 28
-      : 27;
+  // 성장기·전성기·노쇠기 구간 경계를 retirementEngine의 단일 진실 원천(computeEffectiveAgingOnset)으로 통합
+  const priorMinutes = computeCareerMinutes(career);
+  const seasonMinutes = majorInjuryAftermath?.currentSeasonMinutes ?? 0;
+  const careerMinutes = priorMinutes + seasonMinutes;
+  const { maxGrowthAge, onsetAge } = computeEffectiveAgingOnset(
+    dna,
+    careerMinutes,
+    traits
+  );
 
   if (career.age <= maxGrowthAge) {
     // 연속적 출전 시간 계수
@@ -1397,19 +1456,11 @@ export function calculateSeasonStatGrowth(
     return applyBioCapAndAftermath(nextStats);
   }
 
-  const primeEndAge =
-    dna === 'IRONMAN'
-      ? 30
-      : dna === 'LATE_BLOOMER' || isSlowStarter
-      ? 30
-      : dna === 'EARLY_BLOOMER'
-      ? 28
-      : 29;
-
-  if (career.age <= primeEndAge) {
+  if (career.age < onsetAge) {
     const nextStats: PlayerStats = { ...prev };
     if (career.ovr < leagueConfig.growthCap && career.ovr < career.potential) {
-      // 전성기 미세 성장: 훈련 집중 능력치 + 무작위 보조 능력치 각각 확률적으로 +1
+      // 전성기 미세 성장: 훈련 집중 능력치(BALANCED는 6개 중 균등 무작위) + 서로 다른 보조 능력치 각각 확률적으로 +1
+      const allKeys: (keyof PlayerStats)[] = ['ins', 'out', 'ply', 'def', 'reb', 'phy'];
       const bonusKey: keyof PlayerStats =
         career.trainingFocus === 'OUTSIDE_SHOOTING'
           ? 'out'
@@ -1421,9 +1472,12 @@ export function calculateSeasonStatGrowth(
           ? 'reb'
           : career.trainingFocus === 'PHYSICAL_CONDITIONING'
           ? 'phy'
-          : 'ins';
-      const allKeys: (keyof PlayerStats)[] = ['ins', 'out', 'ply', 'def', 'reb', 'phy'];
-      const secondaryKey = allKeys[Math.floor(rng() * allKeys.length)];
+          : career.trainingFocus === 'INSIDE_SCORING'
+          ? 'ins'
+          : allKeys[Math.floor(rng() * allKeys.length)];
+      const secondaryCandidates = allKeys.filter((k) => k !== bonusKey);
+      const secondaryKey =
+        secondaryCandidates[Math.floor(rng() * secondaryCandidates.length)];
       const primeChance = hasBiomechLab
         ? GROWTH_CONFIG.primeGrowthChanceWithLab
         : GROWTH_CONFIG.primeGrowthChance;
@@ -1436,12 +1490,10 @@ export function calculateSeasonStatGrowth(
     return applyBioCapAndAftermath(nextStats);
   }
 
-  const priorMinutes = computeCareerMinutes(career);
-  const seasonMinutes = majorInjuryAftermath?.currentSeasonMinutes ?? 0;
-  const careerMinutes = priorMinutes + seasonMinutes;
   const aged = applyAgingCurve(career.age, prev, rng, {
     growthDna: dna,
     careerMinutes,
+    traits,
     hasBiomechLab,
     hasCampAgingShield,
     veteranReinvented,
@@ -1559,19 +1611,6 @@ export function evaluateFluidSeasonAwards(params: {
   const seasonPaceFactor = 0.96 + rng() * 0.08;
   const ldrScale = leagueConfig.ldr / 78;
 
-  const dpoyScore =
-    career.stats.def * 0.55 +
-    spg * 7.5 +
-    bpg * 8.5 +
-    rpg * 0.8 +
-    winRate * 15;
-  const dynamicDpoyBar = (leagueConfig.ldr * 0.82 + 8.0) * seasonPaceFactor;
-  const wonDpoy =
-    eligibleForMajorAwards &&
-    career.stats.def >= leagueConfig.ldr + 3 &&
-    dpoyScore >= dynamicDpoyBar &&
-    winRate >= 0.51;
-
   const isBenchRole = role.includes('식스맨') || role.includes('로테이션');
   const dynamicSixthManBar = (9.5 + ldrScale * 4.8) * seasonPaceFactor;
   const wonSixthMan =
@@ -1596,12 +1635,12 @@ export function evaluateFluidSeasonAwards(params: {
     currImpact - prevImpact >= 5.2 &&
     currImpact / Math.max(6, prevImpact) >= 1.28;
 
-  // 주요 경쟁 수상(올스타·올리그·MVP·신인왕)은 통합 리그 풀(evaluateUnifiedLeagueAwards)에서만 단일 확정
+  // 주요 경쟁 수상(올스타·올리그·MVP·DPOY·신인왕)은 통합 리그 풀(evaluateUnifiedLeagueAwards)에서만 단일 확정
   return {
     allStarSelected: false,
     wonMvp: false,
     allLeagueTeam: null,
-    wonDpoy,
+    wonDpoy: false,
     wonSixthMan,
     wonMip,
     wonRookieOfYear: false,
@@ -2085,6 +2124,7 @@ export function simulateSeason(
   });
 
   awards.wonMvp = awardRaces.playerWonMvp;
+  awards.wonDpoy = awardRaces.playerWonDpoy;
   awards.allStarSelected = awardRaces.playerAllStarSelected;
   awards.allLeagueTeam = awardRaces.playerAllLeagueTeam;
   awards.wonRookieOfYear = isRookieSeasonEligible ? awardRaces.playerWonRoy : false;
@@ -2110,6 +2150,8 @@ export function simulateSeason(
     wonMvp: awards.wonMvp,
     allStarSelected: awards.allStarSelected,
     isFarewellTour: career.isFarewellTour,
+    isRookie: isRookieSeasonEligible,
+    priorMvpsCount: career.totals.mvps,
   };
 
   const headline = generateSeasonHeadline(headlineCtx);
@@ -2222,6 +2264,7 @@ export function simulateSeason(
   const boxScore: SeasonBoxScore = {
     ...baseBoxScore,
     wonMvp: awards.wonMvp,
+    wonDpoy: awards.wonDpoy,
     wonRookieOfYear: awards.wonRookieOfYear,
     allStarSelected: awards.allStarSelected,
     allLeagueTeam: awards.allLeagueTeam,
@@ -2306,7 +2349,6 @@ export function simulateSeason(
   const stockBoost =
     (ppg * 1.05 + rpg * 0.42 + apg * 0.5 + (spg + bpg) * 1.2) *
       leagueConfig.prestige +
-    (awards.wonChampionship ? 10 : 0) +
     (awards.wonMvp ? 14 : 0) +
     (awards.wonDpoy ? 8 : 0) -
     mismatch.scoutingPenalty * 0.4;
@@ -2380,12 +2422,14 @@ export interface LeagueAwardCandidate {
   spg: number;
   bpg: number;
   fgPct: number;
+  defStat?: number;
   wins: number;
   losses: number;
   eligible: boolean;
   mvpScore: number;
   allStarScore: number;
   royScore: number;
+  dpoyScore?: number;
 }
 
 /**
@@ -2487,6 +2531,43 @@ export function calcUnifiedRoyScore(params: {
       spg * w.spg +
       bpg * w.bpg +
       (fgPct - w.fgEffBase) * w.fgEffWeight +
+      winPct * w.winPctWeight
+    ).toFixed(2)
+  );
+}
+
+/**
+ * 통합 올해의 수비수(DPOY) 평가 점수 (외곽 스틸·온볼 수비 vs 빅맨 림프로텍팅 포지션 균형 반영)
+ */
+export function calcUnifiedDpoyScore(params: {
+  pos: Position;
+  defStat: number;
+  spg: number;
+  bpg: number;
+  rpg: number;
+  wins: number;
+  losses: number;
+}): number {
+  const w = AWARD_VOTING_CONFIG.dpoyWeights;
+  const winPct = params.wins / Math.max(1, params.wins + params.losses);
+  const isBig = params.pos === 'C' || params.pos === 'PF';
+  const posRebBaseline =
+    params.pos === 'C'
+      ? 10.0
+      : params.pos === 'PF'
+      ? 8.0
+      : params.pos === 'SF'
+      ? 5.5
+      : 4.2;
+  const rebOverBaseline = Math.max(0, params.rpg - posRebBaseline);
+  const spgTerm = params.spg * (isBig ? w.bigSpgWeight : w.perimeterSpgWeight);
+  const bpgTerm = params.bpg * (isBig ? w.bigBpgWeight : w.perimeterBpgWeight);
+  return Number(
+    (
+      params.defStat * w.defStatWeight +
+      spgTerm +
+      bpgTerm +
+      rebOverBaseline * w.rebOverBaselineWeight +
       winPct * w.winPctWeight
     ).toFixed(2)
   );
@@ -2675,6 +2756,7 @@ export function buildSymmetricLeaguePlayerPool(params: {
     spg: boxScore.spg,
     bpg: boxScore.bpg,
     fgPct: boxScore.fgPct,
+    defStat: career.stats.def,
     wins: boxScore.wins,
     losses: boxScore.losses,
     eligible: playerEligible,
@@ -2708,12 +2790,24 @@ export function buildSymmetricLeaguePlayerPool(params: {
       wins: boxScore.wins,
       losses: boxScore.losses,
     }),
+    dpoyScore: calcUnifiedDpoyScore({
+      pos: career.primaryPos,
+      defStat: career.stats.def,
+      spg: boxScore.spg,
+      bpg: boxScore.bpg,
+      rpg: boxScore.rpg,
+      wins: boxScore.wins,
+      losses: boxScore.losses,
+    }),
   });
 
   // 2) 동일 리그 라이벌 후보 등록 (동일 공식·동일 출장 자격 검증)
   const sameLeagueRivals = updatedRivals.filter((r) => r.league === career.league);
   const teamOccupiedSlots = new Map<string, number>();
-  teamOccupiedSlots.set(boxScore.teamId, 1);
+  // 주인공이 벤치(MPG < 25)인 경우 구단 1옵션 NPC 에이스 슬롯을 점유하지 않아 팀 동료 NPC 스타가 정상 생성되도록 보장
+  if (boxScore.mpg >= 25.0) {
+    teamOccupiedSlots.set(boxScore.teamId, 1);
+  }
 
   for (const r of sameLeagueRivals) {
     const st = standings.find((s) => s.team.id === r.teamId) || standings[0];
@@ -2725,6 +2819,7 @@ export function buildSymmetricLeaguePlayerPool(params: {
     const rSpg = snap?.spg ?? 1.1;
     const rBpg = snap?.bpg ?? (r.pos === 'C' || r.pos === 'PF' ? 1.2 : 0.4);
     const rFgPct = snap?.fgPct ?? (r.pos === 'C' ? 52.5 : 46.5);
+    const rDefStat = Math.round(clampNum(r.ovr + (rng() * 6 - 3), 50, 96));
     const rEligible =
       rGp / Math.max(1, leagueCfg.games) >= leagueMeta.minAttendanceRatio &&
       rMpg >= AWARD_VOTING_CONFIG.minMpgForMajorAward;
@@ -2748,6 +2843,7 @@ export function buildSymmetricLeaguePlayerPool(params: {
       spg: rSpg,
       bpg: rBpg,
       fgPct: rFgPct,
+      defStat: rDefStat,
       wins: rWins,
       losses: rLosses,
       eligible: rEligible,
@@ -2778,6 +2874,15 @@ export function buildSymmetricLeaguePlayerPool(params: {
         spg: rSpg,
         bpg: rBpg,
         fgPct: rFgPct,
+        wins: rWins,
+        losses: rLosses,
+      }),
+      dpoyScore: calcUnifiedDpoyScore({
+        pos: r.pos,
+        defStat: rDefStat,
+        spg: rSpg,
+        bpg: rBpg,
+        rpg: r.rpg,
         wins: rWins,
         losses: rLosses,
       }),
@@ -2894,20 +2999,32 @@ export function generateLeagueNpcStarPool(params: {
           11.8
         ).toFixed(1)
       );
+      const isDefSpecialist = rng() < 0.14;
+      const npcDefStat = Math.round(
+        clampNum(
+          leagueCfg.ldr +
+            (st.winPct - 0.5) * 8.0 +
+            (isDefSpecialist ? 7.5 + rng() * 6.5 : (rng() * 8.0 - 4.0)),
+          Math.max(40, leagueCfg.ldr - 12),
+          97
+        )
+      );
       const npcSpg = Number(
         clampNum(
           (pos === 'PG' || pos === 'SG' || pos === 'SF' ? 1.38 : 0.95) * tierSecondaryScale +
+            (isDefSpecialist && (pos === 'PG' || pos === 'SG' || pos === 'SF') ? 0.55 : 0) +
             (rng() * 0.7 - 0.35),
           0.3,
-          2.6
+          2.8
         ).toFixed(1)
       );
       const npcBpg = Number(
         clampNum(
           (pos === 'C' ? 1.95 : pos === 'PF' ? 1.25 : 0.52) * tierSecondaryScale +
+            (isDefSpecialist && (pos === 'C' || pos === 'PF') ? 0.65 : isDefSpecialist ? 0.25 : 0) +
             (rng() * 0.65 - 0.3),
           0.1,
-          3.3
+          3.4
         ).toFixed(1)
       );
       const posFgAnchor = pos === 'C' ? 53.5 : pos === 'PF' ? 48.5 : 45.2;
@@ -2935,6 +3052,7 @@ export function generateLeagueNpcStarPool(params: {
         spg: npcSpg,
         bpg: npcBpg,
         fgPct: npcFgPct,
+        defStat: npcDefStat,
         wins: st.wins,
         losses: st.losses,
         eligible: npcEligible,
@@ -2965,6 +3083,15 @@ export function generateLeagueNpcStarPool(params: {
           spg: npcSpg,
           bpg: npcBpg,
           fgPct: npcFgPct,
+          wins: st.wins,
+          losses: st.losses,
+        }),
+        dpoyScore: calcUnifiedDpoyScore({
+          pos,
+          defStat: npcDefStat,
+          spg: npcSpg,
+          bpg: npcBpg,
+          rpg: npcRpg,
           wins: st.wins,
           losses: st.losses,
         }),
@@ -3190,6 +3317,8 @@ export interface UnifiedLeagueAwardsResult {
   playerMvpRank: number | null;
   playerWonMvp: boolean;
   mvpWinnerId: string | null;
+  playerWonDpoy: boolean;
+  dpoyWinnerId: string | null;
   playerAllStarSelected: boolean;
   playerAllLeagueTeam: AllLeagueTier;
   allStarIds: Set<string>;
@@ -3300,6 +3429,26 @@ export function evaluateUnifiedLeagueAwards(params: {
   const mvpWinnerCandidate = eligibleMvpSorted[0] ?? null;
   const mvpWinnerId = mvpWinnerCandidate ? mvpWinnerCandidate.id : null;
   const playerWonMvp = Boolean(mvpWinnerCandidate?.isPlayer);
+
+  // 1-2. 올해의 수비수(DPOY) 대칭 풀 1위 선정 (외곽·빅맨 포지션 균형 수비 점수 비교)
+  const getCandidateDpoyScore = (c: LeagueAwardCandidate): number =>
+    typeof c.dpoyScore === 'number'
+      ? c.dpoyScore
+      : calcUnifiedDpoyScore({
+          pos: c.pos,
+          defStat: c.defStat ?? leagueCfg.ldr,
+          spg: c.spg,
+          bpg: c.bpg,
+          rpg: c.rpg,
+          wins: c.wins,
+          losses: c.losses,
+        });
+  const eligibleDpoySorted = pool
+    .filter((c) => c.eligible)
+    .sort((a, b) => getCandidateDpoyScore(b) - getCandidateDpoyScore(a));
+  const dpoyWinnerCandidate = eligibleDpoySorted[0] ?? null;
+  const dpoyWinnerId = dpoyWinnerCandidate ? dpoyWinnerCandidate.id : null;
+  const playerWonDpoy = Boolean(dpoyWinnerCandidate?.isPlayer);
 
   // 2. 올스타 & 올-리그 팀: 리그별 정원 + 포지션 균형 독립 선정
   const allStarSelection = selectPositionBalancedAllStars(pool, quota);
@@ -3483,6 +3632,8 @@ export function evaluateUnifiedLeagueAwards(params: {
     playerMvpRank,
     playerWonMvp,
     mvpWinnerId,
+    playerWonDpoy,
+    dpoyWinnerId,
     playerAllStarSelected,
     playerAllLeagueTeam,
     allStarIds,

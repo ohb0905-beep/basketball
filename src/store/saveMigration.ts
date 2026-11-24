@@ -102,6 +102,12 @@ export function normalizeTeamInfo(team: TeamInfo): TeamInfo {
       league: latest.league,
       name: latest.name,
       shortName: latest.shortName,
+      primaryColor: latest.primaryColor,
+      secondaryColor: latest.secondaryColor,
+      conference: latest.conference,
+      isMilitaryTeam: latest.isMilitaryTeam,
+      preferredStyle: latest.preferredStyle,
+      direction: latest.direction,
       logoUrl: latest.logoUrl || team.logoUrl,
     };
   }
@@ -355,7 +361,7 @@ export function normalizeCareerSave(
         ...log,
         league: logLeague,
         leagueName: wasLegacyOverseas
-          ? LEAGUE_CONFIG[logLeague]?.name || log.leagueName
+          ? LEAGUE_CONFIG[logLeague]?.shortName || log.leagueName
           : log.leagueName,
         teamName:
           logLeague === 'U_LEAGUE' || log.teamId === SANGMU_TEAM.id

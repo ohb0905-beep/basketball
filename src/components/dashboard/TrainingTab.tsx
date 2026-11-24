@@ -134,7 +134,8 @@ export function TrainingTab() {
   const agingPhase = getAgingPhaseInfo(
     career.age,
     career.growthDna,
-    careerMinutes
+    careerMinutes,
+    career.traits
   );
   const isVeteranCampMode = career.age >= 31;
   const positions: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];

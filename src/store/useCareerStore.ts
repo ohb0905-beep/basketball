@@ -8,6 +8,7 @@ import {
   ECONOMY_CONFIG,
   INTERNATIONAL_TOURNAMENT_CONFIG,
   LEAGUE_BALANCE_META,
+  ROLE_MPG_CONFIG,
   canUseProTradeSystem,
   clampNum,
   getPersonalCareCostFromConfig,
@@ -17,8 +18,9 @@ import {
   createSangmuEnlistmentEvent,
   getMilitaryEnlistAgeForLeague,
   rollMidSeasonCrossroadsEvent,
-  rollSeasonEvent,
+  rollSeasonEventQueue,
 } from '../data/events';
+import { generateSeasonHeadline } from '../data/headlines';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import {
   ALL_TEAMS,
@@ -98,6 +100,7 @@ import {
   rollPlayerDnaAndPlaystyle,
 } from '../engine/statCalculator';
 import {
+  CareerEvent,
   CareerEventChoice,
   CareerState,
   ClutchChoiceId,
@@ -192,6 +195,76 @@ function buildRecordBreakToast(
   };
 }
 
+function buildTeamTransferRelationships(
+  career: CareerState,
+  nextCoachTrust: number
+) {
+  const prevRel = getEffectiveRelationships(career);
+  const clampedTrust = clampNum(Math.round(nextCoachTrust), 10, 100);
+  return {
+    coachTrust: clampedTrust,
+    lockerRoom: 52,
+    frontOffice: 52,
+    mediaFan: prevRel.mediaFan,
+  };
+}
+
+function dequeueNextPendingEvent(career: CareerState): CareerState {
+  if (career.pendingEvent) return career;
+  const queue = career.pendingEventQueue || [];
+  if (queue.length === 0) return career;
+  const [nextEvt, ...restQueue] = queue;
+  const nextSeenIds = [...(career.seenEventIds || [])];
+  if (!nextSeenIds.includes(nextEvt.id)) {
+    nextSeenIds.push(nextEvt.id);
+  }
+  const nextRecentCats = [...(career.recentEventCategories || []), nextEvt.category].slice(-6);
+  const nextPendingChain =
+    career.pendingChainEvent && nextEvt.id === career.pendingChainEvent.id
+      ? null
+      : career.pendingChainEvent || null;
+  return {
+    ...career,
+    pendingEvent: nextEvt,
+    pendingEventQueue: restQueue,
+    seenEventIds: nextSeenIds,
+    recentEventCategories: nextRecentCats,
+    pendingChainEvent: nextPendingChain,
+    agentAdviceShown:
+      career.agentAdviceShown || nextEvt.id === 'EVT_AGENT_RETIREMENT_ADVICE',
+    veteranReinventionOffered:
+      career.veteranReinventionOffered || nextEvt.id === 'EVT_VETERAN_REINVENTION',
+  };
+}
+
+function refreshChampionSeasonHeadline(
+  career: CareerState,
+  log: CareerState['seasonLogs'][number]
+): string {
+  if (!log.wonChampionship) return log.headline;
+  const priorMvps = Math.max(0, career.totals.mvps - (log.wonMvp ? 1 : 0));
+  return generateSeasonHeadline({
+    playerName: career.name,
+    teamName: log.teamName,
+    teamShortName: log.teamShortName,
+    league: log.league,
+    leagueName: log.leagueName,
+    pos: career.primaryPos,
+    role: log.role,
+    ppg: log.ppg,
+    rpg: log.rpg,
+    apg: log.apg,
+    spg: log.spg,
+    bpg: log.bpg,
+    singleGameHighPts: log.singleGameHighPts,
+    wonChampionship: true,
+    wonMvp: log.wonMvp,
+    allStarSelected: log.allStarSelected,
+    isFarewellTour: career.isFarewellTour,
+    priorMvpsCount: priorMvps,
+  });
+}
+
 function finalizeSeasonAndEnterOffseason(career: CareerState): {
   career: CareerState;
   retiredView: boolean;
@@ -219,26 +292,33 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
   let nextMilitaryExempt = career.militaryExempt;
   let nextMilitaryLeft = career.militaryServiceSeasonsLeft;
   let nextPrevTeam = career.previousTeamBeforeMilitary;
+  let dischargedThisOffseason = false;
   const newMilestones = [...career.milestones];
 
   const settledStats = settlement ? settlement.nextStats : career.stats;
   const settledDelta = settlement ? settlement.statDelta : career.lastSeasonDelta;
   const settledOvr = settlement ? settlement.nextOvr : career.ovr;
   const settledPotential = settlement ? settlement.nextPotential : career.potential;
-  const settledTrust = settlement ? settlement.nextCoachTrust : career.coachTrust;
-  const settledStock = settlement ? settlement.nextDraftStock : career.draftStock;
+  let settledTrust = settlement ? settlement.nextCoachTrust : career.coachTrust;
+  const latestSeasonLog = career.seasonLogs[career.seasonLogs.length - 1];
+  const baseSettledStock = settlement ? settlement.nextDraftStock : career.draftStock;
+  const champStockBonus = latestSeasonLog?.wonChampionship ? 10 : 0;
+  const settledStock = Math.min(100, baseSettledStock + champStockBonus);
   const settledBadges = settlement ? settlement.nextBadges : career.badges;
   const settledTraits = settlement ? settlement.nextTraits : career.traits;
   const settledBrokenPromise = settlement
     ? settlement.brokenRolePromise
     : career.brokenRolePromise;
-  const settledRelationships = settlement?.nextRelationships
+  let settledRelationships = settlement?.nextRelationships
     ? { ...settlement.nextRelationships, coachTrust: settledTrust }
     : { ...getEffectiveRelationships(career), coachTrust: settledTrust };
+  let settledRole = career.role;
+  let settledSeasonsOnTeam = career.seasonsOnCurrentTeam ?? 0;
 
   if (nextMilitaryLeft > 0) {
     nextMilitaryLeft -= 1;
     if (nextMilitaryLeft === 0) {
+      dischargedThisOffseason = true;
       nextMilitaryExempt = true;
       const returnTeam =
         (nextPrevTeam && getTeamById(nextPrevTeam.id, nextRatingsMap)) ||
@@ -257,6 +337,21 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
       nextContractYearsLeft = 0;
       nextAnnualSalary = getContractDefaultSalary(nextContractType, settledOvr);
       nextPrevTeam = null;
+      settledSeasonsOnTeam = 0;
+      settledTrust = 54;
+      settledRelationships = buildTeamTransferRelationships(
+        { ...career, relationships: settledRelationships },
+        settledTrust
+      );
+      settledRole = calculateRoleAndMpg({
+        ...career,
+        ovr: settledOvr,
+        stats: settledStats,
+        league: nextLeague,
+        team: nextTeam,
+        contractType: nextContractType,
+        coachTrust: settledTrust,
+      }).role;
 
       newMilestones.push({
         id: `MS_DISCHARGE_${nextSeasonYear}`,
@@ -300,6 +395,8 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
     traits: settledTraits,
     league: nextLeague,
     team: nextTeam,
+    role: settledRole,
+    seasonsOnCurrentTeam: settledSeasonsOnTeam,
     contractType: nextContractType,
     contractYearsLeft: nextContractYearsLeft,
     annualSalary: nextAnnualSalary,
@@ -307,7 +404,7 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
     campAgingShield: false,
     twoWaySeasonsUsed: nextTwoWaySeasonsUsed,
     draftPedigreeSeasonsLeft: nextPedigreeSeasonsLeft,
-    brokenRolePromise: settledBrokenPromise,
+    brokenRolePromise: dischargedThisOffseason ? false : settledBrokenPromise,
     coachTrust: settledTrust,
     draftStock: settledStock,
     relationships: settledRelationships,
@@ -325,6 +422,7 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
     offseasonLocked: true,
     offseasonOptions: [],
     pendingEvent: null,
+    pendingEventQueue: [],
     pendingSeasonSettlement: null,
   };
 
@@ -362,44 +460,26 @@ function finalizeSeasonAndEnterOffseason(career: CareerState): {
     };
   }
 
-  const rolledEvent = rollSeasonEvent(settledBase, Math.random, completedSeasonYear);
-  const nextSeenIds = [...(career.seenEventIds || [])];
-  const nextRecentCats = [...(career.recentEventCategories || [])];
-  let nextPendingChain = career.pendingChainEvent || null;
+  const rolledQueue = rollSeasonEventQueue(
+    settledBase,
+    Math.random,
+    completedSeasonYear
+  );
+  const withQueued = dequeueNextPendingEvent({
+    ...settledBase,
+    pendingEventQueue: rolledQueue,
+  });
 
-  if (rolledEvent) {
-    if (
-      career.pendingChainEvent &&
-      rolledEvent.id === career.pendingChainEvent.id
-    ) {
-      nextPendingChain = null;
-    }
-    if (!nextSeenIds.includes(rolledEvent.id)) {
-      nextSeenIds.push(rolledEvent.id);
-    }
-    nextRecentCats.push(rolledEvent.category);
-  }
-
-  const offseasonOptions = generateOffseasonOptions(settledBase);
+  const offseasonOptions = generateOffseasonOptions(withQueued);
   const hasNoActiveOffers =
     offseasonOptions.length === 1 &&
     offseasonOptions[0].actionType === 'RETIRE_OUT_OF_LEAGUE';
 
   return {
     career: {
-      ...settledBase,
-      seenEventIds: nextSeenIds,
-      recentEventCategories: nextRecentCats.slice(-6),
-      pendingChainEvent: nextPendingChain,
-      agentAdviceShown:
-        settledBase.agentAdviceShown ||
-        rolledEvent?.id === 'EVT_AGENT_RETIREMENT_ADVICE',
-      veteranReinventionOffered:
-        settledBase.veteranReinventionOffered ||
-        rolledEvent?.id === 'EVT_VETERAN_REINVENTION',
+      ...withQueued,
       isOutOfLeagueWarning: hasNoActiveOffers,
       offseasonOptions,
-      pendingEvent: rolledEvent,
     },
     retiredView: false,
   };
@@ -415,18 +495,23 @@ function applyCompletedLiveGameOutcome(
 
   const outcome = finishedLive.finalOutcome;
   const ps = finishedLive.playerStats;
-  const liveEventYear = isInternationalLiveGame(finishedLive.gameType)
+  const isIntlLive = isInternationalLiveGame(finishedLive.gameType);
+  const liveEventYear = isIntlLive
     ? finishedLive.internationalTournamentYear ?? career.seasonYear
     : career.seasonYear;
   const nextHighs = { ...career.careerHighs };
-  if (ps.pts > nextHighs.points) {
+  // 국제대회 라이브 단일 경기 득점은 리그 커리어하이/역대 기록실과 분리해 오염 방지
+  if (!isIntlLive && ps.pts > nextHighs.points) {
     nextHighs.points = ps.pts;
     nextHighs.pointsContext = `${liveEventYear}시즌 ${finishedLive.title}`;
+    nextHighs.pointsLeague = career.league;
   }
-  nextHighs.rebounds = Math.max(nextHighs.rebounds, ps.reb);
-  nextHighs.assists = Math.max(nextHighs.assists, ps.ast);
-  nextHighs.steals = Math.max(nextHighs.steals, ps.stl);
-  nextHighs.blocks = Math.max(nextHighs.blocks, ps.blk);
+  if (!isIntlLive) {
+    nextHighs.rebounds = Math.max(nextHighs.rebounds, ps.reb);
+    nextHighs.assists = Math.max(nextHighs.assists, ps.ast);
+    nextHighs.steals = Math.max(nextHighs.steals, ps.stl);
+    nextHighs.blocks = Math.max(nextHighs.blocks, ps.blk);
+  }
 
   let nextCareer: CareerState = {
     ...career,
@@ -597,6 +682,7 @@ function applyCompletedLiveGameOutcome(
       const lastIdx = logs.length - 1;
       logs[lastIdx] = {
         ...logs[lastIdx],
+        singleGameHighPts: Math.max(logs[lastIdx].singleGameHighPts, ps.pts),
         playoffResult: updatedBracket
           ? updatedBracket.playoffResultLabel
           : outcome.won
@@ -662,13 +748,20 @@ function applyCompletedLiveGameOutcome(
       nextTotals.finalsMvps = (nextTotals.finalsMvps || 0) + 1;
     }
 
-    logs[lastIdx] = {
+    const updatedLog = {
       ...prevLog,
+      singleGameHighPts: Math.max(prevLog.singleGameHighPts, ps.pts),
       wonChampionship: outcome.won,
       wonFinalsMvp: outcome.wonFinalsMvp,
       playoffResult: outcome.won ? '리그 우승' : '파이널 준우승',
       narrativeLog: [outcome.headline, ...prevLog.narrativeLog],
     };
+    logs[lastIdx] = outcome.won
+      ? {
+          ...updatedLog,
+          headline: refreshChampionSeasonHeadline(career, updatedLog),
+        }
+      : updatedLog;
   }
 
   const updatedBracket = career.playoffBracket
@@ -806,14 +899,32 @@ export const useCareerStore = create<CareerStoreState>()(
 
       clearToast: () => set({ toast: null }),
 
-      dismissEncounterOutcome: () => set({ lastEncounterOutcome: null }),
+      dismissEncounterOutcome: () =>
+        set((state) => ({
+          lastEncounterOutcome: null,
+          career:
+            state.career &&
+            !state.career.pendingEvent &&
+            !state.career.liveGame &&
+            !state.career.lastInternationalSummary
+              ? dequeueNextPendingEvent(state.career)
+              : state.career,
+        })),
 
       dismissInternationalSummary: () =>
-        set((state) => ({
-          career: state.career
-            ? { ...state.career, lastInternationalSummary: null }
-            : null,
-        })),
+        set((state) => {
+          if (!state.career) return { career: null };
+          const cleared: CareerState = {
+            ...state.career,
+            lastInternationalSummary: null,
+          };
+          return {
+            career:
+              !cleared.pendingEvent && !cleared.liveGame
+                ? dequeueNextPendingEvent(cleared)
+                : cleared,
+          };
+        }),
 
       toggleFastSim: () =>
         set((state) => ({
@@ -890,6 +1001,7 @@ export const useCareerStore = create<CareerStoreState>()(
             career: migrated.career,
             hofList: migrated.hofList,
             recordBook: migrated.recordBook,
+            recordBookManuallyReset: false,
             fastSimEnabled:
               typeof parsed.fastSimEnabled === 'boolean'
                 ? parsed.fastSimEnabled
@@ -1441,6 +1553,12 @@ export const useCareerStore = create<CareerStoreState>()(
         }
 
         const sneakerCfg = ECONOMY_CONFIG.personalCare.SIGNATURE_SNEAKER_MARKETING;
+        const rehabCfg = ECONOMY_CONFIG.personalCare.REHAB_LOAD_MGMT;
+        const rehabRiskPct = Math.round((1 - rehabCfg.injuryRiskMultiplier) * 100);
+        const rehabGamesPct = Math.round((1 - rehabCfg.injuryGamesMultiplier) * 100);
+        const majorRehabPct = Math.round(
+          (1 - ROLE_MPG_CONFIG.injury.tiers.major.majorRehabGamesMult) * 100
+        );
         const careMeta: Record<
           PersonalCareId,
           { title: string; summary: string; stockBoost: number; popBoost: number; trustBoost: number }
@@ -1455,8 +1573,7 @@ export const useCareerStore = create<CareerStoreState>()(
           },
           REHAB_LOAD_MGMT: {
             title: '전담 재활 · 로드 매니지먼트 팀 구축',
-            summary:
-              '다음 시즌 부상 발생 확률 및 결장 경기 수가 70% 감소합니다.',
+            summary: `다음 시즌 부상 발생 확률 ${rehabRiskPct}% 감소 및 경미/중등도 결장 ${rehabGamesPct}%·중상 결장 ${majorRehabPct}% 경감이 적용됩니다.`,
             stockBoost: 2,
             popBoost: 2,
             trustBoost: 2,
@@ -1608,6 +1725,19 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
+        if (
+          career.seasonPhase &&
+          career.seasonPhase !== 'REGULAR_SEASON' &&
+          career.seasonPhase !== 'OFFSEASON'
+        ) {
+          get().showToast(
+            '트레이드 요청 불가 시점',
+            '포스트시즌 또는 라이브 경기 진행 중에는 트레이드를 요청할 수 없습니다.',
+            'amber'
+          );
+          return;
+        }
+
         if (career.tradeRequestedThisYear) {
           get().showToast(
             '트레이드 요청 완료 상태',
@@ -1661,9 +1791,17 @@ export const useCareerStore = create<CareerStoreState>()(
           return;
         }
 
+        const posFitCandidates = pool.filter(
+          (t) =>
+            t.neededPositions?.includes(career.primaryPos) ||
+            (career.secondaryPos
+              ? t.neededPositions?.includes(career.secondaryPos)
+              : false)
+        );
+        const candidatePool =
+          posFitCandidates.length > 0 ? posFitCandidates : pool;
         const target =
-          pool.find((t) => t.neededPositions?.includes(career.primaryPos)) ||
-          pool[Math.floor(Math.random() * pool.length)];
+          candidatePool[Math.floor(Math.random() * candidatePool.length)];
 
         const promise = determineTeamRolePromise(
           career,
@@ -1682,10 +1820,9 @@ export const useCareerStore = create<CareerStoreState>()(
           coachTrust: nextTrust,
           promisedRole: promise.promisedRole,
         });
-        const syncedTrade = syncCareerRelationships(
+        const transferRelationships = buildTeamTransferRelationships(
           career,
-          undefined,
-          nextTrust - career.coachTrust
+          nextTrust
         );
 
         set({
@@ -1693,8 +1830,8 @@ export const useCareerStore = create<CareerStoreState>()(
             ...career,
             team: target,
             seasonsOnCurrentTeam: 0,
-            coachTrust: syncedTrade.coachTrust,
-            relationships: syncedTrade.relationships,
+            coachTrust: transferRelationships.coachTrust,
+            relationships: transferRelationships,
             promisedRole: promise.promisedRole,
             brokenRolePromise: false,
             tradeRequestedThisYear: true,
@@ -1798,6 +1935,7 @@ export const useCareerStore = create<CareerStoreState>()(
         if (bs.singleGameHighPts > nextHighs.points) {
           nextHighs.points = bs.singleGameHighPts;
           nextHighs.pointsContext = `${bs.year}시즌 ${bs.teamShortName} (${bs.leagueName})`;
+          nextHighs.pointsLeague = bs.league;
         }
         nextHighs.rebounds = Math.max(
           nextHighs.rebounds,
@@ -1908,7 +2046,12 @@ export const useCareerStore = create<CareerStoreState>()(
             Math.round(bs.salaryEarned * ECONOMY_CONFIG.proNetCashRatio)
           : getEffectiveCashBalance(career) + ECONOMY_CONFIG.amateurAnnualStipendUsd;
 
-        let initialBracket = createPlayoffBracket(career, sim.standings);
+        let initialBracket = createPlayoffBracket(
+          career,
+          sim.standings,
+          Math.random,
+          { simulateForNonPlayer: true }
+        );
         const qualifiedForPlayoffs =
           !initialBracket.playerEliminated && initialBracket.rounds.length > 0;
         // 플레이어 팀이 PO 진출에 실패했더라도 리그 최종 우승팀을 확정해 대진표 및 라이벌 우승 기록 정합성 유지
@@ -2033,12 +2176,18 @@ export const useCareerStore = create<CareerStoreState>()(
             });
           }
 
-          logs[lastIdx] = {
+          const updatedLog = {
             ...prevLog,
             playoffResult: updatedBracket.playoffResultLabel,
             wonChampionship: wonChamp || prevLog.wonChampionship,
             wonFinalsMvp: wonFmvp || prevLog.wonFinalsMvp,
           };
+          logs[lastIdx] = updatedLog.wonChampionship
+            ? {
+                ...updatedLog,
+                headline: refreshChampionSeasonHeadline(career, updatedLog),
+              }
+            : updatedLog;
         }
 
         const nextCareerState: CareerState = {
@@ -2173,12 +2322,18 @@ export const useCareerStore = create<CareerStoreState>()(
                 teamName: prevLog.teamName,
               });
             }
-            logs[lastIdx] = {
+            const updatedLog = {
               ...prevLog,
               playoffResult: finishedBracket.playoffResultLabel,
               wonChampionship: wonChamp || prevLog.wonChampionship,
               wonFinalsMvp: wonFmvp || prevLog.wonFinalsMvp,
             };
+            logs[lastIdx] = updatedLog.wonChampionship
+              ? {
+                  ...updatedLog,
+                  headline: refreshChampionSeasonHeadline(career, updatedLog),
+                }
+              : updatedLog;
           }
           careerToSettle = {
             ...career,
@@ -2258,12 +2413,18 @@ export const useCareerStore = create<CareerStoreState>()(
             }
           }
 
-          logs[lastIdx] = {
+          const updatedLog = {
             ...prevLog,
             playoffResult: finishedBracket.playoffResultLabel,
             wonChampionship: wonChamp,
             wonFinalsMvp: wonFmvp,
           };
+          logs[lastIdx] = updatedLog.wonChampionship
+            ? {
+                ...updatedLog,
+                headline: refreshChampionSeasonHeadline(career, updatedLog),
+              }
+            : updatedLog;
         }
 
         const preFinalCareer: CareerState = {
@@ -2420,6 +2581,19 @@ export const useCareerStore = create<CareerStoreState>()(
           }
           guard++;
         }
+
+        const latestCareer = get().career;
+        if (latestCareer?.liveGame) {
+          set({
+            career: {
+              ...latestCareer,
+              liveGame: {
+                ...latestCareer.liveGame,
+                wasSkipped: true,
+              },
+            },
+          });
+        }
       },
 
       closeLiveGameAndReturn: () => {
@@ -2435,16 +2609,24 @@ export const useCareerStore = create<CareerStoreState>()(
             !career.militaryExempt &&
             career.militaryServiceSeasonsLeft === 0 &&
             career.age >= getMilitaryEnlistAgeForLeague(career.league);
-          set({
-            career: {
-              ...career,
-              liveGame: null,
-              seasonPhase: 'OFFSEASON',
-              pendingEvent: needsImmediateEnlistment
-                ? createSangmuEnlistmentEvent(career)
-                : career.pendingEvent,
-            },
-          });
+          const baseReturned: CareerState = {
+            ...career,
+            liveGame: null,
+            seasonPhase: 'OFFSEASON',
+            pendingEvent: needsImmediateEnlistment
+              ? createSangmuEnlistmentEvent(career)
+              : career.pendingEvent,
+            pendingEventQueue: needsImmediateEnlistment
+              ? []
+              : career.pendingEventQueue,
+          };
+          const nextReturned =
+            !needsImmediateEnlistment &&
+            !baseReturned.pendingEvent &&
+            !baseReturned.lastInternationalSummary
+              ? dequeueNextPendingEvent(baseReturned)
+              : baseReturned;
+          set({ career: nextReturned });
           return;
         }
 
@@ -2583,11 +2765,21 @@ export const useCareerStore = create<CareerStoreState>()(
           choice
         );
 
-        const ageAdjusted = applyAgeAdjustedEventStatChanges(
-          career.age,
-          career.stats,
-          outcome.statChanges
+        const bypassAgeCap = Boolean(
+          choice.bypassAgeStatCap || choice.triggerVeteranReinvention
         );
+        const ageAdjusted = bypassAgeCap
+          ? {
+              adjustedChanges: { ...outcome.statChanges },
+              suppressedPhysicalCount: 0,
+              convertedTrustBonus: 0,
+              grantedAgingShield: false,
+            }
+          : applyAgeAdjustedEventStatChanges(
+              career.age,
+              career.stats,
+              outcome.statChanges
+            );
         const rawStats: PlayerStats = { ...career.stats };
         for (const k of Object.keys(
           ageAdjusted.adjustedChanges
@@ -2747,12 +2939,21 @@ export const useCareerStore = create<CareerStoreState>()(
               (t) =>
                 t.direction === 'CONTENDER' || t.direction === 'PLAYOFF_HUNT'
             );
+            const matchingContenders = contenders.filter(
+              (t) =>
+                t.neededPositions?.includes(career.primaryPos) ||
+                (career.secondaryPos
+                  ? t.neededPositions?.includes(career.secondaryPos)
+                  : false)
+            );
+            const tradePool =
+              matchingContenders.length > 0
+                ? matchingContenders
+                : contenders.length > 0
+                ? contenders
+                : sameLeagueTeams;
             const pickedContender =
-              contenders.find((t) =>
-                t.neededPositions?.includes(career.primaryPos)
-              ) ||
-              contenders[Math.floor(Math.random() * contenders.length)] ||
-              sameLeagueTeams[0];
+              tradePool[Math.floor(Math.random() * tradePool.length)];
 
             if (pickedContender) {
               const oldTeamName = career.team.name;
@@ -2906,14 +3107,15 @@ export const useCareerStore = create<CareerStoreState>()(
           } else {
             nextLiveGame = null;
             nextSeasonPhase = 'OFFSEASON';
+            const isGroupElim = tourney.eliminatedStage === 'GROUP';
             const totalGames = Math.max(1, tourney.matches.length);
-            const qfRecord: InternationalTournamentRecord = {
+            const elimRecord: InternationalTournamentRecord = {
               id: `INTL_${requestedTournamentType}_${requestedTournamentYear}_${Date.now()}`,
               year: requestedTournamentYear,
               age: career.age,
               tournamentType: requestedTournamentType,
               tournamentName: tourneyCfg.name,
-              result: 'QUARTERFINAL',
+              result: isGroupElim ? 'GROUP' : 'QUARTERFINAL',
               wonMvp: false,
               grantedMilitaryExemption: false,
               avgPts: Number(
@@ -2938,7 +3140,7 @@ export const useCareerStore = create<CareerStoreState>()(
               summaryHeadline: tourney.summaryHeadline,
             };
             nextInternationalHistory = [
-              qfRecord,
+              elimRecord,
               ...nextInternationalHistory.filter(
                 (r) =>
                   !(
@@ -2947,7 +3149,7 @@ export const useCareerStore = create<CareerStoreState>()(
                   )
               ),
             ];
-            nextInternationalSummary = qfRecord;
+            nextInternationalSummary = elimRecord;
             nextTotalsForIntl = {
               ...nextTotalsForIntl,
               internationalCaps:
@@ -2955,15 +3157,19 @@ export const useCareerStore = create<CareerStoreState>()(
             };
 
             nextMilestones.push({
-              id: `MS_INTL_QF_${requestedTournamentType}_${requestedTournamentYear}_${Date.now()}`,
+              id: `MS_INTL_${isGroupElim ? 'GROUP' : 'QF'}_${requestedTournamentType}_${requestedTournamentYear}_${Date.now()}`,
               year: requestedTournamentYear,
               age: career.age,
-              title: `${requestedTournamentYear} ${tourneyCfg.shortName} 8강 마감`,
+              title: `${requestedTournamentYear} ${tourneyCfg.shortName} ${
+                isGroupElim ? '조별리그 마감' : '8강 마감'
+              }`,
               description: `${matchSummaries.join(' / ')} · ${tourney.summaryHeadline}`,
               type: requestedTournamentType === 'ASIAN_GAMES' ? 'MILITARY' : 'SPECIAL',
               teamName: '대한민국 국가대표팀',
             });
-            agToastTitle = `${tourneyCfg.shortName} 8강 탈락`;
+            agToastTitle = `${tourneyCfg.shortName} ${
+              isGroupElim ? '조별리그 탈락' : '8강 탈락'
+            }`;
             agToastDesc = tourney.summaryHeadline;
             agToastTone = 'amber';
           }
@@ -2977,13 +3183,36 @@ export const useCareerStore = create<CareerStoreState>()(
             ? null
             : career.pendingChainEvent || null);
 
-        const nextRelationships = applyRelationshipDelta(
-          getEffectiveRelationships(career),
-          outcome.relationshipChanges,
-          nextTrust - career.coachTrust
+        const didChangeTeamInEvent = Boolean(
+          choice.enlistSangmu || midTradeResult === 'ACCEPTED'
         );
+        const nextRelationships = didChangeTeamInEvent
+          ? buildTeamTransferRelationships(
+              career,
+              choice.enlistSangmu ? 55 : nextTrust
+            )
+          : applyRelationshipDelta(
+              getEffectiveRelationships(career),
+              outcome.relationshipChanges,
+              nextTrust - career.coachTrust
+            );
         // 감독 신뢰도 단일 진실 소스 동기화
         nextTrust = nextRelationships.coachTrust;
+
+        const nextRole = didChangeTeamInEvent
+          ? calculateRoleAndMpg({
+              ...career,
+              ovr: nextOvr,
+              stats: nextStats,
+              primaryPos: nextPrimary,
+              secondaryPos: nextSecondary,
+              league: nextLeague,
+              team: nextTeam,
+              contractType: nextContractType,
+              coachTrust: nextTrust,
+              promisedRole: nextPromisedRole,
+            }).role
+          : career.role;
 
         const nextStoryArcs = getEffectiveStoryArcs(career);
         if (arcAdvance) {
@@ -3011,7 +3240,7 @@ export const useCareerStore = create<CareerStoreState>()(
           }
         }
 
-        const updatedBase: CareerState = {
+        let updatedBase: CareerState = {
           ...career,
           primaryPos: nextPrimary,
           secondaryPos: nextSecondary,
@@ -3032,12 +3261,13 @@ export const useCareerStore = create<CareerStoreState>()(
           storyArcs: nextStoryArcs,
           league: nextLeague,
           team: nextTeam,
+          role: nextRole,
           contractType: nextContractType,
           contractYearsLeft: nextContractYearsLeft,
           annualSalary: nextAnnualSalary,
           promisedRole: nextPromisedRole,
           brokenRolePromise:
-            midTradeResult === 'ACCEPTED' ? false : career.brokenRolePromise,
+            didChangeTeamInEvent ? false : career.brokenRolePromise,
           seasonsOnCurrentTeam:
             choice.enlistSangmu ? 0 : nextSeasonsOnTeam,
           tradeRequestedThisYear:
@@ -3080,13 +3310,23 @@ export const useCareerStore = create<CareerStoreState>()(
           updatedBase.age >= getMilitaryEnlistAgeForLeague(updatedBase.league)
         ) {
           updatedBase.pendingEvent = createSangmuEnlistmentEvent(updatedBase);
+          updatedBase.pendingEventQueue = [];
+        }
+
+        const isInternationalAction = Boolean(requestedTournamentType);
+        // 국제대회 액션이 요약 모달 없이 바로 끝난 경우(혹은 결과 모달을 띄우지 않는 경우) 대기 큐 선두 이벤트를 즉시 활성화
+        if (
+          isInternationalAction &&
+          !nextLiveGame &&
+          !updatedBase.pendingEvent &&
+          !updatedBase.lastInternationalSummary
+        ) {
+          updatedBase = dequeueNextPendingEvent(updatedBase);
         }
 
         const refreshedOptions = updatedBase.offseasonLocked
           ? generateOffseasonOptions(updatedBase)
           : [];
-
-        const isInternationalAction = Boolean(requestedTournamentType);
 
         const outcomeTone: ToastMessage['tone'] = agToastTitle
           ? agToastTone
@@ -3186,11 +3426,14 @@ export const useCareerStore = create<CareerStoreState>()(
         }
 
         if (option.actionType === 'RETURN_KBL_FAREWELL' && option.targetTeam) {
+          const returnTrust = 60;
+          const returnRel = buildTeamTransferRelationships(career, returnTrust);
           const { role } = calculateRoleAndMpg({
             ...career,
             league: 'KBL',
             team: option.targetTeam,
             contractType: 'KBL_VET',
+            coachTrust: returnTrust,
           });
           set({
             career: {
@@ -3201,10 +3444,15 @@ export const useCareerStore = create<CareerStoreState>()(
               contractYearsLeft: 1,
               annualSalary: getContractDefaultSalary('KBL_VET', career.ovr),
               role,
+              seasonsOnCurrentTeam: 0,
+              coachTrust: returnRel.coachTrust,
+              relationships: returnRel,
+              brokenRolePromise: false,
               isFarewellTour: true,
               isOutOfLeagueWarning: false,
               offseasonLocked: false,
               offseasonOptions: [],
+              pendingEventQueue: [],
               seasonPhase: 'REGULAR_SEASON',
               playoffBracket: null,
               liveGame: null,
@@ -3322,7 +3570,9 @@ export const useCareerStore = create<CareerStoreState>()(
 
         const isTeamChanged = nextTeam.id !== career.team.id;
         const isExistingContractStay =
-          option.actionType === 'STAY_TEAM' && !isTeamChanged;
+          Boolean(option.isExistingContract) &&
+          !isTeamChanged &&
+          career.contractYearsLeft > 0;
         const nextTrust = isTeamChanged ? 54 : career.coachTrust;
         const nextSalary = isExistingContractStay
           ? career.annualSalary
@@ -3431,14 +3681,17 @@ export const useCareerStore = create<CareerStoreState>()(
             tradeRequestedThisYear: false,
             rivals: nextRivals,
             coachTrust: nextTrust,
-            relationships: {
-              ...getEffectiveRelationships(career),
-              coachTrust: nextTrust,
-            },
+            relationships: isTeamChanged
+              ? buildTeamTransferRelationships(career, nextTrust)
+              : {
+                  ...getEffectiveRelationships(career),
+                  coachTrust: nextTrust,
+                },
             role,
             isOutOfLeagueWarning: false,
             offseasonLocked: false,
             offseasonOptions: [],
+            pendingEventQueue: [],
             seasonPhase: 'REGULAR_SEASON',
             playoffBracket: null,
             liveGame: null,
@@ -3461,9 +3714,20 @@ export const useCareerStore = create<CareerStoreState>()(
 
         const statVal = career.stats[statKey];
         const gradeBonus = statVal >= 78 ? 6.5 : statVal >= 68 ? 4.0 : 2.0;
-        const updatedStats: PlayerStats = {
+        const rawUpdatedStats: PlayerStats = {
           ...career.stats,
           [statKey]: clampStat(career.stats[statKey] + 1),
+        };
+        const updatedStats = enforceBiomechanicalCaps(
+          rawUpdatedStats,
+          career.heightCm,
+          career.primaryPos
+        );
+        const actualGain = Math.max(0, updatedStats[statKey] - career.stats[statKey]);
+        const prevGains = career.combineState.statGains || {};
+        const nextGains: Partial<PlayerStats> = {
+          ...prevGains,
+          [statKey]: (prevGains[statKey] || 0) + actualGain,
         };
         const updatedOvr = calculateOvr(
           updatedStats,
@@ -3489,12 +3753,16 @@ export const useCareerStore = create<CareerStoreState>()(
               combineBonusScore: newBonus,
               projectedPick,
               undraftedRisk,
+              statGains: nextGains,
             },
           },
           toast: {
             id: `TOAST_${Date.now()}`,
             title: `${label} 측정 완료`,
-            description: `능력치 +1 상승 · 예상 지명 ${projectedPick}순위`,
+            description:
+              actualGain > 0
+                ? `능력치 +${actualGain} 상승 · 예상 지명 ${projectedPick}순위`
+                : `신체 상한 도달 · 예상 지명 ${projectedPick}순위`,
             tone: 'emerald',
           },
         });
@@ -3522,6 +3790,10 @@ export const useCareerStore = create<CareerStoreState>()(
         );
 
         const syncedInterview = syncCareerRelationships(career, undefined, 4);
+        const actualTrustGain = Math.max(
+          0,
+          syncedInterview.coachTrust - career.coachTrust
+        );
         set({
           career: {
             ...career,
@@ -3533,6 +3805,7 @@ export const useCareerStore = create<CareerStoreState>()(
               combineBonusScore: newBonus,
               projectedPick,
               undraftedRisk,
+              trustGain: (career.combineState.trustGain || 0) + actualTrustGain,
             },
           },
           toast: {
@@ -3548,8 +3821,40 @@ export const useCareerStore = create<CareerStoreState>()(
         const { career } = get();
         if (!career) return;
 
+        // 컴바인 드릴/면접으로 얻은 임시 스탯·신뢰도 상승분 원복 (반복 철회 스탯 파밍 방지)
+        const statGains = career.combineState?.statGains || {};
+        const trustGain = career.combineState?.trustGain || 0;
+        const rolledBackStats: PlayerStats = { ...career.stats };
+        let hadStatRollback = false;
+        for (const k of Object.keys(statGains) as (keyof PlayerStats)[]) {
+          const g = statGains[k] || 0;
+          if (g > 0) {
+            rolledBackStats[k] = clampStat(rolledBackStats[k] - g);
+            hadStatRollback = true;
+          }
+        }
+        const rolledBackOvr = calculateOvr(
+          rolledBackStats,
+          career.primaryPos,
+          career.heightCm
+        );
+        const rolledBackTrust = clampNum(career.coachTrust - trustGain, 10, 100);
+        const rolledBackRelationships = {
+          ...getEffectiveRelationships(career),
+          coachTrust: rolledBackTrust,
+        };
+        const rolledBackCareer: CareerState = {
+          ...career,
+          stats: rolledBackStats,
+          ovr: rolledBackOvr,
+          coachTrust: rolledBackTrust,
+          relationships: rolledBackRelationships,
+          combineState: null,
+          draftResult: null,
+        };
+
         // NBA 드래프트 신청을 철회해도 오프시즌 에이전트 데스크 선택권(잔류/타 구단 오퍼/KBL 드래프트 등)을 유지!
-        const allOptions = generateOffseasonOptions(career);
+        const allOptions = generateOffseasonOptions(rolledBackCareer);
         const remainingOptions = allOptions.filter(
           (opt) => opt.actionType !== 'ENTER_NBA_DRAFT'
         );
@@ -3572,12 +3877,10 @@ export const useCareerStore = create<CareerStoreState>()(
                 },
               ];
 
-        const { role } = calculateRoleAndMpg(career);
+        const { role } = calculateRoleAndMpg(rolledBackCareer);
         set({
           career: {
-            ...career,
-            combineState: null,
-            draftResult: null,
+            ...rolledBackCareer,
             offseasonLocked: true,
             offseasonOptions: fallbackOptions,
             seasonPhase: 'OFFSEASON',
@@ -3588,7 +3891,9 @@ export const useCareerStore = create<CareerStoreState>()(
             id: `TOAST_${Date.now()}`,
             title: 'NBA 드래프트 참가 철회 · 에이전트 데스크 복귀',
             description:
-              '대학 잔류, KBL 드래프트, 타 리그 계약 오퍼 중 다음 진로를 선택하세요.',
+              hadStatRollback || trustGain > 0
+                ? '컴바인 기간 중 얻은 임시 상승분이 원복되었습니다. 다음 진로를 선택하세요.'
+                : '대학 잔류, KBL 드래프트, 타 리그 계약 오퍼 중 다음 진로를 선택하세요.',
             tone: 'amber',
           },
         });
@@ -3762,10 +4067,10 @@ export const useCareerStore = create<CareerStoreState>()(
             tradeRequestedThisYear: false,
             rivals: nextRivals,
             coachTrust: nextInitialTrust,
-            relationships: {
-              ...getEffectiveRelationships(career),
-              coachTrust: nextInitialTrust,
-            },
+            relationships: buildTeamTransferRelationships(
+              career,
+              nextInitialTrust
+            ),
             hasEnteredNbaDraft:
               career.hasEnteredNbaDraft || dr.draftType === 'NBA',
             role,
@@ -3773,6 +4078,7 @@ export const useCareerStore = create<CareerStoreState>()(
             draftResult: null,
             offseasonLocked: false,
             offseasonOptions: [],
+            pendingEventQueue: [],
             seasonPhase: 'REGULAR_SEASON',
             playoffBracket: null,
             liveGame: null,
@@ -3933,17 +4239,21 @@ export const useCareerStore = create<CareerStoreState>()(
         fastSimEnabled: state.fastSimEnabled,
         lastPersonalCareIds: state.lastPersonalCareIds,
       }),
-      onRehydrateStorage: () => (state) => {
-        if (!state) return;
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState as Partial<CareerStoreState>) || {};
         const migrated = migratePersistedPayload({
-          career: state.career,
-          hofList: state.hofList,
-          recordBook: state.recordBook,
-          skipRecordSync: Boolean(state.recordBookManuallyReset),
+          career: persisted.career ?? currentState.career,
+          hofList: persisted.hofList ?? currentState.hofList,
+          recordBook: persisted.recordBook ?? currentState.recordBook,
+          skipRecordSync: Boolean(persisted.recordBookManuallyReset),
         });
-        state.career = migrated.career;
-        state.hofList = migrated.hofList;
-        state.recordBook = migrated.recordBook;
+        return {
+          ...currentState,
+          ...persisted,
+          career: migrated.career,
+          hofList: migrated.hofList,
+          recordBook: migrated.recordBook,
+        };
       },
     }
   )

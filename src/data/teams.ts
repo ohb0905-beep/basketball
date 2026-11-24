@@ -20,39 +20,46 @@ function deriveDefaultNeeds(id: string): Position[] {
   return [first, second];
 }
 
+const TEAM_STYLES: NonNullable<TeamInfo['preferredStyle']>[] = [
+  'PACE_AND_SPACE',
+  'DEFENSE_GRIT',
+  'HALF_COURT',
+  'BALANCED',
+];
+
+function derivePreferredStyle(id: string): NonNullable<TeamInfo['preferredStyle']> {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 37 + id.charCodeAt(i)) % 991;
+  }
+  return TEAM_STYLES[hash % TEAM_STYLES.length];
+}
+
+export const LEAGUE_TEAM_RATING_BOUNDS: Record<
+  LeagueId,
+  { low: number; high: number; minR: number; maxR: number }
+> = {
+  HIGH_SCHOOL: { low: 59, high: 63, minR: 55, maxR: 68 },
+  U_LEAGUE: { low: 65, high: 69, minR: 61, maxR: 74 },
+  NCAA: { low: 76, high: 80, minR: 71, maxR: 85 },
+  KBL: { low: 72, high: 76, minR: 68, maxR: 83 },
+  B_LEAGUE: { low: 71, high: 76, minR: 66, maxR: 82 },
+  NBL: { low: 73, high: 78, minR: 69, maxR: 83 },
+  GLEAGUE: { low: 77, high: 80, minR: 73, maxR: 84 },
+  EUROLEAGUE: { low: 78, high: 83, minR: 74, maxR: 89 },
+  NBA: { low: 82, high: 88, minR: 75, maxR: 94 },
+};
+
 function deriveDirection(rating: number, league: LeagueId): TeamDirection {
-  const thresholdHigh =
-    league === 'NBA'
-      ? 88
-      : league === 'EUROLEAGUE'
-      ? 83
-      : league === 'NBL'
-      ? 78
-      : league === 'B_LEAGUE'
-      ? 76
-      : league === 'KBL'
-      ? 76
-      : 68;
-  const thresholdLow =
-    league === 'NBA'
-      ? 82
-      : league === 'EUROLEAGUE'
-      ? 78
-      : league === 'NBL'
-      ? 73
-      : league === 'B_LEAGUE'
-      ? 71
-      : league === 'KBL'
-      ? 72
-      : 63;
-  if (rating >= thresholdHigh) return 'CONTENDER';
-  if (rating <= thresholdLow) return 'REBUILDING';
+  const cfg = LEAGUE_TEAM_RATING_BOUNDS[league];
+  if (rating >= cfg.high) return 'CONTENDER';
+  if (rating <= cfg.low) return 'REBUILDING';
   return 'PLAYOFF_HUNT';
 }
 
 
 // ==========================================
-// 1. 대한민국 고교 농구 연맹 (KSSBF 남고부 24개교)
+// 1. 대한민국 고교 농구 연맹 (KSSBF 남고부 30개교)
 // ==========================================
 export const HIGH_SCHOOL_TEAMS: TeamInfo[] = [
   {
@@ -1891,7 +1898,7 @@ export const GLEAGUE_TEAMS: TeamInfo[] = [
 ];
 
 // ==========================================
-// 6. 미국 NCAA 디비전 1 (24대 명문 대학 - ESPN 공식 ID & 로고 연동)
+// 6. 미국 NCAA 디비전 1 (32대 명문 대학 - ESPN 공식 ID & 로고 연동)
 // ==========================================
 export const NCAA_TEAMS: TeamInfo[] = [
   {
@@ -3155,7 +3162,7 @@ export const ALL_TEAMS: TeamInfo[] = [
   ...t,
   direction: t.direction || deriveDirection(t.rating, t.league),
   neededPositions: t.neededPositions || deriveDefaultNeeds(t.id),
-  preferredStyle: t.preferredStyle || 'BALANCED',
+  preferredStyle: t.preferredStyle || derivePreferredStyle(t.id),
 }));
 
 export function getTeamsByLeague(
@@ -3177,11 +3184,11 @@ export function getTeamsByLeague(
 export function getTeamById(
   id: string,
   ratingsMap?: Record<string, number>
-): TeamInfo {
+): TeamInfo | undefined {
   const found =
     ALL_TEAMS.find((t) => t.id === id) ||
-    ALL_INTERNATIONAL_TEAMS.find((t) => t.id === id) ||
-    HIGH_SCHOOL_TEAMS[0];
+    ALL_INTERNATIONAL_TEAMS.find((t) => t.id === id);
+  if (!found) return undefined;
   const updatedRating = ratingsMap?.[found.id] ?? found.rating;
   return {
     ...found,
@@ -3252,30 +3259,9 @@ export function evolveLeagueTeamRatings(
       cycleShift = rng() < 0.58 ? 1 : 0;
     }
 
-    const minR =
-      t.league === 'NBA'
-        ? 75
-        : t.league === 'EUROLEAGUE'
-        ? 74
-        : t.league === 'NBL'
-        ? 69
-        : t.league === 'B_LEAGUE'
-        ? 66
-        : t.league === 'KBL'
-        ? 68
-        : 56;
-    const maxR =
-      t.league === 'NBA'
-        ? 94
-        : t.league === 'EUROLEAGUE'
-        ? 89
-        : t.league === 'NBL'
-        ? 83
-        : t.league === 'B_LEAGUE'
-        ? 82
-        : t.league === 'KBL'
-        ? 83
-        : 86;
+    const bounds = LEAGUE_TEAM_RATING_BOUNDS[t.league];
+    const minR = bounds.minR;
+    const maxR = bounds.maxR;
     nextMap[t.id] = Math.max(
       minR,
       Math.min(maxR, Math.round(cur + delta + cycleShift))

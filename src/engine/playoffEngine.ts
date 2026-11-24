@@ -561,8 +561,10 @@ function buildNblMainRound1(
 export function createPlayoffBracket(
   career: CareerState,
   standings: StandingEntry[],
-  rng: () => number = Math.random
+  rng: () => number = Math.random,
+  options?: { simulateForNonPlayer?: boolean }
 ): PlayoffBracketState {
+  const simulateForNonPlayer = Boolean(options?.simulateForNonPlayer);
   const playerStanding =
     standings.find((s) => s.isPlayerTeam) || standings[standings.length - 1];
 
@@ -576,7 +578,11 @@ export function createPlayoffBracket(
       .sort((a, b) => (a.conferenceRank ?? a.rank) - (b.conferenceRank ?? b.rank));
 
     const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
-    if (!playerQualified || eastList.length < 10 || westList.length < 10) {
+    if (
+      (!playerQualified && !simulateForNonPlayer) ||
+      eastList.length < 10 ||
+      westList.length < 10
+    ) {
       return {
         league: career.league,
         year: career.seasonYear,
@@ -641,7 +647,7 @@ export function createPlayoffBracket(
     );
 
     // 플레이어가 7~10위 플레이인 참가 팀이면 플레이인 1라운드부터 직접 진행
-    if (playerStanding.playInQualified) {
+    if (playerQualified && playerStanding.playInQualified) {
       return {
         league: career.league,
         year: career.seasonYear,
@@ -719,17 +725,17 @@ export function createPlayoffBracket(
       stageType: 'MAIN_PLAYOFF',
       playInSeeds: { east7, east8, west7, west8 },
       rounds: [round1Series],
-      playerEliminated: false,
+      playerEliminated: !playerQualified,
       playerReachedFinals: false,
       championTeamId: null,
-      playoffResultLabel: '플레이오프 진출',
+      playoffResultLabel: playerQualified ? '플레이오프 진출' : 'PO 탈락',
     };
   }
 
   // 2) 유로리그 (20팀): 1~6위 8강 직행, 7~10위 플레이인 쇼다운 (BO1 2단계 -> 8강 BO5 -> 파이널 포 4강/결승 BO1)
   if (career.league === 'EUROLEAGUE') {
     const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
-    if (!playerQualified || standings.length < 10) {
+    if ((!playerQualified && !simulateForNonPlayer) || standings.length < 10) {
       return {
         league: career.league,
         year: career.seasonYear,
@@ -769,7 +775,7 @@ export function createPlayoffBracket(
       { isPlayIn: true, playInSlot: '9v10' }
     );
 
-    if (playerStanding.playInQualified) {
+    if (playerQualified && playerStanding.playInQualified) {
       return {
         league: career.league,
         year: career.seasonYear,
@@ -821,17 +827,17 @@ export function createPlayoffBracket(
           career.team.id
         ),
       ],
-      playerEliminated: false,
+      playerEliminated: !playerQualified,
       playerReachedFinals: false,
       championTeamId: null,
-      playoffResultLabel: '유로리그 8강 PO 진출',
+      playoffResultLabel: playerQualified ? '유로리그 8강 PO 진출' : 'PO 탈락',
     };
   }
 
   // 3) 호주 NBL (10팀): 1~2위 4강 직행, 3~6위 정통 2단계 플레이인 (3v4 + 5v6 -> 최종전 -> 4강 BO3 -> 챔피언십 BO5)
   if (career.league === 'NBL') {
     const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
-    if (!playerQualified || standings.length < 6) {
+    if ((!playerQualified && !simulateForNonPlayer) || standings.length < 6) {
       return {
         league: career.league,
         year: career.seasonYear,
@@ -871,7 +877,7 @@ export function createPlayoffBracket(
       { isPlayIn: true, playInSlot: '5v6' }
     );
 
-    if (playerStanding.playInQualified) {
+    if (playerQualified && playerStanding.playInQualified) {
       return {
         league: career.league,
         year: career.seasonYear,
@@ -924,10 +930,10 @@ export function createPlayoffBracket(
           career.team.id
         ),
       ],
-      playerEliminated: false,
+      playerEliminated: !playerQualified,
       playerReachedFinals: false,
       championTeamId: null,
-      playoffResultLabel: 'NBL 세미파이널 직행',
+      playoffResultLabel: playerQualified ? 'NBL 세미파이널 직행' : 'PO 탈락',
     };
   }
 
@@ -943,7 +949,11 @@ export function createPlayoffBracket(
       .slice(0, 6);
 
     const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
-    if (!playerQualified || eastTop6.length < 6 || westTop6.length < 6) {
+    if (
+      (!playerQualified && !simulateForNonPlayer) ||
+      eastTop6.length < 6 ||
+      westTop6.length < 6
+    ) {
       return {
         league: career.league,
         year: career.seasonYear,
@@ -1014,10 +1024,10 @@ export function createPlayoffBracket(
       currentRound: 1,
       stageType: 'MAIN_PLAYOFF',
       rounds: [round1Series],
-      playerEliminated: false,
+      playerEliminated: !playerQualified,
       playerReachedFinals: false,
       championTeamId: null,
-      playoffResultLabel: 'G리그 플레이오프 진출',
+      playoffResultLabel: playerQualified ? 'G리그 플레이오프 진출' : 'PO 탈락',
     };
   }
 
@@ -1025,7 +1035,7 @@ export function createPlayoffBracket(
   if (career.league === 'NCAA') {
     const qualified = standings.slice(0, 16);
     const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
-    if (!playerQualified || qualified.length < 16) {
+    if ((!playerQualified && !simulateForNonPlayer) || qualified.length < 16) {
       return {
         league: career.league,
         year: career.seasonYear,
@@ -1072,10 +1082,12 @@ export function createPlayoffBracket(
       currentRound: 1,
       stageType: 'MAIN_PLAYOFF',
       rounds: [round1Series],
-      playerEliminated: false,
+      playerEliminated: !playerQualified,
       playerReachedFinals: false,
       championTeamId: null,
-      playoffResultLabel: 'NCAA 16강 토너먼트 진출',
+      playoffResultLabel: playerQualified
+        ? 'NCAA 16강 토너먼트 진출'
+        : '토너먼트 탈락',
     };
   }
 
@@ -1090,7 +1102,7 @@ export function createPlayoffBracket(
   const playerQualified = Boolean(playerStanding?.qualifiedPlayoffs);
   const totalRounds = qualified.length <= 4 ? 2 : 3;
 
-  if (!playerQualified || qualified.length < 2) {
+  if ((!playerQualified && !simulateForNonPlayer) || qualified.length < 2) {
     return {
       league: career.league,
       year: career.seasonYear,
@@ -1170,10 +1182,10 @@ export function createPlayoffBracket(
     currentRound: 1,
     stageType: 'MAIN_PLAYOFF',
     rounds: [round1Series],
-    playerEliminated: false,
+    playerEliminated: !playerQualified,
     playerReachedFinals: false,
     championTeamId: null,
-    playoffResultLabel: '플레이오프 진출',
+    playoffResultLabel: playerQualified ? '플레이오프 진출' : 'PO 탈락',
   };
 }
 
@@ -1347,7 +1359,7 @@ export function evaluateRealisticFinalsMvp(
       finalsGameScore * clamp(0.7 + minuteShareFactor * 0.3, 0.7, 1.05) +
       teamGapAdjust -
       strainPenalty;
-    const teamAceGameBenchmark = Math.max(31.0, 27.5 + (teamRating - 62) * 1.12);
+    const teamAceGameBenchmark = Math.max(30.0, 30.8 + (teamRating - 62) * 0.78);
     return effectiveGameImpact >= teamAceGameBenchmark;
   }
 
@@ -2325,10 +2337,37 @@ export function simulateInternationalTournament(
     };
   };
 
-  // 1. 조별리그 3경기
+  // 1. 조별리그 3경기 (최소 2승 또는 1승 2패 득실차 >= 0 시 8강 토너먼트 진출)
+  const groupMatches: AsianGamesMatchLog[] = [];
   groupOpponents.slice(0, 3).forEach((opp, idx) => {
-    matches.push(playMatch('GROUP', `조별리그 ${idx + 1}차전`, opp));
+    const m = playMatch('GROUP', `조별리그 ${idx + 1}차전`, opp);
+    matches.push(m);
+    groupMatches.push(m);
   });
+  const groupWins = groupMatches.filter((m) => m.won).length;
+  const groupLosses = groupMatches.length - groupWins;
+  const groupPointDiff = groupMatches.reduce(
+    (sum, m) => sum + (m.korScore - m.oppScore),
+    0
+  );
+  const qualifiedFromGroup =
+    groupWins >= 2 || (groupWins === 1 && groupPointDiff >= 0);
+  if (!qualifiedFromGroup) {
+    return {
+      tournamentType,
+      tournamentName: cfg.name,
+      reachedFinals: false,
+      reachedBronzeMatch: false,
+      eliminatedStage: 'GROUP',
+      finalOpponent: null,
+      bronzeOpponent: null,
+      korEffectiveRating,
+      matches,
+      summaryHeadline: `${cfg.shortName} 조별리그 탈락 — 대한민국, 조별리그 ${groupWins}승 ${groupLosses}패(득실 ${
+        groupPointDiff >= 0 ? `+${groupPointDiff}` : groupPointDiff
+      })로 본선 토너먼트 진출 실패`,
+    };
+  }
 
   // 2. 8강 토너먼트
   const qfMatch = playMatch('QUARTERFINAL', '8강 토너먼트', qfOpponent);
@@ -2422,9 +2461,9 @@ export function createLiveFinalGame(
     ? INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType]
     : null;
 
-  const korRating = tournamentType
-    ? Math.round(calculateKoreaTeamEffectiveRating(career, tournamentType))
-    : 78;
+  // 라이브 경기에서는 simulateLiveQuarter()가 주인공의 개인 기여도(playerCourtLift)를 별도 반영하므로
+  // 대표팀 기본 전력(baseKorRating)을 사용해 주인공 OVR 이중 가산을 방지합니다.
+  const korRating = tourneyCfg ? Math.round(tourneyCfg.baseKorRating) : 78;
 
   const playerTeam: TeamInfo = isInternational
     ? {
@@ -2615,11 +2654,11 @@ function splitPointsIntoBuckets(
 }
 
 const THREE_PT_SPOTS: [number, number][] = [
-  [11, 20], // 좌측 코너
-  [89, 20], // 우측 코너
-  [18, 52], // 좌측 윙
-  [82, 52], // 우측 윙
-  [50, 66], // 탑 오브 더 키
+  [3, 20],  // 좌측 코너 (3점 아크 밖 x < 8.8)
+  [97, 20], // 우측 코너 (3점 아크 밖 x > 91.2)
+  [10, 72], // 좌측 윙 (3점 아크 밖)
+  [90, 72], // 우측 윙 (3점 아크 밖)
+  [50, 91], // 탑 오브 더 키 (3점 아크 밖 y > 84)
 ];
 
 const TWO_PT_SPOTS: [number, number][] = [
@@ -2755,7 +2794,7 @@ function generateQuarterCourtPlays(params: {
       const [x, y] = pickSpot(THREE_PT_SPOTS, rng);
       const pts = Math.min(3, remainingTeamBudget);
       remainingTeamBudget -= pts;
-      const spotLabel = x <= 20 || x >= 80 ? '코너 3점슛' : y >= 60 ? '탑 3점슛' : '윙 3점슛';
+      const spotLabel = y <= 28 ? '코너 3점슛' : y >= 82 ? '탑 3점슛' : '윙 3점슛';
       actions.push({
         actor: 'PLAYER',
         type: 'THREE_MAKE',
@@ -2818,7 +2857,7 @@ function generateQuarterCourtPlays(params: {
         shotPoints: pts,
         courtBadge: `+${pts}`,
         x: 50,
-        y: 38,
+        y: 46,
         dPts: trip,
         dFgm: 0,
         dFga: 0,
@@ -3126,9 +3165,9 @@ function generateQuarterCourtPlays(params: {
 /**
  * 실시간 결승전 중계의 다음 쿼터(1Q -> 2Q -> 3Q -> 4Q -> 동점 시 OT1~3)를 시뮬레이션합니다.
  * - 점수 조작 0%: 1~4쿼터 누적 실제 스코어를 있는 그대로 보존합니다.
- * - 4쿼터 종료 직전 실제 점수 차가 ±4점 이내(|teamScore - oppScore| <= 4)이고 퇴장(파울 아웃) 상태가 아닐 때만
+ * - 4쿼터 종료 직전 실제 점수 차가 ±3점 이내(|teamScore - oppScore| <= 3)이고 퇴장(파울 아웃) 상태가 아닐 때만
  *   자연스럽게 '클러치 마지막 1포제션 선택지(공격/수비/자유투 분기)'를 발동합니다!
- * - 점수 차가 5점 이상이면 클러치 없이 자연스럽게 경기가 종료됩니다.
+ * - 점수 차가 4점 이상이면 클러치 없이 자연스럽게 경기가 종료됩니다.
  * - 동점으로 쿼터(또는 클러치)가 끝나면 최대 3차 연장(OT)까지 진행합니다.
  */
 /**
@@ -3146,7 +3185,7 @@ export function getReplacementLevelQuarterImpact(
   const threeShare = ldr >= 56 ? clamp((ldr - 42) / 105, 0.12, 0.55) : 0;
   const fieldPts = fga * fgProb * ((1 - threeShare) * 2 + threeShare * 0.85 * 3);
   const ftProb = clamp(0.62 + (ldr - 50) * 0.006, 0.55, 0.93);
-  const ftPts = 0.28 * minutesFactor * 2 * ftProb;
+  const ftPts = 0.28 * minutesFactor * (isOvertime ? 0.55 : 1.0) * 2 * ftProb;
   const ast =
     (0.4 + (ldr / 100) * 1.85) * minutesFactor * (isOvertime ? 0.55 : 1.0);
   const stocks =
@@ -3235,11 +3274,30 @@ export function simulateLiveQuarter(
   let nextFouls = liveGame.playerStats.fouls;
   let fouledOutNow = isAlreadyFouledOut;
   let nextStamina = curStamina;
+  let foulOutQuarterShare = 1.0;
 
   if (!isAlreadyFouledOut) {
-    const baseFga = (isOvertime ? 1.8 : 3.25) * roleMinutesFactor * foulTroubleMinutesMult;
+    // 1) 파울아웃 여부를 먼저 판정해, 쿼터 중반 퇴장 시 해당 쿼터 출전 비중(foulOutQuarterShare)을 스탯·체력·기여도에 일관 축소 적용
+    const effectiveFoulRisk =
+      mod.foulRisk *
+      (inFoulTrouble ? 0.55 : 1.0) *
+      clamp(0.6 + roleMinutesFactor * 0.4, 0.6, 1.1) *
+      (isOvertime ? 0.55 : 1.0);
+    const addedFoul = rng() < effectiveFoulRisk ? 1 : 0;
+    nextFouls = Math.min(foulLimit, liveGame.playerStats.fouls + addedFoul);
+    if (nextFouls >= foulLimit) {
+      fouledOutNow = true;
+      foulOutQuarterShare = 0.35 + rng() * 0.3;
+    }
+  }
+
+  const activeQuarterMinutesMult = foulTroubleMinutesMult * foulOutQuarterShare;
+
+  if (!isAlreadyFouledOut) {
+    const baseFga =
+      (isOvertime ? 1.8 : 3.25) * roleMinutesFactor * activeQuarterMinutesMult;
     qFga = Math.max(
-      seasonMpg < 12 ? 0 : 1,
+      seasonMpg < 12 || fouledOutNow ? 0 : 1,
       Math.round(
         baseFga *
           mod.usageMult *
@@ -3281,12 +3339,11 @@ export function simulateLiveQuarter(
     }
 
     const ftProb = clamp(0.62 + (stats.out - 50) * 0.006, 0.55, 0.93);
+    const ftVolumeMult =
+      roleMinutesFactor * activeQuarterMinutesMult * (isOvertime ? 0.55 : 1.0);
     const ftTrips =
-      chosenTactic === 'ACE_HERO' && rng() < 0.55 * roleMinutesFactor
-        ? 2
-        : rng() < 0.28 * roleMinutesFactor
-        ? 1
-        : 0;
+      (rng() < 0.28 * ftVolumeMult ? 1 : 0) +
+      (chosenTactic === 'ACE_HERO' && rng() < 0.36 * ftVolumeMult ? 1 : 0);
     for (let t = 0; t < ftTrips; t++) {
       if (rng() < ftProb) freeThrows++;
       if (rng() < ftProb) freeThrows++;
@@ -3298,7 +3355,7 @@ export function simulateLiveQuarter(
       Math.round(
         (0.55 + (stats.reb / 100) * 2.15) *
           roleMinutesFactor *
-          foulTroubleMinutesMult *
+          activeQuarterMinutesMult *
           mismatch.rebMultiplier *
           (isOvertime ? 0.55 : 1.0) *
           (0.6 + rng() * 0.8)
@@ -3309,7 +3366,7 @@ export function simulateLiveQuarter(
       Math.round(
         (0.4 + (stats.ply / 100) * 1.85) *
           roleMinutesFactor *
-          foulTroubleMinutesMult *
+          activeQuarterMinutesMult *
           mod.astBonus *
           (isOvertime ? 0.55 : 1.0) *
           (0.6 + rng() * 0.8)
@@ -3321,7 +3378,8 @@ export function simulateLiveQuarter(
         ((stats.def / 100) * 0.42 +
           (chosenTactic === 'LOCKDOWN_DEFENSE' ? 0.16 : 0)) *
           roleMinutesFactor *
-          foulTroubleMinutesMult,
+          activeQuarterMinutesMult *
+          (isOvertime ? 0.55 : 1.0),
         0.03,
         0.62
       )
@@ -3334,7 +3392,8 @@ export function simulateLiveQuarter(
           0.36 *
           mismatch.blkMultiplier *
           roleMinutesFactor *
-          foulTroubleMinutesMult,
+          activeQuarterMinutesMult *
+          (isOvertime ? 0.55 : 1.0),
         0.02,
         0.52
       )
@@ -3344,34 +3403,33 @@ export function simulateLiveQuarter(
     const drain = Math.round(
       mod.staminaDrain *
         (0.55 + roleMinutesFactor * 0.45) *
+        foulOutQuarterShare *
         (hasIronMan ? 0.72 : 1.0) *
         bio.staminaDrainMultiplier *
         (isOvertime ? 0.55 : 1.0)
     );
-    nextStamina = clamp(
-      curStamina - drain + (chosenTactic === 'PACE_CONSERVE' ? 6 : 0),
-      10,
-      100
-    );
-
-    const effectiveFoulRisk =
-      mod.foulRisk *
-      (inFoulTrouble ? 0.55 : 1.0) *
-      clamp(0.6 + roleMinutesFactor * 0.4, 0.6, 1.1);
-    const addedFoul = rng() < effectiveFoulRisk ? 1 : 0;
-    nextFouls = Math.min(foulLimit, liveGame.playerStats.fouls + addedFoul);
-    if (nextFouls >= foulLimit) {
-      fouledOutNow = true;
-    }
+    nextStamina = clamp(curStamina - drain, 10, 100);
   }
 
-  // 리그별 실제 경기 템포 기반 팀/상대 쿼터 득점 산출 (강제 스코어 조작 0%)
+  // 리그/국제대회별 실제 경기 템포 기반 팀/상대 쿼터 득점 산출 (강제 스코어 조작 0%, 홈/원정 완전 대칭)
   const teamRating =
     career.teamRatingsMap?.[liveGame.playerTeam.id] ?? liveGame.playerTeam.rating;
-  const baseTeamQuarterPts = isOvertime
+  const intlTempoCfg =
+    isInternational && tournamentType
+      ? INTERNATIONAL_TOURNAMENT_CONFIG[tournamentType]
+      : null;
+  const baseTeamQuarterPts = intlTempoCfg
+    ? isOvertime
+      ? intlTempoCfg.liveOvertimeBasePts
+      : intlTempoCfg.liveQuarterBasePts
+    : isOvertime
     ? leagueMeta.liveOvertimeBasePts
     : leagueMeta.liveQuarterBasePts;
-  const baseOppQuarterPts = isOvertime
+  const baseOppQuarterPts = intlTempoCfg
+    ? isOvertime
+      ? intlTempoCfg.liveOvertimeBasePts
+      : intlTempoCfg.liveQuarterBasePts
+    : isOvertime
     ? leagueMeta.liveOvertimeBasePts
     : leagueMeta.liveOppQuarterBasePts;
 
@@ -3384,12 +3442,20 @@ export function simulateLiveQuarter(
   // 평균 선수는 승패에 중립적이고 실력이 리그 평균을 넘어설수록 팀 승률이 올라갑니다.
   const replacement = getReplacementLevelQuarterImpact(
     ldr,
-    roleMinutesFactor * foulTroubleMinutesMult,
+    roleMinutesFactor * activeQuarterMinutesMult,
     isOvertime
   );
+  const midQuarterFoulOutPenalty =
+    !isAlreadyFouledOut && fouledOutNow
+      ? LIVE_GAME_CONFIG.fouledOutLiftPenalty * (1 - foulOutQuarterShare)
+      : 0;
+  const midQuarterFoulOutDefPenalty =
+    !isAlreadyFouledOut && fouledOutNow
+      ? LIVE_GAME_CONFIG.fouledOutDefPenalty * (1 - foulOutQuarterShare)
+      : 0;
   const playerCourtLift = isAlreadyFouledOut
     ? -LIVE_GAME_CONFIG.fouledOutLiftPenalty
-    : qPts - qFga * 0.85 + qAst * 1.35 - replacement.lift;
+    : qPts - qFga * 0.85 + qAst * 1.35 - replacement.lift - midQuarterFoulOutPenalty;
   const myQScore = Math.max(
     isOvertime ? 4 : 11,
     isAlreadyFouledOut ? 0 : qPts + (qAst > 0 ? 2 : 0),
@@ -3404,10 +3470,11 @@ export function simulateLiveQuarter(
   const oppAdvantage = (liveGame.opponentTeam.rating - teamRating) * 0.24;
   const defSuppression = isAlreadyFouledOut
     ? -LIVE_GAME_CONFIG.fouledOutDefPenalty
-    : mod.defBonus * roleMinutesFactor * foulTroubleMinutesMult +
-      (stats.def - ldr) * 0.08 * roleMinutesFactor * foulTroubleMinutesMult +
+    : mod.defBonus * roleMinutesFactor * activeQuarterMinutesMult +
+      (stats.def - ldr) * 0.08 * roleMinutesFactor * activeQuarterMinutesMult +
       (qStl + qBlk - replacement.stocks) * 1.35 -
-      bio.perimeterDefPenalty * 0.14 * roleMinutesFactor * foulTroubleMinutesMult;
+      bio.perimeterDefPenalty * 0.14 * roleMinutesFactor * activeQuarterMinutesMult -
+      midQuarterFoulOutDefPenalty;
   let oppQScore = Math.max(
     isOvertime ? 4 : 11,
     Math.round(
@@ -3438,7 +3505,7 @@ export function simulateLiveQuarter(
   }
 
   // 🔥 자연 클러치 1포제션 발동 조건:
-  // 4쿼터 종료 직전, 파울아웃되지 않았고, 실제 점수 차가 ±4점 이내(|diff| <= 4)일 때만 발동!
+  // 4쿼터 종료 직전, 파울아웃되지 않았고, 실제 점수 차가 ±3점 이내(|diff| <= 3)일 때만 발동!
   // 스코어는 단 1점도 조작하지 않고 실제 누적 점수를 그대로 유지합니다.
   const scoreDiff = nextTeamScore - nextOppScore;
   let triggerClutchPossession = false;
@@ -3648,7 +3715,7 @@ export function simulateLiveQuarter(
 }
 
 /**
- * 🔥 4쿼터 실제 ±4점 이내 접전 '클러치 마지막 1포제션' 판정 (실제 2점/3점/자유투/수비 점수만 정확히 가산!)
+ * 🔥 4쿼터 실제 ±3점 이내 접전 '클러치 마지막 1포제션' 판정 (실제 2점/3점/자유투/수비 점수만 정확히 가산!)
  * - 절대 점수를 텔레포트 조작하지 않습니다. 동점이 되면 자연스럽게 연장전(OT)으로 진입합니다!
  */
 export function resolveClutchPossession(
@@ -3854,7 +3921,7 @@ export function resolveClutchPossession(
       choice === 'LOCKDOWN_STOP'
         ? oppDelta === 0
           ? 'STOP'
-          : 'FOUL'
+          : `-${oppDelta}`
         : choice === 'KICKOUT_ASSIST'
         ? playerShotPts > 0
           ? `AST +${playerShotPts}`
@@ -3877,23 +3944,23 @@ export function resolveClutchPossession(
       fromY: choice === 'KICKOUT_ASSIST' ? 42 : undefined,
       x:
         choice === 'KICKOUT_ASSIST'
-          ? 89
+          ? 97
           : choice === 'CLUTCH_FREE_THROWS'
           ? 50
           : choice === 'LOCKDOWN_STOP'
           ? 50
           : teamDelta === 3 || deficit >= 3
-          ? 80
+          ? 90
           : 52,
       y:
         choice === 'KICKOUT_ASSIST'
           ? 20
           : choice === 'CLUTCH_FREE_THROWS'
-          ? 38
+          ? 46
           : choice === 'LOCKDOWN_STOP'
           ? 24
           : teamDelta === 3 || deficit >= 3
-          ? 54
+          ? 72
           : 26,
       teamScoreBefore: liveGame.teamScore,
       oppScoreBefore: liveGame.oppScore,
@@ -3993,5 +4060,8 @@ export function skipLiveGameToEnd(
     }
     guard++;
   }
-  return current;
+  return {
+    ...current,
+    wasSkipped: true,
+  };
 }

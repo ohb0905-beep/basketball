@@ -10,8 +10,13 @@ import {
   CareerState,
   InternationalTournamentType,
   LeagueId,
-  Position,
 } from '../types/game';
+import {
+  POSITION_EVENTS,
+  rollCombinatorialEncounter,
+} from '../engine/encounterEngine';
+
+export { POSITION_EVENTS };
 
 export function getMilitaryEnlistAgeForLeague(league: LeagueId): number {
   return league === 'NBA'
@@ -24,271 +29,6 @@ export function getMilitaryExemptionMaxAgeForLeague(league: LeagueId): number {
     ? MILITARY_SERVICE_CONFIG.nbaExemptionMaxAge
     : MILITARY_SERVICE_CONFIG.defaultExemptionMaxAge;
 }
-
-export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
-  PG: [
-    {
-      id: 'EVT_PG_PACE',
-      title: '작전타임 선택: 세트 오펜스 vs 자율 리딩',
-      subtitle: '포인트가드 전술 분기점',
-      description:
-        '4쿼터 승부처, 감독은 세트 오펜스를 지시했지만 상대 수비 대형에 순간적인 균열이 보입니다. 어떤 판단을 내릴지 결정합니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '얼리 오펜스 전환 패스 시도',
-          description: '상대 수비가 정돈되기 전 림으로 달리는 동료에게 빠르게 패스를 연결합니다.',
-          effectSummary: 'PLY +2, OUT +1 · 감독 신뢰도 소폭 상승',
-          statChanges: { ply: 2, out: 1 },
-          trustDelta: 3,
-          draftStockDelta: 4,
-        },
-        {
-          label: '감독의 세트 플레이 충실 이행',
-          description: '템포를 조절하며 약속된 스크린 패턴으로 안정적인 슛 찬스를 만듭니다.',
-          effectSummary: 'PLY +1, DEF +1 · 감독 신뢰도 크게 상승',
-          statChanges: { ply: 1, def: 1 },
-          trustDelta: 8,
-          draftStockDelta: 2,
-        },
-      ],
-    },
-    {
-      id: 'EVT_PG_DEEP_THREE',
-      title: '딥쓰리 슈팅 레인지 확장 훈련',
-      subtitle: '가드 공격 옵션 보강',
-      description:
-        '상대 빅맨이 드롭백 수비로 골밑만 지키는 상황입니다. 3점 라인 한두 발 뒤에서 던지는 딥쓰리 훈련 여부를 결정합니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '딥쓰리 풀업 슈팅 집중 훈련',
-          description: '하프코트 직후부터 수비를 끌어낼 수 있는 외곽 슈팅 레인지를 넓힙니다.',
-          effectSummary: 'OUT +2, PHY -1 · 스카우트 평가 상승',
-          statChanges: { out: 2, phy: -1 },
-          draftStockDelta: 5,
-        },
-        {
-          label: '플로터와 미드레인지 완성도 강화',
-          description: '드롭백 수비의 빈틈을 공략하는 플로터와 중거리 점퍼를 가다듬습니다.',
-          effectSummary: 'INS +2, PLY +1 · 감독 신뢰도 +5',
-          statChanges: { ins: 2, ply: 1 },
-          trustDelta: 5,
-        },
-      ],
-    },
-  ],
-  SG: [
-    {
-      id: 'EVT_SG_CLUTCH',
-      title: '종료 3.2초 전 마지막 인바운드 패턴',
-      subtitle: '슈팅가드 승부처 분기점',
-      description:
-        '2점 뒤진 경기 종료 직전, 더블팀 수비가 몰려오는 상황에서 공을 받았습니다. 마지막 공격 선택지를 고릅니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '스텝백 역전 3점슛 시도',
-          description: '수비 견제를 뚫고 외곽 역전 슛을 시도합니다.',
-          effectSummary: 'OUT +2 · 스카우트 평가 +6',
-          statChanges: { out: 2 },
-          draftStockDelta: 6,
-          trustDelta: 4,
-        },
-        {
-          label: '강한 림어택으로 앤드원 유도',
-          description: '수비 틈을 파고드는 돌파로 파울과 득점을 동시에 노립니다.',
-          effectSummary: 'INS +2, PHY +1 · 감독 신뢰도 +6',
-          statChanges: { ins: 2, phy: 1 },
-          trustDelta: 6,
-        },
-      ],
-    },
-    {
-      id: 'EVT_SG_COMBO',
-      title: '세컨드 볼핸들러 역할 제안',
-      subtitle: '코칭스태프 전술 미팅',
-      description:
-        '주전 포인트가드가 집중 견제를 받자 코칭스태프가 보조 리딩과 투맨 게임 전개를 맡겨보려 합니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '볼핸들링과 픽앤롤 리딩 적극 수행',
-          description: '득점뿐 아니라 동료의 찬스까지 만드는 듀얼 가드 역할을 병행합니다.',
-          effectSummary: 'PLY +2, OUT +1 · 부포지션 PG 해금 · 감독 신뢰도 +7',
-          statChanges: { ply: 2, out: 1 },
-          trustDelta: 7,
-          unlockSecondaryPos: 'PG',
-        },
-        {
-          label: '오프볼 무브와 캐치앤슛 집중',
-          description: '전문 슈터 본연의 오프볼 움직임과 슈팅 효율을 끌어올립니다.',
-          effectSummary: 'OUT +2, INS +1 · 감독 신뢰도 +3',
-          statChanges: { out: 2, ins: 1 },
-          trustDelta: 3,
-        },
-      ],
-    },
-  ],
-  SF: [
-    {
-      id: 'EVT_SF_STOPPER',
-      title: '상대 팀 주득점원 전담 수비 임무',
-      subtitle: '스몰포워드 전술 분기점',
-      description:
-        '평균 30점을 기록 중인 상대 에이스 윙을 제어하기 위해 감독이 전담 수비 임무를 요청했습니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '체력을 집중해 전담 대인 수비 수행',
-          description: '공격 비중을 일부 줄이더라도 상대 에이스의 야투 효율을 떨어뜨리는 데 집중합니다.',
-          effectSummary: 'DEF +2, REB +1 · 감독 신뢰도 +9',
-          statChanges: { def: 2, reb: 1 },
-          trustDelta: 9,
-          draftStockDelta: 5,
-        },
-        {
-          label: '공격 맞대결로 상대 체력 소모 유도',
-          description: '아이솔레이션 공격으로 맞불을 놓아 상대 에이스의 수비 부담을 키웁니다.',
-          effectSummary: 'INS +2, OUT +1 · 스카우트 평가 +5',
-          statChanges: { ins: 2, out: 1 },
-          draftStockDelta: 5,
-          trustDelta: 4,
-        },
-      ],
-    },
-    {
-      id: 'EVT_SF_POINT_FORWARD',
-      title: '포인트 포워드 전술 기용 제안',
-      subtitle: '공격 역할 확장',
-      description:
-        '리바운드 직후 직접 볼을 운반해 공격을 전개하는 포인트 포워드 역할을 제안받았습니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '코트 비전과 트랜지션 패스 강화',
-          description: '윙 플레이메이커로서 다재다능한 경기 운영 능력을 보강합니다.',
-          effectSummary: 'PLY +2, REB +1 · 스카우트 평가 +6',
-          statChanges: { ply: 2, reb: 1 },
-          draftStockDelta: 6,
-          trustDelta: 5,
-        },
-        {
-          label: '윙 슬래셔 마무리 능력 집중',
-          description: '리딩 부담을 줄이고 간결한 림 돌파와 마무리에 집중합니다.',
-          effectSummary: 'INS +2, PHY +1 · 감독 신뢰도 +4',
-          statChanges: { ins: 2, phy: 1 },
-          trustDelta: 4,
-        },
-      ],
-    },
-  ],
-  PF: [
-    {
-      id: 'EVT_PF_STRETCH',
-      title: '스트레치 4 전환 vs 인사이드 집중',
-      subtitle: '파워포워드 전술 분기점',
-      description:
-        '팀의 페인트존 공간을 넓히기 위해 코칭스태프가 코너 3점슛 비중 확대를 제안했습니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '외곽 3점슛 비중 확대 (스트레치 빅)',
-          description: '상대 빅맨을 외곽으로 끌어내 팀 전체의 공격 스페이싱을 넓힙니다.',
-          effectSummary: 'OUT +2, PLY +1 · 스카우트 평가 +6',
-          statChanges: { out: 2, ply: 1 },
-          draftStockDelta: 6,
-          trustDelta: 6,
-        },
-        {
-          label: '웨이트 증량과 포스트업·보드 집중',
-          description: '박스아웃과 포스트 몸싸움을 강화해 골밑 생산성을 끌어올립니다.',
-          effectSummary: 'REB +2, INS +1 · 감독 신뢰도 +5',
-          statChanges: { reb: 2, ins: 1 },
-          trustDelta: 5,
-        },
-      ],
-    },
-    {
-      id: 'EVT_PF_SMALLBALL',
-      title: '스몰볼 라인업 센터(5번) 겸임 요청',
-      subtitle: '전술 유연성 확보',
-      description:
-        '승부처 기동성을 높이기 위해 정통 센터를 빼고 스몰볼 5번으로 기용하는 전술을 제안받았습니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '골밑 수비와 림 프로텍션 겸임 수락',
-          description: '부포지션 센터(C)를 해금하고 팀 전술의 핵심 축을 맡습니다.',
-          effectSummary: 'DEF +2, REB +1 · 부포지션 C 해금 · 감독 신뢰도 +8',
-          statChanges: { def: 2, reb: 1 },
-          trustDelta: 8,
-          unlockSecondaryPos: 'C',
-        },
-        {
-          label: '4번 포지션 기동성과 윙 수비 유지',
-          description: '체력 소모와 부상 위험을 줄이고 본래 포지션 역할에 집중합니다.',
-          effectSummary: 'PHY +2, OUT +1 · 컨디션 유지',
-          statChanges: { phy: 2, out: 1 },
-          trustDelta: 3,
-        },
-      ],
-    },
-  ],
-  C: [
-    {
-      id: 'EVT_C_HIGH_POST_HUB',
-      title: '하이포스트 패싱 허브 전술 도입',
-      subtitle: '센터 전술 분기점',
-      description:
-        '자유투 라인 부근에서 컷인하는 동료들에게 패스를 연결하는 하이포스트 허브 역할을 제안받았습니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '패싱 빅맨(포인트 센터) 역할 연마',
-          description: '시야와 킥아웃 패스로 상대 더블팀 수비를 분산시킵니다.',
-          effectSummary: 'PLY +2, OUT +1 · 스카우트 평가 +7',
-          statChanges: { ply: 2, out: 1 },
-          draftStockDelta: 7,
-          trustDelta: 6,
-        },
-        {
-          label: '림 프로텍션과 앨리웁 피니시 집중',
-          description: '높이와 몸싸움을 앞세워 페인트존 수비와 골밑 마무리에 집중합니다.',
-          effectSummary: 'DEF +2, REB +2 · 감독 신뢰도 +7',
-          statChanges: { def: 2, reb: 2 },
-          trustDelta: 7,
-        },
-      ],
-    },
-    {
-      id: 'EVT_C_SWITCH',
-      title: '외곽 가드 상대 스위치 수비 대응',
-      subtitle: '빅맨 수비 과제',
-      description:
-        '상대 가드들이 픽앤롤 이후 의도적으로 외곽으로 끌어내 일대일 돌파를 시도하고 있습니다.',
-      category: 'POSITION',
-      choices: [
-        {
-          label: '하체 민첩성과 사이드스텝 집중 훈련',
-          description: '외곽에서도 버틸 수 있는 스위치 수비 기동력을 보강합니다.',
-          effectSummary: 'PHY +2, DEF +1 · 스카우트 평가 +6',
-          statChanges: { phy: 2, def: 1 },
-          draftStockDelta: 6,
-        },
-        {
-          label: '리커버리 블록 타이밍 집중 훈련',
-          description: '첫 발을 내주더라도 림 앞에서 차단하는 추격 블록 타이밍을 다듬습니다.',
-          effectSummary: 'DEF +2, REB +1 · 감독 신뢰도 +5',
-          statChanges: { def: 2, reb: 1 },
-          trustDelta: 5,
-        },
-      ],
-    },
-  ],
-};
-
-import { rollCombinatorialEncounter } from '../engine/encounterEngine';
 
 export const ASIAN_GAMES_MILITARY_EVENT: CareerEvent = {
   id: 'EVT_ASIAN_GAMES_GOLD',
@@ -458,6 +198,7 @@ export const VETERAN_CRITICAL_INJURY_EVENT: CareerEvent = {
       effectSummary: 'PHY -7 영구 하락 · PLY +2 · 재활 복귀',
       statChanges: { phy: -7, ply: 2 },
       trustDelta: 5,
+      bypassAgeStatCap: true,
     },
     {
       label: '부상을 받아들이고 현역 은퇴 선언',
@@ -649,7 +390,9 @@ export function rollMidSeasonCrossroadsEvent(
           label: '공격적인 득점 쇼케이스로 어필',
           description: '과감한 1대1 돌파와 외곽슛으로 공격 재능을 증명합니다.',
           riskTier: 'HIGH_RISK',
-          effectSummary: '성공 시 INS +2, OUT +1, POT +1, 주가 +8 · 실패 시 신뢰도 -6, 주가 -3',
+          effectSummary: isPro
+            ? '성공 시 INS +2, OUT +1, POT +1, 주가 +8 · 실패 시 신뢰도 -6, 주가 -3'
+            : '성공 시 INS +2, OUT +1, 주가 +8 · 실패 시 신뢰도 -6, 주가 -3',
           successCheck: {
             statKey: 'ins',
             difficulty: 0,
@@ -657,11 +400,13 @@ export function rollMidSeasonCrossroadsEvent(
             label: '인사이드(INS) 기반 쇼케이스 판정',
           },
           successOutcome: {
-            narrative: '3주간 임시 선발로 맹활약하며 잠재력 상한선까지 끌어올렸습니다.',
+            narrative: isPro
+              ? '3주간 임시 선발로 맹활약하며 잠재력 상한선까지 끌어올렸습니다.'
+              : '3주간 임시 선발로 맹활약하며 스카우트와 코칭스태프의 시선을 사로잡았습니다.',
             statChanges: { ins: 2, out: 1 },
             trustDelta: 5,
             draftStockDelta: 8,
-            potentialDelta: 1,
+            ...(isPro ? { potentialDelta: 1 } : {}),
           },
           failureOutcome: {
             narrative: '무리한 아이솔레이션이 턴오버로 이어지며 다시 벤치 롤로 복귀했습니다.',
@@ -671,7 +416,7 @@ export function rollMidSeasonCrossroadsEvent(
           },
           statChanges: { ins: 1, out: 1 },
           draftStockDelta: 7,
-          potentialDelta: 1,
+          ...(isPro ? { potentialDelta: 1 } : {}),
         },
         {
           label: '궂은일과 이타적 패스로 감독 신뢰 확보',
@@ -855,6 +600,7 @@ export function createVeteranReinventionEvent(
         statChanges: { ply: 3, out: 3, def: 1, phy: -2 },
         trustDelta: 9,
         triggerVeteranReinvention: true,
+        bypassAgeStatCap: true,
       },
       {
         label: '기존 돌파와 인사이드 스타일 고수',
@@ -863,28 +609,43 @@ export function createVeteranReinventionEvent(
         effectSummary: 'INS +2, PHY +1 · 감독 신뢰도 +3 · 기존 스타일 유지',
         statChanges: { ins: 2, phy: 1 },
         trustDelta: 3,
+        bypassAgeStatCap: true,
       },
     ],
   };
 }
 
-export function rollSeasonEvent(
+/**
+ * 오프시즌 이벤트 큐 생성:
+ * - Slot A: 병역/베테랑 분기/국제대회 국가대표 차출
+ * - Slot B: 예약된 연쇄 스토리 · 멀티 시즌 스토리 아크 · 조합형/포지션 인카운터
+ * 국제대회 차출이 매년 발생하는 전성기에도 Slot B 서사 이벤트를 함께 적재해 스토리 아크와 인카운터 기아를 방지합니다.
+ */
+export function rollSeasonEventQueue(
   career: CareerState,
   rng: () => number = Math.random,
   completedSeasonYear?: number
-): CareerEvent | null {
+): CareerEvent[] {
   const targetYear = completedSeasonYear ?? career.seasonYear;
   const scheduledTournament = getInternationalTournamentByYear(targetYear);
   const tourneyCfg = INTERNATIONAL_TOURNAMENT_CONFIG[scheduledTournament];
-  // 동일 연도·동일 대회 기준으로만 중복 출전 차단 (구 세이브의 1년 밀린 아시아컵 기록이 아시안게임을 막지 않도록 방어)
   const alreadyPlayedThisTournament = (career.internationalHistory || []).some(
     (rec) => rec.year === targetYear && rec.tournamentType === scheduledTournament
   );
   const exemptionMaxAge = getMilitaryExemptionMaxAgeForLeague(career.league);
+  const queue: CareerEvent[] = [];
 
-  // 0) 병역 미필자 상무 입대 이벤트 (국내/일반 프로 만 27세, NBA 소속 선수는 만 28세까지 연기 후 만 29세 발부)
-  //    단, 방금 종료된 시즌 연령이 병역특례 상한(일반 26세 / NBA 28세) 이하이고 해당 연도가 아시안게임·올림픽이라면
-  //    마지막 병역특례 도전 기회를 상무 입대 영장보다 먼저 제공합니다.
+  const rollNarrativeSlot = (): CareerEvent | null => {
+    if (career.pendingChainEvent) {
+      return rollCombinatorialEncounter(career, rng);
+    }
+    if (rng() < 0.48) {
+      return rollCombinatorialEncounter(career, rng);
+    }
+    return null;
+  };
+
+  // 0) 병역 미필자 상무 입대 이벤트 (또는 입대 직전 마지막 특례 대회)
   const enlistAgeThreshold = getMilitaryEnlistAgeForLeague(career.league);
   if (
     !career.militaryExempt &&
@@ -900,13 +661,13 @@ export function rollSeasonEvent(
       !alreadyPlayedThisTournament &&
       career.ovr >= tourneyCfg.minOvr;
     if (eligibleForLastChanceExemption) {
-      return createInternationalCallupEvent(
-        career,
-        targetYear,
-        scheduledTournament
+      queue.push(
+        createInternationalCallupEvent(career, targetYear, scheduledTournament)
       );
+      return queue;
     }
-    return createSangmuEnlistmentEvent(career);
+    queue.push(createSangmuEnlistmentEvent(career));
+    return queue;
   }
 
   // 1) 만 32~34세 베테랑 '플레이 스타일 진화(Re-invention)' 이벤트 (커리어 단 1회)
@@ -916,23 +677,26 @@ export function rollSeasonEvent(
     !career.veteranReinventionOffered &&
     !career.veteranReinvented
   ) {
-    return createVeteranReinventionEvent(career);
+    queue.push(createVeteranReinventionEvent(career));
+    return queue;
   }
 
   // 2) 노장 치명적 부상 은퇴 기로: 만 32세 이상이고 PHY <= 65일 때 10% 확률
   if (career.age >= 32 && career.stats.phy <= 65 && rng() < 0.1) {
-    return VETERAN_CRITICAL_INJURY_EVENT;
+    queue.push(VETERAN_CRITICAL_INJURY_EVENT);
+    return queue;
   }
 
-  // 3) 에이전트 은퇴 권유 리포트 (커리어 중 단 1회만, 동일 리그 내 뚜렷한 기량 하락 또는 만 35세+ 노쇠화 시)
+  // 3) 에이전트 은퇴 권유 리포트 (커리어 중 단 1회)
   if (!career.agentAdviceShown) {
     const adviceEvent = createAgentRetirementAdviceEvent(career);
     if (adviceEvent) {
-      return adviceEvent;
+      queue.push(adviceEvent);
+      return queue;
     }
   }
 
-  // 4) 4년 주기 국제대회 국가대표 차출 (아시아컵 %4==1 / 아시안게임 %4==2 / FIBA 월드컵 %4==3 / 올림픽 %4==0)
+  // 4) 4년 주기 국제대회 국가대표 차출 (Slot A) + 서사 이벤트 동시 큐 적재 (Slot B)
   if (
     !alreadyPlayedThisTournament &&
     career.militaryServiceSeasonsLeft === 0 &&
@@ -940,27 +704,36 @@ export function rollSeasonEvent(
     career.age <= 36 &&
     career.ovr >= tourneyCfg.minOvr
   ) {
-    // 아시안게임은 미필 병역특례 대상 연령(일반 20~26세, NBA 20~28세)에게 최우선 보장, 군필·면제 선수는 OVR 70+일 때 베테랑 대표로 차출
     const meetsTournamentEligibility =
       scheduledTournament === 'ASIAN_GAMES'
         ? (!career.militaryExempt && career.age >= 20 && career.age <= exemptionMaxAge) ||
           career.ovr >= 70
         : true;
     if (meetsTournamentEligibility) {
-      return createInternationalCallupEvent(career, targetYear, scheduledTournament);
+      queue.push(
+        createInternationalCallupEvent(career, targetYear, scheduledTournament)
+      );
+      const narrativeFollowup = rollNarrativeSlot();
+      if (narrativeFollowup) {
+        queue.push(narrativeFollowup);
+      }
+      return queue;
     }
   }
 
-  // 5) 예약된 연쇄(Chain) 이벤트가 있으면 즉시 발동
-  if (career.pendingChainEvent) {
-    return rollCombinatorialEncounter(career, rng);
+  // 5) 일반 서사 슬롯 (연쇄 이벤트 -> 멀티 시즌 스토리 아크 -> 조합형/포지션 인카운터)
+  const narrative = rollNarrativeSlot();
+  if (narrative) {
+    queue.push(narrative);
   }
+  return queue;
+}
 
-  // 6) 4축 조합형 랜덤 인카운터 엔진 (중복 0%, 최근 2시즌 카테고리 쿨다운, 48종 시나리오 풀)
-  if (rng() < 0.48) {
-    return rollCombinatorialEncounter(career, rng);
-  }
-
-  return null;
+export function rollSeasonEvent(
+  career: CareerState,
+  rng: () => number = Math.random,
+  completedSeasonYear?: number
+): CareerEvent | null {
+  return rollSeasonEventQueue(career, rng, completedSeasonYear)[0] ?? null;
 }
 

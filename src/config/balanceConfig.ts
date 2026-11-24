@@ -11,7 +11,7 @@ import {
  * 중앙 밸런스 파라미터 설정 모듈 (Single Source of Truth)
  * - 리그 메타(아마추어/프로 구분, 파울 한도, 라이브 중계 템포, 수상 명칭)
  * - 경제 및 퍼스널 케어(가용 자산 vs 통산 누적 연봉, 상무 급여, 리그별 해금 정책)
- * - 라이브 중계 & 클러치 1포제션(±4점 이내 자연 발동, 연장전, 파울 아웃, MPG 연동)
+ * - 라이브 중계 & 클러치 1포제션(±3점 이내 자연 발동, 연장전, 파울 아웃, MPG 연동)
  * - 역할·출전시간(연속 보간)·부상 리스크·득점·투표 레이스(통합 공식)
  * - 드래프트·유망주(연속 종합 스코어)·트레이드(연속 승인 확률)·에이징 커브·은퇴/레거시
  */
@@ -35,7 +35,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isAmateur: true,
     foulLimit: 5,
     liveQuarterBasePts: 17,
-    liveOppQuarterBasePts: 18,
+    liveOppQuarterBasePts: 17,
     liveOvertimeBasePts: 8,
     minAttendanceRatio: 0.65,
     mvpBoardTitle: '전국대회 최우수 유망주(MVP) 랭킹 TOP 5',
@@ -47,7 +47,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isAmateur: true,
     foulLimit: 5,
     liveQuarterBasePts: 18,
-    liveOppQuarterBasePts: 19,
+    liveOppQuarterBasePts: 18,
     liveOvertimeBasePts: 8,
     minAttendanceRatio: 0.65,
     mvpBoardTitle: '대학농구 최우수 선수(MVP) 랭킹 TOP 5',
@@ -59,7 +59,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isAmateur: true,
     foulLimit: 5,
     liveQuarterBasePts: 18,
-    liveOppQuarterBasePts: 19,
+    liveOppQuarterBasePts: 18,
     liveOvertimeBasePts: 9,
     minAttendanceRatio: 0.66,
     mvpBoardTitle: 'NCAA 올해의 선수(NPOY) 투표 TOP 5',
@@ -71,7 +71,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isAmateur: false,
     foulLimit: 5,
     liveQuarterBasePts: 19,
-    liveOppQuarterBasePts: 20,
+    liveOppQuarterBasePts: 19,
     liveOvertimeBasePts: 9,
     minAttendanceRatio: 0.67,
     mvpBoardTitle: 'KBL 정규시즌 MVP 투표 레이스 TOP 5',
@@ -83,7 +83,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isAmateur: false,
     foulLimit: 5,
     liveQuarterBasePts: 19,
-    liveOppQuarterBasePts: 20,
+    liveOppQuarterBasePts: 19,
     liveOvertimeBasePts: 9,
     minAttendanceRatio: 0.67,
     mvpBoardTitle: 'B.리그 B1 정규시즌 MVP 투표 TOP 5',
@@ -95,7 +95,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isAmateur: false,
     foulLimit: 5,
     liveQuarterBasePts: 21,
-    liveOppQuarterBasePts: 22,
+    liveOppQuarterBasePts: 21,
     liveOvertimeBasePts: 9,
     minAttendanceRatio: 0.66,
     mvpBoardTitle: '호주 NBL 정규시즌 MVP 투표 TOP 5',
@@ -119,7 +119,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isAmateur: false,
     foulLimit: 6,
     liveQuarterBasePts: 24,
-    liveOppQuarterBasePts: 25,
+    liveOppQuarterBasePts: 24,
     liveOvertimeBasePts: 11,
     minAttendanceRatio: 0.65,
     mvpBoardTitle: 'G리그 정규시즌 MVP 투표 레이스 TOP 5',
@@ -131,7 +131,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isAmateur: false,
     foulLimit: 6,
     liveQuarterBasePts: 25,
-    liveOppQuarterBasePts: 26,
+    liveOppQuarterBasePts: 25,
     liveOvertimeBasePts: 11,
     minAttendanceRatio: 0.68,
     mvpBoardTitle: 'NBA 정규시즌 MVP 투표 레이스 TOP 5',
@@ -255,6 +255,8 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     aceRatingWeight: number;
     aceRatingMaxBonus: number;
     winProbCap: number;
+    liveQuarterBasePts: number;
+    liveOvertimeBasePts: number;
     militaryExemptionMinMedal: 'GOLD' | 'BRONZE' | null;
     draftStockBonus: number;
     legacyPoints: { gold: number; silver: number; bronze: number; mvp: number };
@@ -272,6 +274,8 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     aceRatingWeight: 0.56,
     aceRatingMaxBonus: 14.0,
     winProbCap: 0.91,
+    liveQuarterBasePts: 19,
+    liveOvertimeBasePts: 9,
     militaryExemptionMinMedal: null,
     draftStockBonus: 5,
     legacyPoints: { gold: 350, silver: 160, bronze: 80, mvp: 180 },
@@ -288,6 +292,8 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     aceRatingWeight: 0.72,
     aceRatingMaxBonus: 15.5,
     winProbCap: 0.93,
+    liveQuarterBasePts: 19,
+    liveOvertimeBasePts: 9,
     militaryExemptionMinMedal: 'GOLD',
     draftStockBonus: 6,
     legacyPoints: { gold: 400, silver: 140, bronze: 70, mvp: 160 },
@@ -304,6 +310,8 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     aceRatingWeight: 0.68,
     aceRatingMaxBonus: 18.0,
     winProbCap: 0.89,
+    liveQuarterBasePts: 19,
+    liveOvertimeBasePts: 9,
     militaryExemptionMinMedal: null,
     draftStockBonus: 9,
     legacyPoints: { gold: 1100, silver: 650, bronze: 380, mvp: 520 },
@@ -320,6 +328,8 @@ export const INTERNATIONAL_TOURNAMENT_CONFIG: Record<
     aceRatingWeight: 0.72,
     aceRatingMaxBonus: 19.5,
     winProbCap: 0.88,
+    liveQuarterBasePts: 20,
+    liveOvertimeBasePts: 9,
     militaryExemptionMinMedal: 'BRONZE',
     draftStockBonus: 11,
     legacyPoints: { gold: 1400, silver: 850, bronze: 500, mvp: 650 },
@@ -350,7 +360,7 @@ export const GROWTH_CONFIG = {
 };
 
 export const LIVE_GAME_CONFIG = {
-  clutchMaxPointGap: 4, // 실제 ±4점 이내 접전일 때만 클러치 마지막 1포제션 자연 발동
+  clutchMaxPointGap: 3, // 실제 ±3점 이내 1포제션 접전일 때만 클러치 마지막 1포제션 자연 발동
   maxOvertimePeriods: 3, // 최대 3차 연장(3OT)
   // [대칭 보정] 선수 기여도는 리그 평균 선수(스탯 = LDR) 기대 기여도 대비 차이로 반영
   playerImpactWeight: 0.8, // 공격 기여도(평균 대비) → 팀 쿼터 득점 환산 계수
@@ -363,36 +373,36 @@ export const LIVE_GAME_CONFIG = {
   clutchProbMax: 0.85,
   tacticMods: {
     ACE_HERO: {
-      usageMult: 1.38,
-      fgBonus: 0.01,
-      defBonus: 0,
-      astBonus: 0.85,
-      staminaDrain: 23,
+      usageMult: 1.32,
+      fgBonus: 0.005,
+      defBonus: -0.3,
+      astBonus: 0.86,
+      staminaDrain: 21,
       foulRisk: 0.24,
       label: '에이스 모드 (공격 주도)',
     },
     LOCKDOWN_DEFENSE: {
-      usageMult: 0.86,
-      fgBonus: 0.01,
-      defBonus: 1.45,
-      astBonus: 0.95,
-      staminaDrain: 22,
+      usageMult: 0.84,
+      fgBonus: -0.02,
+      defBonus: 1.05,
+      astBonus: 0.86,
+      staminaDrain: 20,
       foulRisk: 0.42,
       label: '질식 수비 (상대 에이스 봉쇄)',
     },
     UNSELFISH_PASS: {
-      usageMult: 1.0,
-      fgBonus: 0.032,
-      defBonus: -0.4,
-      astBonus: 1.42,
+      usageMult: 0.9,
+      fgBonus: 0.014,
+      defBonus: -0.95,
+      astBonus: 1.22,
       staminaDrain: 15,
       foulRisk: 0.17,
       label: '이타적 조율 (팀플레이)',
     },
     PACE_CONSERVE: {
-      usageMult: 0.84,
-      fgBonus: 0.024,
-      defBonus: 0.42,
+      usageMult: 0.86,
+      fgBonus: 0.008,
+      defBonus: 0.12,
       astBonus: 0.98,
       staminaDrain: 8,
       foulRisk: 0.1,
@@ -476,7 +486,7 @@ export const ROLE_MPG_CONFIG = {
     softCapStart: 22.8,
     softCapSlope: 0.35,
     minPpg: 1.2,
-    maxPpg: 32.5,
+    maxPpg: 36.0,
   },
 };
 
@@ -583,7 +593,7 @@ export const AWARD_VOTING_CONFIG = {
     NBL: 0.0,
     EUROLEAGUE: -0.9,
     GLEAGUE: 1.8,
-    NBA: 0.85,
+    NBA: 0.55,
   } as Record<LeagueId, number>,
   npcMvpPoolSize: 9,
   npcRoyPoolSize: 8, // 신인왕 후보 풀 (루키 NPC 8명 + 동일 리그 루키 라이벌 + 주인공)
@@ -624,6 +634,16 @@ export const AWARD_VOTING_CONFIG = {
     fgEffWeight: 0.2,
     winPctWeight: 9.0,
     mpgFactorRef: 26.0,
+  },
+  // 통합 DPOY 평가 가중치 (외곽 수비수 스틸·블록 vs 빅맨 림프로텍팅·리바운드 포지션 균형 반영)
+  dpoyWeights: {
+    defStatWeight: 0.75,
+    perimeterSpgWeight: 8.5,
+    perimeterBpgWeight: 7.0,
+    bigSpgWeight: 6.5,
+    bigBpgWeight: 5.5,
+    rebOverBaselineWeight: 0.55,
+    winPctWeight: 18.0,
   },
   minMpgForMajorAward: 18.0,
 };

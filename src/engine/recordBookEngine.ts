@@ -1,4 +1,5 @@
 import { LEAGUE_CONFIG } from '../data/leagues';
+import { LEAGUE_BALANCE_META } from '../config/balanceConfig';
 import {
   CareerMilestone,
   CareerState,
@@ -243,7 +244,7 @@ const LEAGUE_BASELINE_RECORDS: Record<LeagueId, BaselineRecordSpec[]> = {
       category: 'CAREER_POINTS',
       label: '통산 득점',
       unit: '점',
-      value: 18908,
+      value: 8500,
       holderName: '앤드류 게이즈',
       teamName: '멜버른 타이거스',
       year: 2005,
@@ -512,7 +513,7 @@ const LEAGUE_BASELINE_RECORDS: Record<LeagueId, BaselineRecordSpec[]> = {
       category: 'CAREER_POINTS',
       label: '통산 득점',
       unit: '점',
-      value: 1950,
+      value: 1320,
       holderName: '김선형',
       teamName: '중앙대학교',
       year: 2011,
@@ -741,8 +742,22 @@ export function normalizeRecordBook(
   return base;
 }
 
-function aggregateLeagueCareerStats(career: CareerState, league: LeagueId) {
+/**
+ * 리그별 시즌 평균 기록(PPG/RPG/APG) 등재 최소 출전 경기 수
+ * (정규시즌 총 경기 수 × 리그 최소 출장률 비율)
+ */
+export function getMinGpForSeasonRecord(league: LeagueId): number {
+  const games = LEAGUE_CONFIG[league]?.games ?? 30;
+  const ratio = LEAGUE_BALANCE_META[league]?.minAttendanceRatio ?? 0.65;
+  return Math.max(1, Math.ceil(games * ratio));
+}
+
+function aggregateLeagueCareerStats(
+  career: Pick<CareerState, 'seasonLogs'>,
+  league: LeagueId
+) {
   const logs = career.seasonLogs.filter((l) => l.league === league);
+  const minGp = getMinGpForSeasonRecord(league);
   let points = 0;
   let championships = 0;
   let mvps = 0;
@@ -758,7 +773,7 @@ function aggregateLeagueCareerStats(career: CareerState, league: LeagueId) {
     if (l.wonMvp) mvps += 1;
     if (l.wonFinalsMvp) finalsMvps += 1;
     if (l.singleGameHighPts > singleGameHighPts) singleGameHighPts = l.singleGameHighPts;
-    if (l.gp >= 10) {
+    if (l.gp >= minGp) {
       if (l.ppg > bestPpg) bestPpg = l.ppg;
       if (l.rpg > bestRpg) bestRpg = l.rpg;
       if (l.apg > bestApg) bestApg = l.apg;
@@ -793,13 +808,14 @@ export function checkAndApplyRecordBreaks(
   const normalized = normalizeRecordBook(recordBook);
   const entries = normalized[league].map((e) => ({ ...e }));
   const agg = aggregateLeagueCareerStats(career, league);
+  const minGp = getMinGpForSeasonRecord(league);
 
   const candidates: Record<LeagueRecordCategory, number> = {
     CAREER_POINTS: agg.points,
     SINGLE_GAME_POINTS: seasonLog.singleGameHighPts,
-    SEASON_PPG: seasonLog.gp >= 10 ? Number(seasonLog.ppg.toFixed(1)) : 0,
-    SEASON_RPG: seasonLog.gp >= 10 ? Number(seasonLog.rpg.toFixed(1)) : 0,
-    SEASON_APG: seasonLog.gp >= 10 ? Number(seasonLog.apg.toFixed(1)) : 0,
+    SEASON_PPG: seasonLog.gp >= minGp ? Number(seasonLog.ppg.toFixed(1)) : 0,
+    SEASON_RPG: seasonLog.gp >= minGp ? Number(seasonLog.rpg.toFixed(1)) : 0,
+    SEASON_APG: seasonLog.gp >= minGp ? Number(seasonLog.apg.toFixed(1)) : 0,
     CHAMPIONSHIPS: agg.championships,
     MVPS: agg.mvps,
     FINALS_MVPS: agg.finalsMvps,
@@ -915,8 +931,39 @@ export function getLeagueRecordChases(
   });
 }
 
+function applyCandidateMapToLeagueEntries(
+  entries: LeagueRecordEntry[],
+  updates: Partial<Record<LeagueRecordCategory, number>>,
+  meta: {
+    holderName: string;
+    teamName: string;
+    year: number;
+    playerId: string;
+  }
+): LeagueRecordEntry[] {
+  return entries.map((entry) => {
+    const val = updates[entry.category];
+    if (typeof val === 'number' && val > entry.value) {
+      return {
+        ...entry,
+        value: val,
+        holderName: meta.holderName,
+        teamName: meta.teamName,
+        year: meta.year,
+        isUserRecord: true,
+        playerId: meta.playerId,
+      };
+    }
+    return entry;
+  });
+}
+
 /**
  * 구 세이브의 HOF 리스트와 현재 커리어를 RecordBook과 동기화
+ * - retrospective.seasons가 있는 HOF 엔트리는 9개 전 리그를 시즌 순서대로 정확히 재생하여
+ *   리그별 단일경기 최다 득점·최소 출장 수 충족 평균 기록·통산 기록 달성 연도/구단을 정밀 반영합니다.
+ * - 구 세이브(retrospective.seasons 없음)는 타 리그 단일경기 기록이 NBA로 오기입되지 않도록
+ *   leagueCareerHighPts 또는 순수 NBA 커리어일 때만 NBA 단일경기 최다 득점을 반영합니다.
  */
 export function syncRecordBookWithHof(
   recordBook: RecordBookState | null | undefined,
@@ -925,8 +972,59 @@ export function syncRecordBookWithHof(
 ): RecordBookState {
   let nextBook = normalizeRecordBook(recordBook);
 
-  // HOF 선수들의 NBA·KBL 기록 및 통산/단일경기/파이널 MVP 기록 반영
   for (const hof of hofList) {
+    const retroSeasons = hof.retrospective?.seasons;
+    if (Array.isArray(retroSeasons) && retroSeasons.length > 0) {
+      const leagueAcc: Partial<
+        Record<
+          LeagueId,
+          { points: number; championships: number; mvps: number; finalsMvps: number }
+        >
+      > = {};
+
+      for (const s of retroSeasons) {
+        const league = s.league;
+        if (!nextBook[league]) continue;
+        const acc = leagueAcc[league] || {
+          points: 0,
+          championships: 0,
+          mvps: 0,
+          finalsMvps: 0,
+        };
+        acc.points += Math.round(s.ppg * s.gp);
+        if (s.wonChampionship) acc.championships += 1;
+        if (s.wonMvp) acc.mvps += 1;
+        if (s.wonFinalsMvp) acc.finalsMvps += 1;
+        leagueAcc[league] = acc;
+
+        const minGp = getMinGpForSeasonRecord(league);
+        const updates: Partial<Record<LeagueRecordCategory, number>> = {
+          CAREER_POINTS: acc.points,
+          SINGLE_GAME_POINTS: s.singleGameHighPts,
+          SEASON_PPG: s.gp >= minGp ? Number(s.ppg.toFixed(1)) : 0,
+          SEASON_RPG: s.gp >= minGp ? Number(s.rpg.toFixed(1)) : 0,
+          SEASON_APG: s.gp >= minGp ? Number(s.apg.toFixed(1)) : 0,
+          CHAMPIONSHIPS: acc.championships,
+          MVPS: acc.mvps,
+          FINALS_MVPS: acc.finalsMvps,
+        };
+
+        nextBook = {
+          ...nextBook,
+          [league]: applyCandidateMapToLeagueEntries(nextBook[league], updates, {
+            holderName: hof.name,
+            teamName: s.teamName,
+            year: s.year,
+            playerId: hof.id,
+          }),
+        };
+      }
+      continue;
+    }
+
+    // 구 세이브 폴백 (retrospective.seasons 부재 시)
+    const fallbackYear =
+      hof.finalSeasonYear ?? 2026 + Math.max(0, hof.seasonsPlayed);
     const nbaFinalsMvps =
       typeof hof.totals.nbaFinalsMvps === 'number'
         ? hof.totals.nbaFinalsMvps
@@ -940,61 +1038,81 @@ export function syncRecordBookWithHof(
         ? hof.totals.finalsMvps || 0
         : 0;
 
-    const nbaEntries = nextBook.NBA.map((e) => ({ ...e }));
     const nbaUpdates: Partial<Record<LeagueRecordCategory, number>> = {
       CAREER_POINTS: hof.totals.nbaPoints,
       CHAMPIONSHIPS: hof.totals.nbaChampionships,
       MVPS: hof.totals.nbaMvps,
       FINALS_MVPS: nbaFinalsMvps,
     };
-    if (hof.iconicTeam.league === 'NBA') {
+    const isPureNbaCareer =
+      hof.totals.nbaGp > 0 && hof.totals.nbaGp === hof.totals.gp;
+    if (typeof hof.leagueCareerHighPts?.NBA === 'number') {
+      nbaUpdates.SINGLE_GAME_POINTS = hof.leagueCareerHighPts.NBA;
+    } else if (isPureNbaCareer) {
       nbaUpdates.SINGLE_GAME_POINTS = hof.careerHighPts;
     }
 
-    for (let i = 0; i < nbaEntries.length; i++) {
-      const entry = nbaEntries[i];
-      const val = nbaUpdates[entry.category];
-      if (typeof val === 'number' && val > entry.value) {
-        nbaEntries[i] = {
-          ...entry,
-          value: val,
-          holderName: hof.name,
-          teamName: hof.iconicTeam.name,
-          year: new Date(hof.inductedAt).getFullYear(),
-          isUserRecord: true,
-          playerId: hof.id,
-        };
-      }
-    }
+    nextBook = {
+      ...nextBook,
+      NBA: applyCandidateMapToLeagueEntries(nextBook.NBA, nbaUpdates, {
+        holderName: hof.name,
+        teamName: hof.iconicTeam.name,
+        year: fallbackYear,
+        playerId: hof.id,
+      }),
+    };
 
-    const kblEntries = nextBook.KBL.map((e) => ({ ...e }));
     const kblUpdates: Partial<Record<LeagueRecordCategory, number>> = {
       CHAMPIONSHIPS: hof.totals.kblChampionships ?? 0,
       MVPS: hof.totals.kblMvps ?? 0,
       FINALS_MVPS: kblFinalsMvps,
     };
-    for (let i = 0; i < kblEntries.length; i++) {
-      const entry = kblEntries[i];
-      const val = kblUpdates[entry.category];
-      if (typeof val === 'number' && val > entry.value) {
-        kblEntries[i] = {
-          ...entry,
-          value: val,
-          holderName: hof.name,
-          teamName: hof.iconicTeam.name,
-          year: new Date(hof.inductedAt).getFullYear(),
-          isUserRecord: true,
-          playerId: hof.id,
-        };
-      }
+    if (typeof hof.leagueCareerHighPts?.KBL === 'number') {
+      kblUpdates.SINGLE_GAME_POINTS = hof.leagueCareerHighPts.KBL;
     }
 
-    nextBook = { ...nextBook, NBA: nbaEntries, KBL: kblEntries };
+    nextBook = {
+      ...nextBook,
+      KBL: applyCandidateMapToLeagueEntries(nextBook.KBL, kblUpdates, {
+        holderName: hof.name,
+        teamName: hof.iconicTeam.name,
+        year: fallbackYear,
+        playerId: hof.id,
+      }),
+    };
+
+    if (hof.leagueCareerHighPts) {
+      for (const league of ALL_LEAGUE_IDS) {
+        if (league === 'NBA' || league === 'KBL') continue;
+        const leagueHigh = hof.leagueCareerHighPts[league];
+        if (typeof leagueHigh === 'number' && leagueHigh > 0) {
+          nextBook = {
+            ...nextBook,
+            [league]: applyCandidateMapToLeagueEntries(
+              nextBook[league],
+              { SINGLE_GAME_POINTS: leagueHigh },
+              {
+                holderName: hof.name,
+                teamName: hof.iconicTeam.name,
+                year: fallbackYear,
+                playerId: hof.id,
+              }
+            ),
+          };
+        }
+      }
+    }
   }
 
+  // 활성 커리어 역시 시즌 순서대로 누적 재생해 통산 신기록 달성 연도·구단을 정확히 기록
   if (activeCareer && activeCareer.seasonLogs.length > 0) {
-    for (const log of activeCareer.seasonLogs) {
-      const res = checkAndApplyRecordBreaks(nextBook, activeCareer, log);
+    for (let idx = 0; idx < activeCareer.seasonLogs.length; idx++) {
+      const log = activeCareer.seasonLogs[idx];
+      const slicedCareer: CareerState = {
+        ...activeCareer,
+        seasonLogs: activeCareer.seasonLogs.slice(0, idx + 1),
+      };
+      const res = checkAndApplyRecordBreaks(nextBook, slicedCareer, log);
       nextBook = res.nextBook;
     }
   }

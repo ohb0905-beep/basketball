@@ -10,7 +10,7 @@ import {
   RelationshipMetrics,
 } from '../types/game';
 import { LEAGUE_CONFIG } from '../data/leagues';
-import { clampNum } from '../config/balanceConfig';
+import { LEAGUE_BALANCE_META, clampNum } from '../config/balanceConfig';
 import { rollStoryArcEvent } from './storyArcEngine';
 
 export type CareerEventCategory = NonNullable<CareerEvent['category']>;
@@ -57,7 +57,12 @@ export function extractCareerContextTags(
   if (career.ovr >= 80 && career.age >= 23 && career.age <= 31) {
     tags.push('PRIME_ACE');
   }
-  if (career.contractYearsLeft <= 1) {
+  if (
+    LEAGUE_BALANCE_META[career.league]?.isPro &&
+    career.contractType !== 'AMATEUR' &&
+    career.contractType !== 'MILITARY_SERVICE' &&
+    career.contractYearsLeft <= 1
+  ) {
     tags.push('CONTRACT_YEAR');
   }
   if (career.seasonsPlayed <= 2) {
@@ -1943,6 +1948,21 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
   const c1TrustAdj = Math.max(3, Math.min(8, s.c1Trust));
   const c1DraftAdj = Math.max(1, Math.min(4, s.c1Draft));
 
+  const mergeStatBonuses = (
+    ...entries: Array<[keyof PlayerStats, number]>
+  ): Partial<PlayerStats> => {
+    const merged: Partial<PlayerStats> = {};
+    for (const [key, val] of entries) {
+      merged[key] = (merged[key] ?? 0) + val;
+    }
+    return merged;
+  };
+
+  const formatStatSummary = (statsMap: Partial<PlayerStats>): string =>
+    (Object.keys(statsMap) as (keyof PlayerStats)[])
+      .map((k) => `${k.toUpperCase()} +${statsMap[k]}`)
+      .join(', ');
+
   const safeChoice: CareerEventChoice = {
     label: s.c1Label,
     description: s.c1Desc,
@@ -1951,7 +1971,6 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
     statChanges: c1StatsBalanced,
     trustDelta: c1TrustAdj,
     draftStockDelta: c1DraftAdj,
-    nextChainEvent: chainEntry ? chainEntry.successChain : undefined,
   };
 
   // 선택지 2: 도전형 (실제 능력치 기반 확률 판정 + 성공 시 고보상 / 실패 시 실질 페널티 + 연쇄 스토리)
@@ -2007,17 +2026,19 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
 
   // 일부 핵심 프로/특훈 시나리오에는 자금 투자형 및 능력치·특성·관계도 전용 3번째 선택지 추가
   if (isProScenario && (s.category === 'LOAD_MANAGEMENT' || s.category === 'OFF_COURT_BRAND')) {
+    const bonusStats = mergeStatBonuses(['phy', 2], [c1Primary, 1]);
     choices.push({
       label: '사비를 투자해 전문 컨설턴트·트레이너를 개인 초빙한다 (-$15K)',
       description: '보유 현금을 과감히 투자해 리스크 없이 피지컬과 기량 보너스를 확보합니다.',
       riskTier: 'SAFE',
       cashDelta: -15000,
-      effectSummary: '가용 자산 -$15K · PHY +2 · 감독 신뢰 +6 확정',
-      statChanges: { phy: 2, [c1Primary]: 1 },
+      effectSummary: `가용 자산 -$15K · ${formatStatSummary(bonusStats)} · 감독 신뢰 +6 확정`,
+      statChanges: bonusStats,
       trustDelta: 6,
       draftStockDelta: 5,
     });
   } else if (s.category === 'TACTICAL_CLASH' || s.category === 'ROLE_ADAPTATION') {
+    const bonusStats = mergeStatBonuses(['ply', 2], [c1Primary, 1]);
     choices.push({
       label: '전술 영상 브리핑으로 코칭스태프와 맞춤 해법 합의',
       description: '높은 패스·전술 이해도(PLY)를 바탕으로 팀 전술과 개인 강점을 동시에 살리는 방안을 도출합니다.',
@@ -2027,13 +2048,14 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
         minStat: { ply: 74 },
         label: '전용 분기 · 패스(PLY) 74+',
       },
-      effectSummary: 'PLY +2 · 감독 신뢰 +8 · 라커룸 +4 확정',
-      statChanges: { ply: 2, [c1Primary]: 1 },
+      effectSummary: `${formatStatSummary(bonusStats)} · 감독 신뢰 +8 · 라커룸 +4 확정`,
+      statChanges: bonusStats,
       relationshipChanges: { lockerRoom: 4 },
       trustDelta: 8,
       draftStockDelta: 4,
     });
   } else if (s.category === 'RIVAL_SHOWDOWN' || s.category === 'MEDIA_SPOTLIGHT') {
+    const bonusStats = mergeStatBonuses([c2Primary, 2]);
     choices.push({
       label: '승부처 퍼포먼스로 정면 돌파해 스포트라이트 독점',
       description: '압박감을 즐기는 승부사 기질로 여론과 매치업 주도권을 한 번에 가져옵니다.',
@@ -2043,13 +2065,14 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
         requiredTrait: 'CLUTCH_PERFORMER',
         label: "전용 분기 · 특성 '승부사' 보유",
       },
-      effectSummary: '언론·팬심 +8 · 핵심 스탯 +2 · 감독 신뢰 +4 확정',
-      statChanges: { [c2Primary]: 2 },
+      effectSummary: `언론·팬심 +8 · ${formatStatSummary(bonusStats)} · 감독 신뢰 +4 확정`,
+      statChanges: bonusStats,
       relationshipChanges: { mediaFan: 8 },
       trustDelta: 4,
       draftStockDelta: 5,
     });
   } else if (s.category === 'LOCKER_ROOM' || s.category === 'FRONT_OFFICE') {
+    const bonusStats = mergeStatBonuses([c1Primary, 1], ['def', 1]);
     choices.push({
       label: '베테랑급 소통으로 선수단과 구단 가교 역할 수행',
       description: '라커룸 내부 결속력을 바탕으로 갈등을 중재하고 팀 분위기를 한 단계 끌어올립니다.',
@@ -2059,8 +2082,8 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
         minRelationship: { lockerRoom: 70 },
         label: '전용 분기 · 라커룸 70+',
       },
-      effectSummary: '라커룸 +8 · 프런트 +6 · DEF +1 · 감독 신뢰 +6 확정',
-      statChanges: { [c1Primary]: 1, def: 1 },
+      effectSummary: `라커룸 +8 · 프런트 +6 · ${formatStatSummary(bonusStats)} · 감독 신뢰 +6 확정`,
+      statChanges: bonusStats,
       relationshipChanges: { lockerRoom: 8, frontOffice: 6 },
       trustDelta: 6,
       draftStockDelta: 3,
@@ -2070,8 +2093,307 @@ function enrichSeedChoices(s: (typeof SCENARIO_SEEDS)[number]): CareerEventChoic
   return choices;
 }
 
-export const ENCOUNTER_SCENARIO_POOL: EncounterScenarioTemplate[] =
-  SCENARIO_SEEDS.map((s) => ({
+export const POSITION_EVENTS: Record<Position, CareerEvent[]> = {
+  PG: [
+    {
+      id: 'EVT_PG_PACE',
+      title: '작전타임 선택: 세트 오펜스 vs 자율 리딩',
+      subtitle: '포인트가드 전술 분기점',
+      description:
+        '4쿼터 승부처, 감독은 세트 오펜스를 지시했지만 상대 수비 대형에 순간적인 균열이 보입니다. 어떤 판단을 내릴지 결정합니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '얼리 오펜스 전환 패스 시도',
+          description: '상대 수비가 정돈되기 전 림으로 달리는 동료에게 빠르게 패스를 연결합니다.',
+          effectSummary: 'PLY +2, OUT +1 · 감독 신뢰도 소폭 상승',
+          riskTier: 'SAFE',
+          statChanges: { ply: 2, out: 1 },
+          trustDelta: 3,
+          draftStockDelta: 4,
+        },
+        {
+          label: '감독의 세트 플레이 충실 이행',
+          description: '템포를 조절하며 약속된 스크린 패턴으로 안정적인 슛 찬스를 만듭니다.',
+          effectSummary: 'PLY +1, DEF +1 · 감독 신뢰도 크게 상승',
+          riskTier: 'SAFE',
+          statChanges: { ply: 1, def: 1 },
+          trustDelta: 8,
+          draftStockDelta: 2,
+        },
+      ],
+    },
+    {
+      id: 'EVT_PG_DEEP_THREE',
+      title: '딥쓰리 슈팅 레인지 확장 훈련',
+      subtitle: '가드 공격 옵션 보강',
+      description:
+        '상대 빅맨이 드롭백 수비로 골밑만 지키는 상황입니다. 3점 라인 한두 발 뒤에서 던지는 딥쓰리 훈련 여부를 결정합니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '딥쓰리 풀업 슈팅 집중 훈련',
+          description: '하프코트 직후부터 수비를 끌어낼 수 있는 외곽 슈팅 레인지를 넓힙니다.',
+          effectSummary: 'OUT +2 · 스카우트 평가 +5',
+          riskTier: 'SAFE',
+          statChanges: { out: 2 },
+          draftStockDelta: 5,
+        },
+        {
+          label: '플로터와 미드레인지 완성도 강화',
+          description: '드롭백 수비의 빈틈을 공략하는 플로터와 중거리 점퍼를 가다듬습니다.',
+          effectSummary: 'INS +2, PLY +1 · 감독 신뢰도 +5',
+          riskTier: 'SAFE',
+          statChanges: { ins: 2, ply: 1 },
+          trustDelta: 5,
+        },
+      ],
+    },
+  ],
+  SG: [
+    {
+      id: 'EVT_SG_CLUTCH',
+      title: '종료 3.2초 전 마지막 인바운드 패턴',
+      subtitle: '슈팅가드 승부처 분기점',
+      description:
+        '2점 뒤진 경기 종료 직전, 더블팀 수비가 몰려오는 상황에서 공을 받았습니다. 마지막 공격 선택지를 고릅니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '스텝백 역전 3점슛 시도',
+          description: '수비 견제를 뚫고 외곽 역전 슛을 시도합니다.',
+          effectSummary: 'OUT +2 · 스카우트 평가 +6',
+          riskTier: 'SAFE',
+          statChanges: { out: 2 },
+          draftStockDelta: 6,
+          trustDelta: 4,
+        },
+        {
+          label: '강한 림어택으로 앤드원 유도',
+          description: '수비 틈을 파고드는 돌파로 파울과 득점을 동시에 노립니다.',
+          effectSummary: 'INS +2, PHY +1 · 감독 신뢰도 +6',
+          riskTier: 'SAFE',
+          statChanges: { ins: 2, phy: 1 },
+          trustDelta: 6,
+        },
+      ],
+    },
+    {
+      id: 'EVT_SG_COMBO',
+      title: '세컨드 볼핸들러 역할 제안',
+      subtitle: '코칭스태프 전술 미팅',
+      description:
+        '주전 포인트가드가 집중 견제를 받자 코칭스태프가 보조 리딩과 투맨 게임 전개를 맡겨보려 합니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '볼핸들링과 픽앤롤 리딩 적극 수행',
+          description: '득점뿐 아니라 동료의 찬스까지 만드는 듀얼 가드 역할을 병행합니다.',
+          effectSummary: 'PLY +2, OUT +1 · 부포지션 PG 해금 · 감독 신뢰도 +7',
+          riskTier: 'SAFE',
+          statChanges: { ply: 2, out: 1 },
+          trustDelta: 7,
+          unlockSecondaryPos: 'PG',
+        },
+        {
+          label: '오프볼 무브와 캐치앤슛 집중',
+          description: '전문 슈터 본연의 오프볼 움직임과 슈팅 효율을 끌어올립니다.',
+          effectSummary: 'OUT +2, INS +1 · 감독 신뢰도 +3',
+          riskTier: 'SAFE',
+          statChanges: { out: 2, ins: 1 },
+          trustDelta: 3,
+        },
+      ],
+    },
+  ],
+  SF: [
+    {
+      id: 'EVT_SF_STOPPER',
+      title: '상대 팀 주득점원 전담 수비 임무',
+      subtitle: '스몰포워드 전술 분기점',
+      description:
+        '평균 30점을 기록 중인 상대 에이스 윙을 제어하기 위해 감독이 전담 수비 임무를 요청했습니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '체력을 집중해 전담 대인 수비 수행',
+          description: '공격 비중을 일부 줄이더라도 상대 에이스의 야투 효율을 떨어뜨리는 데 집중합니다.',
+          effectSummary: 'DEF +2, REB +1 · 감독 신뢰도 +9',
+          riskTier: 'SAFE',
+          statChanges: { def: 2, reb: 1 },
+          trustDelta: 9,
+          draftStockDelta: 5,
+        },
+        {
+          label: '공격 맞대결로 상대 체력 소모 유도',
+          description: '아이솔레이션 공격으로 맞불을 놓아 상대 에이스의 수비 부담을 키웁니다.',
+          effectSummary: 'INS +2, OUT +1 · 스카우트 평가 +5',
+          riskTier: 'SAFE',
+          statChanges: { ins: 2, out: 1 },
+          draftStockDelta: 5,
+          trustDelta: 4,
+        },
+      ],
+    },
+    {
+      id: 'EVT_SF_POINT_FORWARD',
+      title: '포인트 포워드 전술 기용 제안',
+      subtitle: '공격 역할 확장',
+      description:
+        '리바운드 직후 직접 볼을 운반해 공격을 전개하는 포인트 포워드 역할을 제안받았습니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '코트 비전과 트랜지션 패스 강화',
+          description: '윙 플레이메이커로서 다재다능한 경기 운영 능력을 보강합니다.',
+          effectSummary: 'PLY +2, REB +1 · 스카우트 평가 +6',
+          riskTier: 'SAFE',
+          statChanges: { ply: 2, reb: 1 },
+          draftStockDelta: 6,
+          trustDelta: 5,
+        },
+        {
+          label: '윙 슬래셔 마무리 능력 집중',
+          description: '리딩 부담을 줄이고 간결한 림 돌파와 마무리에 집중합니다.',
+          effectSummary: 'INS +2, PHY +1 · 감독 신뢰도 +4',
+          riskTier: 'SAFE',
+          statChanges: { ins: 2, phy: 1 },
+          trustDelta: 4,
+        },
+      ],
+    },
+  ],
+  PF: [
+    {
+      id: 'EVT_PF_STRETCH',
+      title: '스트레치 4 전환 vs 인사이드 집중',
+      subtitle: '파워포워드 전술 분기점',
+      description:
+        '팀의 페인트존 공간을 넓히기 위해 코칭스태프가 코너 3점슛 비중 확대를 제안했습니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '외곽 3점슛 비중 확대 (스트레치 빅)',
+          description: '상대 빅맨을 외곽으로 끌어내 팀 전체의 공격 스페이싱을 넓힙니다.',
+          effectSummary: 'OUT +2, PLY +1 · 스카우트 평가 +6',
+          riskTier: 'SAFE',
+          statChanges: { out: 2, ply: 1 },
+          draftStockDelta: 6,
+          trustDelta: 6,
+        },
+        {
+          label: '웨이트 증량과 포스트업·보드 집중',
+          description: '박스아웃과 포스트 몸싸움을 강화해 골밑 생산성을 끌어올립니다.',
+          effectSummary: 'REB +2, INS +1 · 감독 신뢰도 +5',
+          riskTier: 'SAFE',
+          statChanges: { reb: 2, ins: 1 },
+          trustDelta: 5,
+        },
+      ],
+    },
+    {
+      id: 'EVT_PF_SMALLBALL',
+      title: '스몰볼 라인업 센터(5번) 겸임 요청',
+      subtitle: '전술 유연성 확보',
+      description:
+        '승부처 기동성을 높이기 위해 정통 센터를 빼고 스몰볼 5번으로 기용하는 전술을 제안받았습니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '골밑 수비와 림 프로텍션 겸임 수락',
+          description: '부포지션 센터(C)를 해금하고 팀 전술의 핵심 축을 맡습니다.',
+          effectSummary: 'DEF +2, REB +1 · 부포지션 C 해금 · 감독 신뢰도 +8',
+          riskTier: 'SAFE',
+          statChanges: { def: 2, reb: 1 },
+          trustDelta: 8,
+          unlockSecondaryPos: 'C',
+        },
+        {
+          label: '4번 포지션 기동성과 윙 수비 유지',
+          description: '체력 소모와 부상 위험을 줄이고 본래 포지션 역할에 집중합니다.',
+          effectSummary: 'PHY +2, OUT +1 · 컨디션 유지',
+          riskTier: 'SAFE',
+          statChanges: { phy: 2, out: 1 },
+          trustDelta: 3,
+        },
+      ],
+    },
+  ],
+  C: [
+    {
+      id: 'EVT_C_HIGH_POST_HUB',
+      title: '하이포스트 패싱 허브 전술 도입',
+      subtitle: '센터 전술 분기점',
+      description:
+        '자유투 라인 부근에서 컷인하는 동료들에게 패스를 연결하는 하이포스트 허브 역할을 제안받았습니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '패싱 빅맨(포인트 센터) 역할 연마',
+          description: '시야와 킥아웃 패스로 상대 더블팀 수비를 분산시킵니다.',
+          effectSummary: 'PLY +2, OUT +1 · 스카우트 평가 +7',
+          riskTier: 'SAFE',
+          statChanges: { ply: 2, out: 1 },
+          draftStockDelta: 7,
+          trustDelta: 6,
+        },
+        {
+          label: '림 프로텍션과 앨리웁 피니시 집중',
+          description: '높이와 몸싸움을 앞세워 페인트존 수비와 골밑 마무리에 집중합니다.',
+          effectSummary: 'DEF +2, REB +2 · 감독 신뢰도 +7',
+          riskTier: 'SAFE',
+          statChanges: { def: 2, reb: 2 },
+          trustDelta: 7,
+        },
+      ],
+    },
+    {
+      id: 'EVT_C_SWITCH',
+      title: '외곽 가드 상대 스위치 수비 대응',
+      subtitle: '빅맨 수비 과제',
+      description:
+        '상대 가드들이 픽앤롤 이후 의도적으로 외곽으로 끌어내 일대일 돌파를 시도하고 있습니다.',
+      category: 'POSITION',
+      choices: [
+        {
+          label: '하체 민첩성과 사이드스텝 집중 훈련',
+          description: '외곽에서도 버틸 수 있는 스위치 수비 기동력을 보강합니다.',
+          effectSummary: 'PHY +2, DEF +1 · 스카우트 평가 +6',
+          riskTier: 'SAFE',
+          statChanges: { phy: 2, def: 1 },
+          draftStockDelta: 6,
+        },
+        {
+          label: '리커버리 블록 타이밍 집중 훈련',
+          description: '첫 발을 내주더라도 림 앞에서 차단하는 추격 블록 타이밍을 다듬습니다.',
+          effectSummary: 'DEF +2, REB +1 · 감독 신뢰도 +5',
+          riskTier: 'SAFE',
+          statChanges: { def: 2, reb: 1 },
+          trustDelta: 5,
+        },
+      ],
+    },
+  ],
+};
+
+const POSITION_SCENARIO_TEMPLATES: EncounterScenarioTemplate[] = (
+  Object.keys(POSITION_EVENTS) as Position[]
+).flatMap((pos) =>
+  POSITION_EVENTS[pos].map((evt) => ({
+    id: evt.id,
+    category: evt.category,
+    title: evt.title,
+    subtitle: evt.subtitle,
+    description: evt.description,
+    allowedPositions: [pos],
+    preferredPositions: [pos],
+    preferredTags: ['PRO_STAR', 'AMATEUR_PROSPECT', 'PRIME_ACE'] as CareerContextTag[],
+    choices: evt.choices,
+  }))
+);
+
+export const ENCOUNTER_SCENARIO_POOL: EncounterScenarioTemplate[] = [
+  ...SCENARIO_SEEDS.map((s) => ({
     id: `EVT_COMB_${s.code}`,
     category: s.category,
     title: s.title,
@@ -2084,7 +2406,9 @@ export const ENCOUNTER_SCENARIO_POOL: EncounterScenarioTemplate[] =
     minAge: MIN_AGE_BY_CODE[s.code],
     preferredTags: s.tags,
     choices: enrichSeedChoices(s),
-  }));
+  })),
+  ...POSITION_SCENARIO_TEMPLATES,
+];
 
 /**
  * 확률 판정 선택지의 실시간 성공 확률(0~100 정수 %) 산출
@@ -2222,11 +2546,55 @@ export function resolveEncounterChoiceOutcome(
   };
 }
 
+function isPendingChainEventEligible(
+  career: CareerState,
+  pending: CareerEvent
+): boolean {
+  // 상무 군 복무 중에는 일반 프로/이적 연쇄 이벤트를 발동하지 않음
+  if (
+    career.contractType === 'MILITARY_SERVICE' ||
+    career.militaryServiceSeasonsLeft > 0 ||
+    career.team.isMilitaryTeam
+  ) {
+    return false;
+  }
+
+  // 원본 시나리오 코드가 프로 전용인 경우 아마추어 리그에서는 폐기
+  const codeMatch = pending.id.match(/^EVT_CHAIN_([A-Z0-9]+)_/);
+  const sourceCode = codeMatch?.[1];
+  if (
+    sourceCode &&
+    PRO_ONLY_CODES.has(sourceCode) &&
+    !LEAGUE_BALANCE_META[career.league]?.isPro
+  ) {
+    return false;
+  }
+
+  // 팀·감독·라커룸 소속 의존 연쇄 이벤트는 이적 직후(새 구단 0시즌차)에는 맥락 단절 방지를 위해 폐기
+  const teamBoundCategories: CareerEventCategory[] = [
+    'TACTICAL_CLASH',
+    'LOCKER_ROOM',
+    'FRONT_OFFICE',
+  ];
+  if (
+    pending.category &&
+    teamBoundCategories.includes(pending.category) &&
+    (career.seasonsOnCurrentTeam ?? 0) === 0
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export function rollCombinatorialEncounter(
   career: CareerState,
   rng: () => number = Math.random
 ): CareerEvent {
-  if (career.pendingChainEvent) {
+  if (
+    career.pendingChainEvent &&
+    isPendingChainEventEligible(career, career.pendingChainEvent)
+  ) {
     return career.pendingChainEvent;
   }
 

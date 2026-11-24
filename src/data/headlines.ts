@@ -22,6 +22,7 @@ export interface HeadlineContext {
   allStarSelected?: boolean;
   isFarewellTour?: boolean;
   isRookie?: boolean;
+  priorMvpsCount?: number;
 }
 
 const HEADLINE_TEMPLATES = {
@@ -29,9 +30,13 @@ const HEADLINE_TEMPLATES = {
     '{league} {team} {name}, 평균 {ppg}점·{rpg}리바운드·{apg}도움으로 통합 우승과 MVP 석권',
     '{team} {name}, 시즌 MVP에 이어 {league} 챔피언 결정전 우승까지 달성',
   ],
-  MVP_ONLY: [
+  MVP_FIRST: [
     '{league} 정규시즌 MVP는 {team} {name}… 평균 {ppg}점·{apg}어시스트로 팀 견인',
     '{team} {name}, 공수 핵심 활약 속에 생애 첫 {league} 정규시즌 MVP 수상',
+  ],
+  MVP_REPEAT: [
+    '{league} 정규시즌 MVP는 또다시 {team} {name}… 평균 {ppg}점·{apg}어시스트로 리그 지배',
+    '{team} {name}, 압도적 퍼포먼스로 통산 {mvpNum}번째 {league} 정규시즌 MVP 수상',
   ],
   ROOKIE_STAR: [
     '{team} 루키 {name}, 데뷔 시즌 평균 {ppg}점·{rpg}리바운드로 주전 도약',
@@ -62,12 +67,16 @@ const HEADLINE_TEMPLATES = {
 export function generateSeasonHeadline(ctx: HeadlineContext): string {
   const displayName = ctx.name || ctx.playerName || '선수';
   const displayTeam = ctx.teamShortName || ctx.teamName;
+  const priorMvps = Math.max(0, ctx.priorMvpsCount ?? 0);
 
   let pool = HEADLINE_TEMPLATES.SOLID_ROTATION;
   if (ctx.wonChampionship && ctx.wonMvp) {
     pool = HEADLINE_TEMPLATES.CHAMPION_MVP;
   } else if (ctx.wonMvp) {
-    pool = HEADLINE_TEMPLATES.MVP_ONLY;
+    pool =
+      priorMvps === 0
+        ? HEADLINE_TEMPLATES.MVP_FIRST
+        : HEADLINE_TEMPLATES.MVP_REPEAT;
   } else if (ctx.isRookie && ctx.ppg >= 12) {
     pool = HEADLINE_TEMPLATES.ROOKIE_STAR;
   } else if (ctx.ppg >= 20) {
@@ -87,7 +96,8 @@ export function generateSeasonHeadline(ctx: HeadlineContext): string {
     .replace(/\{name\}/g, displayName)
     .replace(/\{ppg\}/g, ctx.ppg.toFixed(1))
     .replace(/\{rpg\}/g, ctx.rpg.toFixed(1))
-    .replace(/\{apg\}/g, ctx.apg.toFixed(1));
+    .replace(/\{apg\}/g, ctx.apg.toFixed(1))
+    .replace(/\{mvpNum\}/g, String(priorMvps + 1));
 }
 
 export function generateSeasonNarrativeLogs(

@@ -20,8 +20,12 @@ import {
   getTeamsByLeague,
   SANGMU_TEAM,
   ALL_TEAMS,
+  LEAGUE_TEAM_RATING_BOUNDS,
+  getTeamById,
   evolveLeagueTeamRatings,
 } from '../data/teams';
+import { POSITION_ARCHETYPES, POSITION_HEIGHT_RANGES } from '../data/archetypes';
+import { generateSeasonHeadline } from '../data/headlines';
 import {
   PLAYER_TRAIT_META,
   analyzePositionFit,
@@ -50,7 +54,9 @@ import {
 import {
   assignPositionBalancedAllLeagueTeams,
   buildAwardRaceTop5,
+  buildSymmetricLeaguePlayerPool,
   calcUnifiedAllStarScore,
+  calcUnifiedDpoyScore,
   calculateRoleAndMpg,
   calculatePpg,
   calculateSeasonStatGrowth,
@@ -82,6 +88,9 @@ import {
   generateOffseasonOptions,
 } from './draftEngine';
 import {
+  formatCashDelta,
+  formatCurrencyCompact,
+  formatCurrencyDetailed,
   formatHeaderContractSummary,
   formatSalaryOffer,
   getMilitaryStatusDisplay,
@@ -105,6 +114,7 @@ import {
   buildFallbackRetrospectiveFromHof,
   buildTeamStints,
   buildTrophyCabinet,
+  extractPlayerBrokenRecords,
   selectPeakSeason,
 } from './retrospectiveEngine';
 import {
@@ -118,6 +128,7 @@ import {
   checkAndApplyRecordBreaks,
   createInitialRecordBook,
   getLeagueRecordChases,
+  getMinGpForSeasonRecord,
   syncRecordBookWithHof,
 } from './recordBookEngine';
 import {
@@ -141,26 +152,34 @@ import {
   AWARD_VOTING_CONFIG,
   INTERNATIONAL_TOURNAMENT_CONFIG,
   LEAGUE_AWARD_QUOTAS,
+  LEAGUE_BALANCE_META,
   LIVE_GAME_CONFIG,
+  ROLE_MPG_CONFIG,
   canUseProTradeSystem,
   getInternationalTournamentByYear,
   isPersonalCareAllowedInLeague,
 } from '../config/balanceConfig';
 import {
   ENCOUNTER_SCENARIO_POOL,
+  POSITION_EVENTS,
   calculateEncounterSuccessChance,
   extractCareerContextTags,
   resolveEncounterChoiceOutcome,
   rollCombinatorialEncounter,
 } from './encounterEngine';
 import {
+  VETERAN_CRITICAL_INJURY_EVENT,
   createAgentRetirementAdviceEvent,
   createInternationalCallupEvent,
   createVeteranReinventionEvent,
   rollMidSeasonCrossroadsEvent,
   rollSeasonEvent,
+  rollSeasonEventQueue,
 } from '../data/events';
-import { migratePersistedPayload } from '../store/saveMigration';
+import {
+  migratePersistedPayload,
+  normalizeTeamInfo,
+} from '../store/saveMigration';
 import {
   CareerState,
   GrowthDna,
@@ -1267,12 +1286,32 @@ test('17. Asian Games 4-Year Cycle & Full Tournament (Group -> QF -> SF -> Final
   assert.ok(winTourney.finalOpponent !== null);
   assert.equal(winTourney.matches.length, 5, 'Group Stage (3G) + QF (1G) + SF (1G) = 5 matches before Finals');
 
-  // Tournament simulation when Korea loses in QF or SF (high rng favors opponent)
-  const loseTourney = simulateAsianGamesTournament(agYearCareer, () => 0.99);
-  assert.equal(loseTourney.reachedFinals, false);
-  assert.ok(
-    loseTourney.eliminatedStage === 'QUARTERFINAL' ||
-      loseTourney.eliminatedStage === 'SEMIFINAL'
+  // Tournament simulation when Korea loses all group games (high rng favors opponent -> GROUP elimination)
+  const groupLoseTourney = simulateAsianGamesTournament(agYearCareer, () => 0.99);
+  assert.equal(groupLoseTourney.reachedFinals, false);
+  assert.equal(groupLoseTourney.eliminatedStage, 'GROUP');
+  assert.equal(groupLoseTourney.matches.length, 3, 'Group-stage elimination stops after 3 group matches');
+
+  // Tournament simulation when Korea advances past group stage (2W+) then loses in QF/SF
+  let sawKnockoutElim = false;
+  for (let seed = 1; seed <= 80 && !sawKnockoutElim; seed++) {
+    let s = seed * 7919 + 13;
+    const seededRng = () => {
+      s = (s * 16807) % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+    const res = simulateAsianGamesTournament(agYearCareer, seededRng);
+    if (
+      !res.reachedFinals &&
+      (res.eliminatedStage === 'QUARTERFINAL' || res.eliminatedStage === 'SEMIFINAL')
+    ) {
+      sawKnockoutElim = true;
+    }
+  }
+  assert.equal(
+    sawKnockoutElim,
+    true,
+    'Asian Games tournament must also support QF/SF knockout elimination after passing group stage'
   );
 
   // Multi-year contract offseason options must include REQUEST_TRADE (and block cross-league/draft offers until FA)
@@ -6400,6 +6439,1073 @@ test('63. 전수 진단 보고서 23건(P0~P2) 회귀 방지 종합 검증', () 
     'evaluateAcquiredTraits must return valid nextTraits array with deduplicated logs'
   );
 });
+
+test('64. 3차 정밀 진단 보고서 25건(P0~P2) 전수 수정 회귀 검증', () => {
+  // [1-1] 파이널 MVP 라이브 벤치마크 현실화: 팀 레이팅 92 NBA 강팀에서 슈퍼스타(30점·7리바·6어시·2스틸) 수상 가능
+  const superTeam = { ...NBA_TEAMS[0], rating: 92 };
+  const superstarCareer = createBaseCareer({
+    league: 'NBA',
+    team: superTeam,
+    heightCm: 193,
+    primaryPos: 'SG',
+    ovr: 93,
+    stats: { ins: 93, out: 93, ply: 90, def: 88, reb: 84, phy: 92 },
+    seasonLogs: [
+      createSeasonLog({
+        league: 'NBA',
+        mpg: 35.5,
+        ppg: 28.5,
+        rpg: 7.0,
+        apg: 6.5,
+        spg: 1.5,
+        bpg: 0.8,
+      }),
+    ],
+  });
+  const starGameScore = 30 + 7 * 1.2 + 6 * 1.5 + 2 * 2; // 51.4
+  assert.equal(
+    evaluateRealisticFinalsMvp(superstarCareer, true, starGameScore),
+    true,
+    'NBA superstar with 30/7/6/2 on a 92-rated contender must win live Finals MVP'
+  );
+
+  // [1-2] 라이브 클러치 1포제션 기준 ±3점 이내 일치
+  assert.equal(
+    LIVE_GAME_CONFIG.clutchMaxPointGap,
+    3,
+    'clutchMaxPointGap must be 3 so 1-possession clutch never triggers at ±4 pts'
+  );
+
+  // [1-3] 9개 전 리그 라이브 기본 쿼터 득점 홈/원정 완전 대칭
+  for (const lid of Object.keys(LEAGUE_BALANCE_META) as Array<keyof typeof LEAGUE_BALANCE_META>) {
+    assert.equal(
+      LEAGUE_BALANCE_META[lid].liveQuarterBasePts,
+      LEAGUE_BALANCE_META[lid].liveOppQuarterBasePts,
+      `${lid} liveQuarterBasePts must equal liveOppQuarterBasePts`
+    );
+  }
+
+  // [1-4] 인카운터 중복 스탯 키 합산 & effectSummary 일치 + [2-7] safeChoice(riskLevel==='LOW') nextChainEvent 제거
+  for (const sc of ENCOUNTER_SCENARIO_POOL) {
+    const safeChoices = sc.choices.filter((c) => c.riskLevel === 'LOW');
+    for (const safeCh of safeChoices) {
+      assert.equal(
+        safeCh.nextChainEvent,
+        undefined,
+        `Scenario ${sc.id} LOW-risk safeChoice (${safeCh.id}) must not carry nextChainEvent`
+      );
+    }
+    for (const ch of sc.choices) {
+      if (ch.statChanges && ch.effectSummary && Object.keys(ch.statChanges).length > 0) {
+        const statLabels: Record<string, string> = {
+          ins: 'INS',
+          out: 'OUT',
+          ply: 'PLY',
+          def: 'DEF',
+          reb: 'REB',
+          phy: 'PHY',
+        };
+        for (const [k, v] of Object.entries(ch.statChanges)) {
+          if (typeof v === 'number' && v !== 0 && statLabels[k]) {
+            const sign = v > 0 ? `+${v}` : `${v}`;
+            assert.ok(
+              ch.effectSummary.includes(`${statLabels[k]} ${sign}`),
+              `Scenario ${sc.id} effectSummary ("${ch.effectSummary}") must reflect merged ${k}=${v}`
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // [1-5] NBA 34.0 PPG 신기록 경신 가능(maxPpg=36.0 + 엘리트 소프트캡 완화) & NBL/U리그 커리어 통산 득점 현실화
+  assert.equal(ROLE_MPG_CONFIG.ppg.maxPpg, 36.0, 'maxPpg must be 36.0');
+  const eliteScorerPpg = calculatePpg(
+    { ins: 99, out: 99 },
+    LEAGUE_CONFIG.NBA.ldr,
+    37.0,
+    23.6,
+    () => 0.92,
+    1.04
+  ).ppg;
+  assert.ok(
+    eliteScorerPpg > 34.0,
+    `99/99 elite NBA scorer must be able to break 34.0 PPG record, got ${eliteScorerPpg}`
+  );
+  const initialBook = createInitialRecordBook();
+  const nblCareerRec = initialBook.NBL.find((r) => r.category === 'CAREER_POINTS');
+  const uLeagueCareerRec = initialBook.U_LEAGUE.find((r) => r.category === 'CAREER_POINTS');
+  assert.equal(nblCareerRec?.value, 8500);
+  assert.equal(uLeagueCareerRec?.value, 1320);
+
+  // [1-6] skipLiveGameToEnd() 완료 시 wasSkipped === true 설정
+  const skipCareer = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    ovr: 78,
+    seasonLogs: [createSeasonLog({ league: 'KBL', mpg: 32, ppg: 18 })],
+  });
+  const liveInit = createLiveFinalGame(skipCareer, KBL_TEAMS[1], 'LEAGUE_FINALS');
+  const skippedLive = skipLiveGameToEnd(liveInit, skipCareer, () => 0.4);
+  assert.equal(skippedLive.isFinished, true);
+  assert.equal(skippedLive.wasSkipped, true, 'skipLiveGameToEnd must mark wasSkipped=true');
+
+  // [2-1 & 2-2] 국제대회 조별리그 탈락(GROUP), 국대 전력 이중가산 제거, 국제대회 전용 템포 검증
+  const intlCareer = createBaseCareer({
+    age: 24,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 92,
+    stats: { ins: 92, out: 92, ply: 88, def: 88, reb: 84, phy: 90 },
+    seasonLogs: [createSeasonLog({ league: 'NBA', mpg: 35, ppg: 26 })],
+  });
+  const groupOut = simulateInternationalTournament(intlCareer, 'FIBA_WORLD_CUP', () => 0.99);
+  assert.equal(groupOut.eliminatedStage, 'GROUP');
+  assert.equal(groupOut.matches.length, 3);
+  const intlOpp = getNationalTeamsForTournament('OLYMPICS')[0];
+  const intlLive = createLiveFinalGame(intlCareer, intlOpp, 'INTERNATIONAL_FINAL', {
+    tournamentType: 'OLYMPICS',
+  });
+  assert.equal(
+    intlLive.playerTeam.rating,
+    Math.round(INTERNATIONAL_TOURNAMENT_CONFIG.OLYMPICS.baseKorRating),
+    'International live game playerTeam.rating must use baseKorRating without player OVR double-counting'
+  );
+  assert.equal(INTERNATIONAL_TOURNAMENT_CONFIG.OLYMPICS.liveQuarterBasePts, 20);
+  assert.equal(INTERNATIONAL_TOURNAMENT_CONFIG.ASIAN_GAMES.liveQuarterBasePts, 19);
+
+  // [2-3] 1라운드 드래프트 위상 보호 연속 곡선(절벽 역전 없음) 검증
+  const nbaTeam84 = { ...NBA_TEAMS[0], rating: 84 };
+  const roleAtDiff0 = calculateRoleAndMpg(
+    {
+      ovr: 84,
+      team: nbaTeam84,
+      coachTrust: 70,
+      secondaryPos: null,
+      contractType: 'NBA_STANDARD',
+      league: 'NBA',
+      draftPedigreePick: 1,
+      draftPedigreeRound: 1,
+      draftPedigreeSeasonsLeft: 2,
+      seasonLogs: [],
+    },
+    () => 0.5
+  );
+  const roleAtDiff2 = calculateRoleAndMpg(
+    {
+      ovr: 86,
+      team: nbaTeam84,
+      coachTrust: 70,
+      secondaryPos: null,
+      contractType: 'NBA_STANDARD',
+      league: 'NBA',
+      draftPedigreePick: 1,
+      draftPedigreeRound: 1,
+      draftPedigreeSeasonsLeft: 2,
+      seasonLogs: [],
+    },
+    () => 0.5
+  );
+  assert.ok(
+    roleAtDiff2.mpg >= roleAtDiff0.mpg,
+    `1st-round pedigree MPG must grow monotonically with OVR (${roleAtDiff0.mpg} -> ${roleAtDiff2.mpg})`
+  );
+
+  // [2-4] PACE_CONSERVE 선택 시 하드코딩 +6 회복 없이 실제 체력 소모 발생
+  const q1Conserve = simulateLiveQuarter(liveInit, skipCareer, 'PACE_CONSERVE', () => 0.5);
+  assert.ok(
+    q1Conserve.playerStats.stamina < 100,
+    `PACE_CONSERVE must drain stamina instead of restoring +6 (got ${q1Conserve.playerStats.stamina})`
+  );
+
+  // [2-5] syncRecordBookWithHof 다리그 순회 및 단일경기 득점 타리그 혼입 차단
+  const multiCareer = createBaseCareer({
+    name: '다리그전설',
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    seasonLogs: [
+      createSeasonLog({
+        year: 2027,
+        league: 'KBL',
+        gp: 54,
+        mpg: 35,
+        ppg: 31.0,
+        singleGameHighPts: 64,
+      }),
+      createSeasonLog({
+        year: 2028,
+        league: 'NBA',
+        gp: 80,
+        mpg: 28,
+        ppg: 16.0,
+        singleGameHighPts: 34,
+      }),
+    ],
+    careerHighs: {
+      points: 64,
+      pointsContext: '2027 KBL 정규시즌',
+      rebounds: 12,
+      assists: 10,
+      steals: 4,
+      blocks: 3,
+    },
+  });
+  const hofMulti = buildHallOfFameEntry(
+    multiCareer,
+    'VOLUNTARY',
+    evaluateCareerLegacy(multiCareer)
+  );
+  const syncedBook = syncRecordBookWithHof(createInitialRecordBook(), [hofMulti], null);
+  const kblSingleRec = syncedBook.KBL.find((r) => r.category === 'SINGLE_GAME_POINTS');
+  const nbaSingleRec = syncedBook.NBA.find((r) => r.category === 'SINGLE_GAME_POINTS');
+  assert.equal(kblSingleRec?.value, 64);
+  assert.equal(kblSingleRec?.holderName, '다리그전설');
+  assert.ok(
+    nbaSingleRec?.holderName !== '다리그전설',
+    'KBL 64-pt single-game high must not leak into NBA single-game record'
+  );
+
+  // [2-6] 통합 DPOY 풀 경쟁: 포지션 균형 수비 점수 & evaluateFluidSeasonAwards.wonDpoy=false
+  const perimeterDpoyScore = calcUnifiedDpoyScore({
+    pos: 'PG',
+    defStat: 94,
+    spg: 2.5,
+    bpg: 0.6,
+    rpg: 4.5,
+    wins: 56,
+    losses: 26,
+  });
+  const averageBigDpoyScore = calcUnifiedDpoyScore({
+    pos: 'C',
+    defStat: 78,
+    spg: 0.5,
+    bpg: 1.8,
+    rpg: 10.5,
+    wins: 41,
+    losses: 41,
+  });
+  assert.ok(
+    perimeterDpoyScore > averageBigDpoyScore,
+    `Elite lockdown PG (${perimeterDpoyScore.toFixed(1)}) must outscore average rim-protecting C (${averageBigDpoyScore.toFixed(1)}) in DPOY race`
+  );
+  const fluidRes = evaluateFluidSeasonAwards({
+    career: createBaseCareer({
+      league: 'NBA',
+      primaryPos: 'C',
+      heightCm: 211,
+      stats: { ins: 86, out: 65, ply: 70, def: 92, reb: 92, phy: 88 },
+    }),
+    role: '주전 스타터',
+    gp: 78,
+    ppg: 16,
+    rpg: 11,
+    apg: 2,
+    spg: 0.8,
+    bpg: 2.5,
+    winRate: 0.65,
+    rng: () => 0.5,
+  });
+  assert.equal(fluidRes.wonDpoy, false, 'evaluateFluidSeasonAwards must defer DPOY to unified pool');
+
+  // [2-8] 3점 슛 코트 좌표가 모두 3점 아크 바깥에 위치 + [3-5] LOCKDOWN_STOP 실점 배지 -N
+  const q1Play = simulateLiveQuarter(liveInit, skipCareer, 'ACE_HERO', () => 0.15);
+  for (const play of q1Play.quarterLogs[0]?.plays || []) {
+    if (play.type === 'THREE_PT' && play.showOnCourt) {
+      const dx = play.x - 50;
+      const dy = play.y - 12;
+      const dist = Math.hypot(dx, dy);
+      assert.ok(
+        Math.abs(dx) >= 45 || dist >= 70,
+        `THREE_PT spot (${play.x}, ${play.y}) must lie outside the 3-point arc`
+      );
+    }
+    if (play.type === 'FREE_THROW' && play.showOnCourt) {
+      assert.equal(play.y, 46, 'FREE_THROW spot must align with free-throw line y=46');
+    }
+  }
+  const leadingClutchGame = {
+    ...liveInit,
+    quarter: 4,
+    teamScore: 84,
+    oppScore: 82,
+    pendingClutchPossession: true,
+    clutchScenario: 'LEADING' as const,
+    quarterLogs: q1Play.quarterLogs,
+  };
+  const stopFail = resolveClutchPossession(leadingClutchGame, skipCareer, 'LOCKDOWN_STOP', () => 0.99);
+  const lastClutchPlay =
+    stopFail.quarterLogs[stopFail.quarterLogs.length - 1]?.plays?.slice(-1)[0];
+  assert.ok(
+    lastClutchPlay?.courtBadge && lastClutchPlay.courtBadge.startsWith('-'),
+    `Failed LOCKDOWN_STOP badge must show -N conceded points, got "${lastClutchPlay?.courtBadge}"`
+  );
+
+  // [3-2] 동일 리그 라이벌이 rivals[1]에 있어도 rivalNarrative 정상 생성
+  const diffLeagueRival = {
+    id: 'RIV_NBA',
+    name: '타리그동기',
+    pos: 'SG' as const,
+    league: 'NBA' as const,
+    teamId: NBA_TEAMS[0].id,
+    teamShortName: NBA_TEAMS[0].shortName,
+    ovr: 82,
+    potential: 90,
+    draftYear: 2026,
+    ppg: 18,
+    rpg: 4,
+    apg: 4,
+    mvps: 0,
+    allStars: 0,
+    championships: 0,
+    lastHeadline: '',
+  };
+  const sameLeagueRival = {
+    ...diffLeagueRival,
+    id: 'RIV_KBL',
+    name: '동일리그동기',
+    league: 'KBL' as const,
+    teamId: KBL_TEAMS[2].id,
+    teamShortName: KBL_TEAMS[2].shortName,
+    ovr: 74,
+  };
+  const rivalSim = simulateRivalsSeason(
+    [diffLeagueRival, sameLeagueRival],
+    2027,
+    createSeasonLog({ league: 'KBL', ppg: 19.5 }),
+    () => 0.4
+  );
+  assert.ok(
+    rivalSim.rivalNarrative && rivalSim.rivalNarrative.includes('동일리그동기'),
+    'rivalNarrative must match first same-league rival even when rivals[0] is in another league'
+  );
+
+  // [3-3] SLOW_STARTER 특성이 computeEffectiveAgingOnset & getAgingPhaseInfo 단일 원천에 반영
+  const normalAging = computeEffectiveAgingOnset('STANDARD', 10000, []);
+  const slowAging = computeEffectiveAgingOnset('STANDARD', 10000, ['SLOW_STARTER']);
+  assert.ok(
+    slowAging.maxGrowthAge > normalAging.maxGrowthAge,
+    `SLOW_STARTER must extend maxGrowthAge (${normalAging.maxGrowthAge} -> ${slowAging.maxGrowthAge})`
+  );
+  const slowPhaseAt25 = getAgingPhaseInfo(25, 'STANDARD', 10000, ['SLOW_STARTER']);
+  assert.equal(slowPhaseAt25.phaseId, 'GROWTH', 'Age 25 SLOW_STARTER must still be in GROWTH phase in UI helper');
+
+  // [3-6] 벤치 선수(MPG < 25)는 소속 팀 NPC 1옵션 슬롯을 점유하지 않음
+  const benchCareer = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    ovr: 62,
+  });
+  const benchBox = createSeasonLog({
+    league: 'KBL',
+    teamId: KBL_TEAMS[0].id,
+    teamShortName: KBL_TEAMS[0].shortName,
+    gp: 40,
+    mpg: 12.0,
+    ppg: 5.5,
+  });
+  const kblStandings = generateLeagueStandings(benchCareer, 30, 24, () => 0.5);
+  const benchPool = buildSymmetricLeaguePlayerPool({
+    career: benchCareer,
+    boxScore: benchBox,
+    standings: kblStandings,
+    updatedRivals: [],
+    isRookieSeason: false,
+    rng: () => 0.5,
+  });
+  const myTeamNpcs = benchPool.filter((c) => !c.isPlayer && c.teamId === KBL_TEAMS[0].id);
+  assert.equal(
+    myTeamNpcs.length,
+    LEAGUE_AWARD_QUOTAS.KBL.npcStarsPerTeam,
+    'Bench player (<25 MPG) must not occupy team NPC star slot'
+  );
+
+  // [3-7] 리그별 시즌 신기록 최소 출전 경기 수 비례화
+  assert.ok(
+    getMinGpForSeasonRecord('NBA') > getMinGpForSeasonRecord('KBL') &&
+      getMinGpForSeasonRecord('KBL') > getMinGpForSeasonRecord('HIGH_SCHOOL'),
+    'Minimum GP for season records must scale proportionally by league game count'
+  );
+
+  // [4-1] NCAA LDR·명성도가 NBL·G리그·유로리그·NBA보다 낮게 정렬
+  assert.equal(LEAGUE_CONFIG.NCAA.ldr, 70);
+  assert.equal(LEAGUE_CONFIG.NCAA.prestige, 0.8);
+  assert.ok(LEAGUE_CONFIG.NCAA.ldr < LEAGUE_CONFIG.NBL.ldr);
+  assert.ok(LEAGUE_CONFIG.NCAA.prestige < LEAGUE_CONFIG.NBL.prestige);
+  assert.ok(LEAGUE_CONFIG.NCAA.prestige < LEAGUE_CONFIG.GLEAGUE.prestige);
+
+  // [4-2] TWO_WAY 계약도 부상 시뮬레이션 파이프라인 통과
+  let twoWaySawInjury = false;
+  for (let i = 0; i < 60; i++) {
+    let s = (i + 1) * 9973;
+    const rng = () => {
+      s = (s * 16807) % 2147483647;
+      return (s - 1) / 2147483646;
+    };
+    const tw = calculateRoleAndMpg(
+      {
+        ovr: 76,
+        team: NBA_TEAMS[0],
+        coachTrust: 60,
+        secondaryPos: null,
+        contractType: 'TWO_WAY',
+        league: 'NBA',
+        age: 26,
+        stats: { phy: 55 },
+        traits: ['GLASS_BODY'],
+      },
+      rng
+    );
+    if (tw.injuredGamesMissed > 0) {
+      twoWaySawInjury = true;
+      break;
+    }
+  }
+  assert.equal(twoWaySawInjury, true, 'TWO_WAY contracts must participate in injury simulation');
+
+  // [4-3] 전성기 BALANCED 훈련이 6개 스탯 전체로 분산
+  const grownKeys = new Set<string>();
+  const primeBalCareer = createBaseCareer({
+    age: 27,
+    ovr: 82,
+    potential: 92,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    trainingFocus: 'BALANCED',
+    stats: { ins: 82, out: 82, ply: 82, def: 82, reb: 82, phy: 82 },
+  });
+  let balSeed = 20261124;
+  const balRng = () => {
+    balSeed = (balSeed * 16807) % 2147483647;
+    return (balSeed - 1) / 2147483646;
+  };
+  for (let i = 0; i < 40; i++) {
+    const g = calculateSeasonStatGrowth(primeBalCareer, 34, balRng);
+    for (const [k, v] of Object.entries(g.delta)) {
+      if (v > 0) grownKeys.add(k);
+    }
+  }
+  assert.ok(
+    grownKeys.size >= 5,
+    `Prime BALANCED training must distribute growth across stats (saw ${Array.from(grownKeys).join(',')})`
+  );
+
+  // [4-4] CONTRACT_YEAR 태그 프로 전용 제한 & 이적/군복무 후 묵은 체인 이벤트 차단
+  const hsTags = extractCareerContextTags(
+    createBaseCareer({
+      league: 'HIGH_SCHOOL',
+      team: HIGH_SCHOOL_TEAMS[0],
+      contractType: 'AMATEUR',
+      contractYearsLeft: 1,
+    })
+  );
+  assert.ok(!hsTags.includes('CONTRACT_YEAR'), 'Amateur HS player must not receive CONTRACT_YEAR tag');
+  const sangmuChainCareer = createBaseCareer({
+    league: 'KBL',
+    team: SANGMU_TEAM,
+    contractType: 'MILITARY_SERVICE',
+    militaryServiceSeasonsLeft: 1,
+    pendingChainEvent: {
+      eventId: 'ARC_TEAM_RIFT_LOCKER_ROOM',
+      sourceTitle: '이전 팀 갈등',
+      triggerSeasonYear: 2027,
+    },
+    seasonYear: 2027,
+  });
+  const blockedChain = rollCombinatorialEncounter(sangmuChainCareer, () => 0.1);
+  assert.notEqual(
+    blockedChain?.id,
+    'ARC_TEAM_RIFT_LOCKER_ROOM',
+    'Stale locker-room chain event must not fire after enlisting in Sangmu'
+  );
+});
+
+test('65. 4차 정밀 진단 보고서 26건(P0~P2) 전수 수정 회귀 검증', async () => {
+  const { useCareerStore } = await import('../store/useCareerStore');
+  const { ECONOMY_CONFIG } = await import('../config/balanceConfig');
+
+  // [1-1] 국제대회 차출 직후에도 스토리 아크/인카운터가 이벤트 큐(pendingEventQueue)로 연계 발동
+  const primeIntlCareer = createBaseCareer({
+    id: 'DIAG4_INTL',
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 24,
+    ovr: 86,
+    seasonYear: 2027,
+    seasonsPlayed: 6,
+    militaryExempt: false,
+    contractType: 'NBA_STANDARD',
+    contractYearsLeft: 2,
+    seasonLogs: [createSeasonLog({ seasonYear: 2027, league: 'NBA', ppg: 22 })],
+  });
+  const queuedEvents = rollSeasonEventQueue(primeIntlCareer, () => 0.2, 2027);
+  assert.equal(
+    queuedEvents.length,
+    2,
+    `Prime-year international callup season should queue both INTL and narrative event, got ${queuedEvents.map((e) => e.id).join(',')}`
+  );
+  assert.ok(
+    queuedEvents[0].id.startsWith('EVT_INTL_'),
+    `First queued event should be international callup, got ${queuedEvents[0].id}`
+  );
+  assert.ok(
+    !queuedEvents[1].id.startsWith('EVT_INTL_'),
+    `Second queued event should be story/encounter, got ${queuedEvents[1].id}`
+  );
+
+  // 스토어에서 국제대회 불참 선택 시 큐에 대기 중인 2번째 이벤트가 즉시 pendingEvent로 승격
+  useCareerStore.setState({
+    career: {
+      ...primeIntlCareer,
+      pendingEvent: queuedEvents[0],
+      pendingEventQueue: [queuedEvents[1]],
+    },
+    lastEncounterOutcome: null,
+  });
+  useCareerStore.getState().resolveEventChoice(queuedEvents[0].choices[1]); // 국제대회 불참
+  useCareerStore.getState().dismissEncounterOutcome();
+  assert.equal(
+    useCareerStore.getState().career?.pendingEvent?.id,
+    queuedEvents[1].id,
+    'Declining international callup and dismissing outcome must dequeue next pending narrative event'
+  );
+
+  // [1-2] 31세 이상 베테랑 재발명 / 중상 극복 이벤트가 bypassAgeStatCap으로 정확히 스탯 반영
+  const vetCareer = createBaseCareer({
+    id: 'DIAG4_VET',
+    age: 34,
+    ovr: 80,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    stats: { ins: 76, out: 78, ply: 75, def: 78, reb: 74, phy: 72 },
+  });
+  const reinventionEvt = createVeteranReinventionEvent(vetCareer);
+  assert.equal(reinventionEvt.choices[0].bypassAgeStatCap, true);
+  assert.equal(VETERAN_CRITICAL_INJURY_EVENT.choices[0].bypassAgeStatCap, true);
+  useCareerStore.setState({
+    career: { ...vetCareer, pendingEvent: reinventionEvt, pendingEventQueue: [] },
+    lastEncounterOutcome: null,
+  });
+  const prevPly = vetCareer.stats.ply;
+  const prevOut = vetCareer.stats.out;
+  useCareerStore.getState().resolveEventChoice(reinventionEvt.choices[0]);
+  const afterVet = useCareerStore.getState().career!;
+  assert.equal(afterVet.stats.ply, prevPly + 3, 'Veteran reinvention choice 0 must apply full ply +3 at age 34');
+  assert.equal(afterVet.stats.out, prevOut + 3, 'Veteran reinvention choice 0 must apply full out +3 at age 34');
+
+  // [1-3] 계약 만료 후 원소속 1년 재계약(STAY_TEAM, isExistingContract=false) 시 잔여 계약 연수 1년 정상 세팅
+  const resignOption = {
+    id: 'OPT_RESIGN_1YR',
+    title: '원소속팀 1년 재계약',
+    subtitle: '베테랑 재계약',
+    description: '1년 재계약으로 현역 연장',
+    actionType: 'STAY_TEAM' as const,
+    targetLeague: 'KBL' as const,
+    targetTeam: KBL_TEAMS[0],
+    contractType: 'KBL_FA' as const,
+    contractYears: 1,
+    annualSalary: 450,
+    isExistingContract: false,
+  };
+  const expiredStayCareer = createBaseCareer({
+    id: 'DIAG4_STAY',
+    age: 33,
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    contractType: 'KBL_FA',
+    contractYearsLeft: 0,
+    annualSalary: 500,
+    seasonPhase: 'OFFSEASON_DECISION',
+    offseasonOptions: [resignOption],
+  });
+  useCareerStore.setState({ career: expiredStayCareer });
+  useCareerStore.getState().selectOffseasonOption(resignOption);
+  const afterResign = useCareerStore.getState().career!;
+  assert.equal(afterResign.contractYearsLeft, 1, 'Expired re-sign STAY_TEAM option must set contractYearsLeft to 1');
+  assert.equal(afterResign.annualSalary, 450, 'Expired re-sign STAY_TEAM option must apply new annualSalary');
+
+  // [1-4 & 2-2] 9개 전 리그 팀 레이팅 바운드·direction 분포 및 preferredStyle 4종 다양성
+  const allLeagues = Object.keys(LEAGUE_TEAM_RATING_BOUNDS) as Array<keyof typeof LEAGUE_TEAM_RATING_BOUNDS>;
+  for (const lg of allLeagues) {
+    const teams = getTeamsByLeague(lg);
+    const dirs = new Set(teams.map((t) => t.direction));
+    assert.ok(
+      dirs.size >= 2,
+      `League ${lg} should have at least 2 team directions, got ${Array.from(dirs).join(',')}`
+    );
+  }
+  const styles = new Set(ALL_TEAMS.map((t) => t.preferredStyle));
+  assert.equal(styles.size, 4, 'ALL_TEAMS must distribute all 4 preferredStyle values');
+  let evoRatings = buildInitialTeamRatingsMap();
+  let evoSeed = 20261125;
+  const evoRng = () => {
+    evoSeed = (evoSeed * 16807) % 2147483647;
+    return (evoSeed - 1) / 2147483646;
+  };
+  for (let y = 0; y < 8; y++) {
+    evoRatings = evolveLeagueTeamRatings(evoRatings, evoRng);
+  }
+  for (const t of ALL_TEAMS) {
+    const b = LEAGUE_TEAM_RATING_BOUNDS[t.league];
+    const r = evoRatings[t.id];
+    assert.ok(
+      r >= b.minR && r <= b.maxR,
+      `Team ${t.id} (${t.league}) evolved rating ${r} out of bounds [${b.minR}, ${b.maxR}]`
+    );
+  }
+
+  // [1-5] NBA 드래프트 컴바인 참가 후 철회 시 컴바인 스탯·신뢰도 원복 + 생체역학 상한 적용
+  const baseCombineCareer = createBaseCareer({
+    id: 'DIAG4_COMBINE',
+    age: 20,
+    heightCm: 184,
+    primaryPos: 'PG',
+    league: 'NCAA',
+    team: NCAA_TEAMS[0],
+    ovr: 76,
+    coachTrust: 65,
+    draftStock: 60,
+    stats: { ins: 74, out: 80, ply: 82, def: 73, reb: 60, phy: 76 },
+    seasonPhase: 'DRAFT_COMBINE',
+  });
+  const combineCareer: CareerState = {
+    ...baseCombineCareer,
+    combineState: createInitialCombineState(baseCombineCareer),
+  };
+  const preCombineStats = { ...combineCareer.stats };
+  const preCombineTrust = combineCareer.coachTrust;
+  useCareerStore.setState({ career: combineCareer });
+  useCareerStore.getState().runCombineDrill('DRILL_ATHLETIC', '운동능력 측정', 'phy');
+  useCareerStore.getState().runCombineDrill('DRILL_SHOOTING', '슈팅 드릴', 'out');
+  useCareerStore.getState().completeCombineInterview('TEAM_FIRST');
+  const midCombine = useCareerStore.getState().career!;
+  const caps = getBiomechanicalStatCaps(midCombine.heightCm, midCombine.primaryPos);
+  for (const k of ['ins', 'out', 'ply', 'def', 'reb', 'phy'] as const) {
+    assert.ok(midCombine.stats[k] <= caps[k], `Combine drill stat ${k}=${midCombine.stats[k]} must respect cap ${caps[k]}`);
+  }
+  useCareerStore.getState().withdrawFromDraft();
+  const afterWithdraw = useCareerStore.getState().career!;
+  assert.deepEqual(
+    afterWithdraw.stats,
+    preCombineStats,
+    'Withdrawing from draft must roll back all combine stat gains'
+  );
+  assert.equal(
+    afterWithdraw.coachTrust,
+    preCombineTrust,
+    'Withdrawing from draft must roll back combine interview trust gain'
+  );
+
+  // [1-6] getTeamById 존재하지 않는 ID 조회 시 경복고 폴백 대신 undefined 반환
+  assert.equal(getTeamById('NON_EXISTENT_TEAM_ID_999'), undefined);
+  assert.equal(getTeamById(NBA_TEAMS[0].id)?.id, NBA_TEAMS[0].id);
+
+  // [1-7] 플레이오프 미진출 시에도 simulateForNonPlayer=true로 타팀 플레이오프 시뮬 및 우승팀 산출
+  const missedPoCareer = createBaseCareer({
+    id: 'DIAG4_NOPO',
+    league: 'KBL',
+    team: KBL_TEAMS[9],
+    ovr: 72,
+  });
+  const kblMissedStandings = generateLeagueStandings(missedPoCareer, 14, 40, () => 0.5);
+  const nonPlayerBracket = createPlayoffBracket(
+    missedPoCareer,
+    kblMissedStandings,
+    () => 0.5,
+    { simulateForNonPlayer: true }
+  );
+  assert.equal(nonPlayerBracket.playerEliminated, true);
+  assert.ok(
+    nonPlayerBracket.rounds.length >= 1 && nonPlayerBracket.rounds[0].length >= 2,
+    'Non-player simulated bracket must populate Round 1 matchups'
+  );
+  const finishedNonPlayer = skipEntirePlayoffs(nonPlayerBracket, missedPoCareer, () => 0.45);
+  assert.ok(
+    Boolean(finishedNonPlayer.championTeamId),
+    'skipEntirePlayoffs must resolve a valid championTeamId even when player missed playoffs'
+  );
+
+  // [2-1] 라이브 리그 결승 단일 경기 최다 득점 동기화 + 국제대회 라이브 경기 careerHighs 오염 차단
+  const liveFinalsCareer = createBaseCareer({
+    id: 'DIAG4_LIVE',
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 90,
+    seasonLogs: [
+      createSeasonLog({
+        seasonYear: 2040,
+        league: 'NBA',
+        singleGameHighPts: 34,
+      }),
+    ],
+    careerHighs: {
+      points: 42,
+      pointsYear: 2039,
+      pointsLeague: 'NBA',
+      rebounds: 10,
+      assists: 11,
+    },
+  });
+  const leagueFinal = createLiveFinalGame(
+    liveFinalsCareer,
+    NBA_TEAMS[1],
+    'LEAGUE_FINALS'
+  );
+  const preFinishLeagueFinal = {
+    ...leagueFinal,
+    currentQuarter: 3,
+    myScore: 96,
+    oppScore: 78,
+    playerStats: { ...leagueFinal.playerStats, pts: 47, reb: 9, ast: 8 },
+  };
+  useCareerStore.setState({
+    career: {
+      ...liveFinalsCareer,
+      playoffBracket: {
+        league: 'NBA',
+        year: 2040,
+        totalRounds: 1,
+        currentRound: 1,
+        rounds: [
+          [
+            {
+              id: 'M_FIN',
+              roundNumber: 1,
+              roundLabel: 'NBA 파이널',
+              conference: 'FINALS',
+              bestOf: 7,
+              winsNeeded: 4,
+              higherSeed: { team: NBA_TEAMS[0], seed: 1, wins: 58, losses: 24, winPct: 0.707, isPlayerTeam: true },
+              lowerSeed: { team: NBA_TEAMS[1], seed: 2, wins: 55, losses: 27, winPct: 0.671, isPlayerTeam: false },
+              higherSeedWins: 3,
+              lowerSeedWins: 3,
+              winnerId: null,
+              involvesPlayer: true,
+              summaryLog: [],
+            },
+          ],
+        ],
+        playerEliminated: false,
+        playerReachedFinals: true,
+        championTeamId: null,
+        playoffResultLabel: '파이널 진출',
+      },
+      liveGame: preFinishLeagueFinal,
+      seasonPhase: 'LIVE_FINAL_GAME',
+    },
+  });
+  useCareerStore.getState().skipLiveGame();
+  const finalGamePts = useCareerStore.getState().career?.liveGame?.playerStats.pts ?? 0;
+  assert.ok(finalGamePts >= 47, `Finished league final must have >= 47 pts, got ${finalGamePts}`);
+  useCareerStore.getState().closeLiveGameAndReturn();
+  const afterLeagueFinal = useCareerStore.getState().career!;
+  assert.equal(afterLeagueFinal.careerHighs.points, finalGamePts, 'League finals game must update careerHighs.points');
+  assert.equal(afterLeagueFinal.careerHighs.pointsLeague, 'NBA', 'careerHighs.pointsLeague must record NBA');
+  assert.equal(
+    afterLeagueFinal.seasonLogs[afterLeagueFinal.seasonLogs.length - 1].singleGameHighPts,
+    finalGamePts,
+    'League finals game must sync seasonLogs.singleGameHighPts'
+  );
+  // [3-3 & 3-6] 우승 직후 draftStock 상승 및 통합 우승/MVP 헤드라인 갱신
+  assert.ok(afterLeagueFinal.draftStock >= liveFinalsCareer.draftStock);
+
+  // 국제대회 라이브 고득점 경기는 프로 리그 careerHighs를 덮어쓰지 않아야 함
+  const intlLive = createLiveFinalGame(
+    afterLeagueFinal,
+    ALL_INTERNATIONAL_TEAMS[0],
+    'INTERNATIONAL_FINAL',
+    {
+      tournamentType: 'OLYMPICS',
+      tournamentYear: 2040,
+    }
+  );
+  useCareerStore.setState({
+    career: {
+      ...afterLeagueFinal,
+      liveGame: {
+        ...intlLive,
+        currentQuarter: 3,
+        myScore: 92,
+        oppScore: 76,
+        playerStats: { ...intlLive.playerStats, pts: finalGamePts + 25, reb: 14, ast: 13 },
+      },
+      seasonPhase: 'LIVE_FINAL_GAME',
+    },
+  });
+  useCareerStore.getState().skipLiveGame();
+  useCareerStore.getState().closeLiveGameAndReturn();
+  const afterIntlLive = useCareerStore.getState().career!;
+  assert.equal(
+    afterIntlLive.careerHighs.points,
+    finalGamePts,
+    'International live game high-scoring performance must NOT overwrite league careerHighs.points'
+  );
+
+  // [2-3] 이적 시 라커룸/프런트 초기화·미디어 유지 + POSTSEASON_BRACKET 중 requestTrade 차단
+  const tradeCareer = createBaseCareer({
+    id: 'DIAG4_TRADE',
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 86,
+    contractType: 'NBA_STANDARD',
+    contractYearsLeft: 2,
+    seasonPhase: 'POSTSEASON_BRACKET',
+    relationships: { coachTrust: 82, lockerRoom: 92, frontOffice: 18, mediaFan: 88 },
+  });
+  useCareerStore.setState({ career: tradeCareer });
+  useCareerStore.getState().requestTrade();
+  assert.equal(
+    useCareerStore.getState().career?.team.id,
+    NBA_TEAMS[0].id,
+    'requestTrade must be blocked during POSTSEASON_BRACKET'
+  );
+  useCareerStore.setState({
+    career: {
+      ...tradeCareer,
+      seasonPhase: 'REGULAR_SEASON',
+      brokenRolePromise: true,
+      tradeRequestedThisYear: false,
+    },
+  });
+  const origRandom = Math.random;
+  try {
+    Math.random = () => 0.05;
+    useCareerStore.getState().requestTrade();
+  } finally {
+    Math.random = origRandom;
+  }
+  const afterTrade = useCareerStore.getState().career!;
+  assert.notEqual(afterTrade.team.id, NBA_TEAMS[0].id, 'requestTrade in REGULAR_SEASON phase must move player to a new team');
+  assert.equal(afterTrade.relationships?.lockerRoom, 52, 'Transfer must reset lockerRoom to 52');
+  assert.equal(afterTrade.relationships?.frontOffice, 52, 'Transfer must reset frontOffice to 52');
+  assert.equal(afterTrade.relationships?.mediaFan, 88, 'Transfer must preserve mediaFan');
+
+  // [2-4 & 3-5] 상무 군복무 중 스토리 아크 차단, 동일 리그 라이벌 필터, 31세+ S3 potentialDelta 대체
+  const sangmuArcCareer = createBaseCareer({
+    id: 'DIAG4_SANGMU_ARC',
+    league: 'KBL',
+    team: SANGMU_TEAM,
+    contractType: 'MILITARY_SERVICE',
+    militaryServiceSeasonsLeft: 1,
+    ovr: 84,
+    age: 26,
+  });
+  assert.equal(
+    rollStoryArcEvent(sangmuArcCareer, () => 0.01),
+    null,
+    'Sangmu military player must not trigger pro story arcs'
+  );
+  const vetArcCareer = createBaseCareer({
+    id: 'DIAG4_VET_ARC',
+    age: 33,
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    ovr: 85,
+  });
+  const coachS3 = buildStoryArcEventById(vetArcCareer, 'COACH_TACTICS_ARC', 3);
+  assert.equal(
+    coachS3.choices[0].potentialDelta ?? 0,
+    0,
+    'Age 33 COACH_TACTICS_ARC S3 must not grant ineffective potentialDelta'
+  );
+  const rivalS1 = buildStoryArcEventById(vetArcCareer, 'RIVAL_DESTINY_ARC', 1);
+  assert.ok(
+    typeof rivalS1.choices[0].trustDelta === 'number' &&
+      rivalS1.choices[0].relationshipChanges?.coachTrust === undefined,
+    'RIVAL_DESTINY_ARC S1 choice 0 must use trustDelta instead of relationshipChanges.coachTrust'
+  );
+
+  // [2-5, 3-1, 3-2] 플레이오프 라벨 우선순위, 동명이인 신기록 분리, HOF finalSeasonYear 폴백
+  const poChronicle = buildChampionshipChronicle([
+    createSeasonLog({ year: 2027, playoffResult: '1R 탈락' }),
+    createSeasonLog({ year: 2028, playoffResult: '컨퍼런스 준결승 탈락' }),
+    createSeasonLog({ year: 2029, playoffResult: '컨퍼런스 파이널 탈락' }),
+    createSeasonLog({ year: 2030, playoffResult: '파이널 준우승' }),
+  ]);
+  assert.ok(
+    poChronicle.bestPlayoffNote && poChronicle.bestPlayoffNote.includes('파이널 준우승'),
+    `Playoff priority must rank 파이널 준우승 above 컨퍼런스 파이널/준결승/1R, got "${poChronicle.bestPlayoffNote}"`
+  );
+  const otherPlayerRecordBook = createInitialRecordBook();
+  otherPlayerRecordBook.NBA[0] = {
+    ...otherPlayerRecordBook.NBA[0],
+    isPlayerRecord: true,
+    holderName: '동명이인선수',
+    playerId: 'OTHER_PLAYER_ID',
+  };
+  const stolenCheck = extractPlayerBrokenRecords(
+    createBaseCareer({ id: 'MY_PLAYER_ID', name: '동명이인선수' }),
+    otherPlayerRecordBook
+  );
+  assert.equal(
+    stolenCheck.length,
+    0,
+    'extractPlayerBrokenRecords must not claim records belonging to a different playerId with the same name'
+  );
+  const hofCareer = createBaseCareer({ id: 'DIAG4_HOF', seasonYear: 2042, seasonsPlayed: 16 });
+  const hofEntry = buildHallOfFameEntry(
+    hofCareer,
+    'VOLUNTARY',
+    evaluateCareerLegacy(hofCareer)
+  );
+  assert.equal(hofEntry.finalSeasonYear, 2042, 'buildHallOfFameEntry must persist finalSeasonYear');
+  const fallbackRetro = buildFallbackRetrospectiveFromHof({
+    ...hofEntry,
+    inductedAt: '2026-11-24T00:00:00.000Z',
+    retrospective: undefined,
+  });
+  assert.equal(
+    fallbackRetro.stints[0]?.endYear,
+    2042,
+    'Fallback retrospective must use finalSeasonYear instead of inductedAt year'
+  );
+
+  // [2-6] importSaveJson 시 recordBookManuallyReset 초기화
+  useCareerStore.setState({
+    career: vetCareer,
+    hofList: [],
+    recordBook: createInitialRecordBook(),
+    recordBookManuallyReset: true,
+  });
+  const exportedJson = useCareerStore.getState().exportSaveJson();
+  const importRes = useCareerStore.getState().importSaveJson(exportedJson);
+  assert.equal(importRes.ok, true);
+  assert.equal(
+    useCareerStore.getState().recordBookManuallyReset,
+    false,
+    'importSaveJson must reset recordBookManuallyReset to false'
+  );
+
+  // [2-7] REHAB_LOAD_MGMT 토스트/마일스톤 문구가 config 기반 실제 감면율 반영
+  const rehabCareer = createBaseCareer({
+    id: 'DIAG4_REHAB',
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    cashBalance: 2_000_000,
+    activePersonalCare: [],
+    seasonYear: 2040,
+  });
+  useCareerStore.setState({ career: rehabCareer, toast: null });
+  useCareerStore.getState().purchasePersonalCare('REHAB_LOAD_MGMT');
+  const rehabCfg = ECONOMY_CONFIG.personalCare.REHAB_LOAD_MGMT;
+  const expectedRiskPct = Math.round((1 - rehabCfg.injuryRiskMultiplier) * 100);
+  const expectedGamesPct = Math.round((1 - rehabCfg.injuryGamesMultiplier) * 100);
+  const expectedMajorPct = Math.round(
+    (1 - ROLE_MPG_CONFIG.injury.tiers.major.majorRehabGamesMult) * 100
+  );
+  const rehabToastObj = useCareerStore.getState().toast;
+  const rehabToast = `${rehabToastObj?.title ?? ''} ${rehabToastObj?.description ?? ''}`;
+  assert.ok(
+    rehabToast.includes(`${expectedRiskPct}%`) &&
+      rehabToast.includes(`${expectedGamesPct}%`) &&
+      rehabToast.includes(`${expectedMajorPct}%`),
+    `REHAB_LOAD_MGMT toast must reflect dynamic config percentages (${expectedRiskPct}%/${expectedGamesPct}%/${expectedMajorPct}%), got "${rehabToast}"`
+  );
+
+  // [2-8] 포지션 전용 이벤트 10종이 ENCOUNTER_SCENARIO_POOL에 통합 + 부포지션 해금 보존
+  const allPosEvtIds = Object.values(POSITION_EVENTS).flat().map((e) => e.id);
+  assert.equal(allPosEvtIds.length, 10);
+  for (const id of allPosEvtIds) {
+    assert.ok(
+      ENCOUNTER_SCENARIO_POOL.some((s) => s.id === id),
+      `Position event ${id} must be registered in ENCOUNTER_SCENARIO_POOL`
+    );
+  }
+  const sgCombo = ENCOUNTER_SCENARIO_POOL.find((s) => s.id === 'EVT_SG_COMBO');
+  const pfSmall = ENCOUNTER_SCENARIO_POOL.find((s) => s.id === 'EVT_PF_SMALLBALL');
+  assert.equal(sgCombo?.choices[0].unlockSecondaryPos, 'PG');
+  assert.equal(pfSmall?.choices[0].unlockSecondaryPos, 'C');
+
+  // [3-4] normalizeTeamInfo가 primaryColor/conference/isMilitaryTeam 동기화 + 레거시 OVERSEAS 로그 shortName
+  const staleTeam = normalizeTeamInfo({
+    ...NBA_TEAMS[0],
+    primaryColor: '#000000',
+    conference: undefined,
+  });
+  assert.equal(staleTeam.primaryColor, NBA_TEAMS[0].primaryColor);
+  assert.equal(staleTeam.conference, NBA_TEAMS[0].conference);
+
+  // [3-6] 다회차 MVP 헤드라인에서 "생애 첫" 문구 미출현 + 루키 ROOKIE_STAR 분기 도달
+  for (let i = 0; i < 20; i++) {
+    const repeatHeadline = generateSeasonHeadline({
+      name: '레전드',
+      teamName: 'LA 레이커스',
+      leagueName: 'NBA',
+      ppg: 28.4,
+      rpg: 7.2,
+      apg: 8.1,
+      wonChampionship: false,
+      wonMvp: true,
+      priorMvpsCount: 2,
+    });
+    assert.equal(
+      repeatHeadline.includes('생애 첫'),
+      false,
+      `Repeat MVP headline must not say "생애 첫": ${repeatHeadline}`
+    );
+  }
+  const rookieHeadline = generateSeasonHeadline({
+    name: '루키스타',
+    teamName: '시카고 불스',
+    leagueName: 'NBA',
+    ppg: 15.2,
+    rpg: 4.5,
+    apg: 4.0,
+    wonChampionship: false,
+    wonMvp: false,
+    isRookie: true,
+  });
+  assert.ok(
+    rookieHeadline.includes('루키') || rookieHeadline.includes('신인'),
+    `Rookie with PPG >= 12 must trigger ROOKIE_STAR headline, got "${rookieHeadline}"`
+  );
+
+  // [3-7] formatCashDelta(0) 및 음수 통화 포맷터 부호 보존
+  assert.equal(formatCashDelta(0), '$0');
+  assert.equal(formatCurrencyCompact(-1_500_000), '-$1.5M');
+  assert.equal(formatCurrencyDetailed(-500_000), '-$500K');
+
+  // [4-1] 아마추어 리그 EVT_MID_STARTER_SHOWCASE는 potentialDelta를 부여하지 않음
+  const hsMidCareer = createBaseCareer({
+    id: 'DIAG4_HS_MID',
+    league: 'HIGH_SCHOOL',
+    team: HIGH_SCHOOL_TEAMS[0],
+    age: 17,
+    ovr: 60,
+    role: '식스맨',
+    midSeasonEventTriggeredThisYear: false,
+  });
+  const hsMidEvt = rollMidSeasonCrossroadsEvent(hsMidCareer, () => 0.5);
+  assert.ok(
+    hsMidEvt.id.startsWith('EVT_MID_STARTER_SHOWCASE'),
+    `Expected EVT_MID_STARTER_SHOWCASE for HS sixth man, got ${hsMidEvt.id}`
+  );
+  assert.equal(
+    hsMidEvt.choices[0].potentialDelta ?? 0,
+    0,
+    'Amateur EVT_MID_STARTER_SHOWCASE must not grant potentialDelta'
+  );
+  assert.equal(
+    hsMidEvt.choices[0].successOutcome?.potentialDelta ?? 0,
+    0,
+    'Amateur EVT_MID_STARTER_SHOWCASE successOutcome must not grant potentialDelta'
+  );
+
+  // [4-3] POSITION_ARCHETYPES 신장 범위가 POSITION_HEIGHT_RANGES 단일 원천과 완전 일치
+  for (const pos of ['PG', 'SG', 'SF', 'PF', 'C'] as const) {
+    assert.deepEqual(
+      POSITION_ARCHETYPES[pos].recommendedHeightRange,
+      [POSITION_HEIGHT_RANGES[pos].optimalMin, POSITION_HEIGHT_RANGES[pos].optimalMax],
+      `POSITION_ARCHETYPES.${pos}.recommendedHeightRange must match POSITION_HEIGHT_RANGES`
+    );
+    assert.equal(
+      POSITION_ARCHETYPES[pos].defaultHeightCm,
+      POSITION_HEIGHT_RANGES[pos].defaultCm,
+      `POSITION_ARCHETYPES.${pos}.defaultHeightCm must match POSITION_HEIGHT_RANGES`
+    );
+  }
+});
+
+
 
 
 

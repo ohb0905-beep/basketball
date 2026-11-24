@@ -1,17 +1,6 @@
-import { LeagueId } from '@/src/types/game';
+import { LeagueConfig, LeagueId } from '../types/game';
 
-export interface LeagueConfig {
-  id: LeagueId;
-  name: string;
-  shortName: string;
-  gamesPerSeason: number;
-  games: number;
-  ldr: number;
-  growthCap: number;
-  prestige: number;
-  country: string;
-  badgeColor: string;
-}
+export type { LeagueConfig };
 
 export const LEAGUES: Record<LeagueId, LeagueConfig> = {
   HIGH_SCHOOL: {
@@ -92,9 +81,9 @@ export const LEAGUES: Record<LeagueId, LeagueConfig> = {
     shortName: 'NCAA D1',
     gamesPerSeason: 35,
     games: 35,
-    ldr: 74,
-    growthCap: 81,
-    prestige: 1.00,
+    ldr: 70,
+    growthCap: 80,
+    prestige: 0.80,
     country: '미국',
     badgeColor: '#D97706',
   },

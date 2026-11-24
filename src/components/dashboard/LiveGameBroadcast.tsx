@@ -59,14 +59,16 @@ function resolveCourtBadge(play: LiveCourtPlay): string | null {
   if (play.type === 'THREE_MAKE') return '+3';
   if (play.type === 'TWO_MAKE') return '+2';
   if (play.type === 'FT') return pts > 0 ? `+${pts}` : '+1';
-  if (play.type === 'ASSIST') return pts === 3 ? 'AST +3' : 'AST +2';
+  if (play.type === 'ASSIST') {
+    return pts > 0 ? `AST +${pts}` : 'AST';
+  }
   if (play.type === 'MISS') return 'MISS';
   if (play.type === 'STEAL') return 'STL';
   if (play.type === 'BLOCK') return 'BLK';
   if (play.type === 'FOUL') return 'FOUL';
   if (play.type === 'CLUTCH') {
     if (pts > 0) return `+${pts}`;
-    return play.oppDelta > 0 ? 'MISS' : 'STOP';
+    return play.oppDelta > 0 ? `-${play.oppDelta}` : 'STOP';
   }
   return null;
 }
@@ -133,8 +135,7 @@ function MiniHalfCourt({
         activeCourtPlay!.oppDelta === 0));
 
   const isScoredPlay =
-    Boolean(activeCourtPlay) &&
-    ((activeCourtPlay!.shotPoints ?? 0) > 0 || activeCourtPlay!.type === 'ASSIST');
+    Boolean(activeCourtPlay) && (activeCourtPlay!.shotPoints ?? 0) > 0;
 
   const accent = activeCourtPlay ? getPlayAccentColor(activeCourtPlay) : '#f05a1f';
   const badgeText = activeCourtPlay ? resolveCourtBadge(activeCourtPlay) : null;
@@ -402,10 +403,11 @@ export function LiveGameBroadcast() {
   });
 
   const isNewKey = replayState.key !== replayKey;
+  const isSkipped = Boolean(liveGame?.wasSkipped);
 
   const playIndex = (() => {
     if (!liveGame || latestPlays.length === 0) return 0;
-    if (prefersReducedMotion) return latestPlays.length - 1;
+    if (prefersReducedMotion || isSkipped) return latestPlays.length - 1;
     if (isNewKey) {
       const [prevQStr, prevLenStr] = replayState.key.split('_');
       const prevQ = Number(prevQStr);
@@ -429,7 +431,7 @@ export function LiveGameBroadcast() {
       : null;
 
   const currentPhase: 'FLYING' | 'LANDED' = (() => {
-    if (!activePlay || prefersReducedMotion) return 'LANDED';
+    if (!activePlay || prefersReducedMotion || isSkipped) return 'LANDED';
     if (isNewKey) {
       return isCourtVisiblePlay(activePlay) ? 'FLYING' : 'LANDED';
     }
@@ -440,6 +442,7 @@ export function LiveGameBroadcast() {
     liveGame &&
       latestPlays.length > 0 &&
       !prefersReducedMotion &&
+      !isSkipped &&
       (isNewKey || !replayState.finished)
   );
 
@@ -709,6 +712,70 @@ export function LiveGameBroadcast() {
             </span>
           </div>
         </div>
+
+        {/* 쿼터별 스코어 요약표 (진행 중 쿼터는 스포일러 방지를 위해 현재 실시간 누적값 기준 표시) */}
+        {liveGame.quarterLogs.length > 0 && (
+          <div
+            data-testid="live-quarter-box"
+            className="overflow-x-auto pt-2.5 border-t border-[var(--t-g100)]"
+          >
+            <table className="w-full text-[11px] tabular-nums text-center">
+              <thead>
+                <tr className="text-[var(--t-g500)] font-semibold">
+                  <th className="text-left font-semibold py-1 pr-2">구단</th>
+                  {liveGame.quarterLogs.map((ql) => (
+                    <th key={ql.label} className="font-semibold py-1 px-1.5">
+                      {ql.label}
+                    </th>
+                  ))}
+                  <th className="font-bold py-1 pl-2 text-[var(--t-g800)]">합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="text-[var(--t-g900)]">
+                  <td className="text-left font-bold text-[var(--t-accent-ink)] py-1 pr-2 truncate max-w-[96px]">
+                    {liveGame.playerTeam.shortName}
+                  </td>
+                  {liveGame.quarterLogs.map((ql, idx) => {
+                    const isCurrentReplayQ =
+                      isReplaying && idx === liveGame.quarterLogs.length - 1;
+                    const qPtsVal = isCurrentReplayQ
+                      ? Math.max(0, displayedTeamScore - (ql.startTeamScore ?? 0))
+                      : ql.teamPts;
+                    return (
+                      <td key={`t-${ql.label}`} className="py-1 px-1.5 font-semibold">
+                        {qPtsVal}
+                      </td>
+                    );
+                  })}
+                  <td className="py-1 pl-2 font-bold text-[var(--t-accent)]">
+                    {displayedTeamScore}
+                  </td>
+                </tr>
+                <tr className="text-[var(--t-g700)]">
+                  <td className="text-left font-semibold py-1 pr-2 truncate max-w-[96px]">
+                    {liveGame.opponentTeam.shortName}
+                  </td>
+                  {liveGame.quarterLogs.map((ql, idx) => {
+                    const isCurrentReplayQ =
+                      isReplaying && idx === liveGame.quarterLogs.length - 1;
+                    const qPtsVal = isCurrentReplayQ
+                      ? Math.max(0, displayedOppScore - (ql.startOppScore ?? 0))
+                      : ql.oppPts;
+                    return (
+                      <td key={`o-${ql.label}`} className="py-1 px-1.5 font-medium">
+                        {qPtsVal}
+                      </td>
+                    );
+                  })}
+                  <td className="py-1 pl-2 font-bold text-[var(--t-g900)]">
+                    {displayedOppScore}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* 내 선수 실시간 스탯 스트립 */}
         <div className="grid grid-cols-5 sm:grid-cols-7 pt-3.5 border-t border-[var(--t-g100)] text-center gap-1 tabular-nums">

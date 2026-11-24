@@ -6,6 +6,7 @@ import {
   LegacyEvaluation,
   LegacyTierId,
   PlayerStats,
+  PlayerTraitId,
   RecordBookState,
   RetirementReason,
   StatDelta,
@@ -26,6 +27,7 @@ import { buildCareerRetrospective } from './retrospectiveEngine';
 export interface AgingCurveOptions {
   growthDna?: GrowthDna;
   careerMinutes?: number;
+  traits?: PlayerTraitId[];
   hasBiomechLab?: boolean;
   hasCampAgingShield?: boolean;
   veteranReinvented?: boolean;
@@ -38,14 +40,26 @@ export interface AgingPhaseInfo {
 }
 
 /**
- * DNA별 성장 종료 나이 및 노쇠화 시작 나이(onsetAge) 단일 진실 원천 산출
+ * DNA·트레이트별 성장 종료 나이 및 노쇠화 시작 나이(onsetAge) 단일 진실 원천 산출
+ * - SLOW_STARTER 트레이트는 성장 종료 나이와 노쇠화 시작 나이를 최소 대기만성형(LATE_BLOOMER) 수준으로 끌어올림
  * - 고마일리지 대기만성형이라도 성장기 직후 최소 1시즌의 전성기(PRIME) 구간을 보장
  */
 export function computeEffectiveAgingOnset(
   growthDna: GrowthDna = 'STANDARD',
-  careerMinutes: number = 0
+  careerMinutes: number = 0,
+  traits?: PlayerTraitId[]
 ): { maxGrowthAge: number; onsetAge: number; mileageOffset: number; dnaSeverityMult: number } {
   const dnaCfg = GROWTH_DNA_CONFIG[growthDna] || GROWTH_DNA_CONFIG.STANDARD;
+  const hasSlowStarter = Boolean(traits?.includes('SLOW_STARTER'));
+  const effectiveMaxGrowthAge = hasSlowStarter
+    ? Math.max(dnaCfg.maxGrowthAge, GROWTH_DNA_CONFIG.LATE_BLOOMER.maxGrowthAge)
+    : dnaCfg.maxGrowthAge;
+  const effectiveAgingOnsetOffset = hasSlowStarter
+    ? Math.max(
+        dnaCfg.agingOnsetOffset,
+        GROWTH_DNA_CONFIG.LATE_BLOOMER.agingOnsetOffset
+      )
+    : dnaCfg.agingOnsetOffset;
   const mileageOffset = clampNum(
     (AGING_RETIREMENT_CONFIG.mileageReferenceMinutes - careerMinutes) /
       AGING_RETIREMENT_CONFIG.mileageScaleDivisor,
@@ -53,13 +67,13 @@ export function computeEffectiveAgingOnset(
     1.0
   );
   const rawOnsetAge =
-    AGING_RETIREMENT_CONFIG.baseOnsetAge + dnaCfg.agingOnsetOffset + mileageOffset;
+    AGING_RETIREMENT_CONFIG.baseOnsetAge + effectiveAgingOnsetOffset + mileageOffset;
   const minOnsetForPrime =
-    dnaCfg.maxGrowthAge + dnaCfg.minPrimeYearsAfterGrowth + 0.5;
+    effectiveMaxGrowthAge + dnaCfg.minPrimeYearsAfterGrowth + 0.5;
   const onsetAge = Math.max(minOnsetForPrime, rawOnsetAge);
 
   return {
-    maxGrowthAge: dnaCfg.maxGrowthAge,
+    maxGrowthAge: effectiveMaxGrowthAge,
     onsetAge,
     mileageOffset,
     dnaSeverityMult: dnaCfg.agingSeverityMult,
@@ -69,11 +83,13 @@ export function computeEffectiveAgingOnset(
 export function getAgingPhaseInfo(
   age: number,
   growthDna: GrowthDna = 'STANDARD',
-  careerMinutes: number = 0
+  careerMinutes: number = 0,
+  traits?: PlayerTraitId[]
 ): AgingPhaseInfo {
   const { maxGrowthAge, onsetAge } = computeEffectiveAgingOnset(
     growthDna,
-    careerMinutes
+    careerMinutes,
+    traits
   );
 
   if (age <= maxGrowthAge) {
@@ -125,7 +141,8 @@ export function applyAgingCurve(
 
   const { onsetAge, dnaSeverityMult } = computeEffectiveAgingOnset(
     dna,
-    careerMinutes
+    careerMinutes,
+    options?.traits
   );
 
   // 누적 출전 마일리지 가속 계수
@@ -696,6 +713,14 @@ export function buildHallOfFameEntry(
   const kblFinalsMvps = career.seasonLogs.filter(
     (l) => l.league === 'KBL' && l.wonFinalsMvp
   ).length;
+  const leagueCareerHighPts: Partial<Record<LeagueId, number>> = {};
+  for (const log of career.seasonLogs) {
+    const prevHigh = leagueCareerHighPts[log.league] ?? 0;
+    const seasonHigh = log.singleGameHighPts ?? 0;
+    if (seasonHigh > prevHigh) {
+      leagueCareerHighPts[log.league] = seasonHigh;
+    }
+  }
   const retrospective = buildCareerRetrospective(
     career,
     reason,
@@ -712,6 +737,10 @@ export function buildHallOfFameEntry(
     secondaryPos: career.secondaryPos,
     peakOvr: career.peakOvr,
     finalAge: career.age,
+    finalSeasonYear:
+      career.seasonLogs.length > 0
+        ? career.seasonLogs[career.seasonLogs.length - 1].year
+        : career.seasonYear,
     seasonsPlayed: career.seasonsPlayed,
     retirementReason: reason,
     legacyTierId: evaluation.tierId,
@@ -755,6 +784,7 @@ export function buildHallOfFameEntry(
       apg: Number((career.totals.assists / gp).toFixed(1)),
     },
     careerHighPts: career.careerHighs.points,
+    leagueCareerHighPts,
     epitaph: evaluation.summaryComment,
     retrospective,
   };

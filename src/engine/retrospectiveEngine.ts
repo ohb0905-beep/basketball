@@ -277,10 +277,36 @@ export function buildChampionshipChronicle(
   if (championships.length === 0 && seasonLogs.length > 0) {
     const playoffPriority = (res?: string): number => {
       if (!res) return 0;
-      if (res.includes('준우승') || res.includes('파이널')) return 5;
-      if (res.includes('컨퍼런스 결승') || res.includes('4강') || res.includes('준결승')) return 4;
-      if (res.includes('2라운드') || res.includes('8강') || res.includes('6강')) return 3;
-      if (res.includes('플레이오프') || res.includes('1라운드') || res.includes('토너먼트')) return 2;
+      if (res.includes('리그 우승')) return 6;
+      if (res.includes('준우승')) return 5;
+      if (
+        res.includes('컨퍼런스 파이널') ||
+        res.includes('컨퍼런스 결승') ||
+        res.includes('파이널 포') ||
+        res.includes('세미파이널') ||
+        res.includes('4강')
+      ) {
+        return 4;
+      }
+      if (
+        res.includes('컨퍼런스 준결승') ||
+        res.includes('2R') ||
+        res.includes('2라운드') ||
+        res.includes('6강') ||
+        (res.includes('8강') && !res.includes('1R'))
+      ) {
+        return 3;
+      }
+      if (
+        res.includes('1R') ||
+        res.includes('1라운드') ||
+        res.includes('플레이인') ||
+        res.includes('PO 진출') ||
+        res.includes('플레이오프 진출') ||
+        res.includes('토너먼트 진출')
+      ) {
+        return 2;
+      }
       return 1;
     };
 
@@ -456,8 +482,9 @@ export function extractPlayerBrokenRecords(
     const entries = recordBook[league] || [];
     for (const rec of entries) {
       if (!rec.isUserRecord) continue;
-      const matchesPlayer =
-        (rec.playerId && rec.playerId === career.id) || rec.holderName === career.name;
+      const matchesPlayer = rec.playerId
+        ? rec.playerId === career.id
+        : rec.holderName === career.name;
       if (!matchesPlayer) continue;
       const isInt = rec.unit === '점' || rec.unit === '회';
       const formattedValue = isInt
@@ -621,7 +648,8 @@ export function buildFallbackRetrospectiveFromHof(
 ): CareerRetrospective {
   if (entry.retrospective) return entry.retrospective;
 
-  const inductedYear = Number(entry.inductedAt?.slice(0, 4)) || 2040;
+  const inductedYear =
+    entry.finalSeasonYear ?? 2026 + Math.max(0, entry.seasonsPlayed);
   const startYear = Math.max(2025, inductedYear - Math.max(1, entry.seasonsPlayed));
   const trophies: TrophyCabinetItem[] = [];
 
