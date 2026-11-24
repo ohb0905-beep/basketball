@@ -370,3 +370,210 @@ export async function insertAnalyticsEventToSupabase(
   }
 }
 
+export const MAX_ANALYTICS_ADMIN_SCAN_ROWS = 5_000;
+const ANALYTICS_ADMIN_PAGE_SIZE = 1_000;
+
+export interface QueryAnalyticsEventsResult {
+  rows: Array<{
+    id: string;
+    event_name: string;
+    anonymous_id: string;
+    session_id: string;
+    career_run_id: string | null;
+    game_version: string | null;
+    device_type: string | null;
+    payload: Record<string, unknown> | null;
+    created_at: string;
+  }>;
+  totalMatchingRows: number;
+  scanLimit: number;
+  availableVersions: string[];
+  tableNotReady: boolean;
+}
+
+/**
+ * 관리자 전용 analytics_events 기간/버전 필터 조회
+ * - PostgREST 기본 1,000행 상한을 고려해 최대 5,000행까지 페이지네이션으로 안전하게 스캔합니다.
+ * - analytics_events 테이블이 아직 생성되지 않은 경우(HTTP 404) 크래시 없이 빈 리포트 + tableNotReady를 반환합니다.
+ */
+export async function queryAnalyticsEventsFromSupabase(
+  params: {
+    sinceIso: string | null;
+    version: string;
+  },
+  env: NodeJS.ProcessEnv = process.env
+): Promise<
+  | { ok: true; data: QueryAnalyticsEventsResult }
+  | { ok: false; status: number; error: string }
+> {
+  const resolved = resolveSupabaseAdminConfig(env);
+  if (!resolved.ok) {
+    return { ok: false, status: 503, error: resolved.error };
+  }
+
+  let endpoint = '';
+  try {
+    const parsedOrigin = new URL(resolved.config.restBaseUrl).origin;
+    endpoint = `${parsedOrigin}/rest/v1/analytics_events`;
+  } catch {
+    return {
+      ok: false,
+      status: 503,
+      error: 'SUPABASE_URL 형식이 올바르지 않습니다.',
+    };
+  }
+
+  const { serviceRoleKey } = resolved.config;
+  const collected: QueryAnalyticsEventsResult['rows'] = [];
+  let totalMatchingRows = 0;
+
+  const maxPages = Math.ceil(
+    MAX_ANALYTICS_ADMIN_SCAN_ROWS / ANALYTICS_ADMIN_PAGE_SIZE
+  );
+
+  try {
+    for (let page = 0; page < maxPages; page += 1) {
+      const offset = page * ANALYTICS_ADMIN_PAGE_SIZE;
+      const queryUrl = new URL(endpoint);
+      queryUrl.searchParams.set(
+        'select',
+        'id,event_name,anonymous_id,session_id,career_run_id,game_version,device_type,payload,created_at'
+      );
+      queryUrl.searchParams.set('order', 'created_at.desc');
+      queryUrl.searchParams.set('limit', String(ANALYTICS_ADMIN_PAGE_SIZE));
+      queryUrl.searchParams.set('offset', String(offset));
+
+      if (params.sinceIso) {
+        queryUrl.searchParams.set('created_at', `gte.${params.sinceIso}`);
+      }
+      if (params.version && params.version !== 'all') {
+        queryUrl.searchParams.set('game_version', `eq.${params.version}`);
+      }
+
+      const res = await fetch(queryUrl.toString(), {
+        method: 'GET',
+        headers: buildSupabaseHeaders(
+          serviceRoleKey,
+          page === 0 ? { Prefer: 'count=exact' } : {}
+        ),
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        cache: 'no-store',
+      });
+
+      if (res.status === 404) {
+        return {
+          ok: true,
+          data: {
+            rows: [],
+            totalMatchingRows: 0,
+            scanLimit: MAX_ANALYTICS_ADMIN_SCAN_ROWS,
+            availableVersions: [],
+            tableNotReady: true,
+          },
+        };
+      }
+
+      if (!res.ok) {
+        console.error(
+          `[admin/analytics] Supabase query failed with HTTP ${res.status}`
+        );
+        return {
+          ok: false,
+          status: 502,
+          error: '플레이 통계 데이터를 불러오는 중 서버 오류가 발생했습니다.',
+        };
+      }
+
+      const pageRows = (await res.json()) as QueryAnalyticsEventsResult['rows'];
+      const safePageRows = Array.isArray(pageRows) ? pageRows : [];
+      collected.push(...safePageRows);
+
+      if (page === 0) {
+        totalMatchingRows = parseContentRangeTotal(
+          res.headers.get('content-range'),
+          safePageRows.length
+        );
+      }
+
+      if (
+        safePageRows.length < ANALYTICS_ADMIN_PAGE_SIZE ||
+        collected.length >= MAX_ANALYTICS_ADMIN_SCAN_ROWS
+      ) {
+        break;
+      }
+    }
+
+    const versionSet = new Set<string>();
+    for (const row of collected) {
+      if (typeof row.game_version === 'string' && row.game_version.trim()) {
+        versionSet.add(row.game_version.trim());
+      }
+    }
+
+    // 특정 버전 필터가 걸려 있을 때도 드롭다운에 전체 수집 버전을 유지하기 위해 경량 버전 목록 조회
+    if (params.version && params.version !== 'all') {
+      try {
+        const verUrl = new URL(endpoint);
+        verUrl.searchParams.set('select', 'game_version');
+        verUrl.searchParams.set('order', 'created_at.desc');
+        verUrl.searchParams.set('limit', '1000');
+        if (params.sinceIso) {
+          verUrl.searchParams.set('created_at', `gte.${params.sinceIso}`);
+        }
+        const verRes = await fetch(verUrl.toString(), {
+          method: 'GET',
+          headers: buildSupabaseHeaders(serviceRoleKey),
+          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+          cache: 'no-store',
+        });
+        if (verRes.ok) {
+          const verRows = (await verRes.json()) as Array<{
+            game_version?: string | null;
+          }>;
+          if (Array.isArray(verRows)) {
+            for (const item of verRows) {
+              if (
+                typeof item.game_version === 'string' &&
+                item.game_version.trim()
+              ) {
+                versionSet.add(item.game_version.trim());
+              }
+            }
+          }
+        }
+      } catch {
+        // 선택적 버전 목록 조회 실패는 대시보드 핵심 응답을 막지 않음
+      }
+      versionSet.add(params.version);
+    }
+
+    return {
+      ok: true,
+      data: {
+        rows: collected.slice(0, MAX_ANALYTICS_ADMIN_SCAN_ROWS),
+        totalMatchingRows: Math.max(totalMatchingRows, collected.length),
+        scanLimit: MAX_ANALYTICS_ADMIN_SCAN_ROWS,
+        availableVersions: Array.from(versionSet).sort((a, b) =>
+          b.localeCompare(a, undefined, { numeric: true })
+        ),
+        tableNotReady: false,
+      },
+    };
+  } catch (err) {
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === 'TimeoutError' || err.name === 'AbortError');
+    console.error(
+      `[admin/analytics] Supabase query request failed (${isTimeout ? 'timeout' : 'network'})`
+    );
+    return {
+      ok: false,
+      status: 502,
+      error: isTimeout
+        ? '통계 데이터베이스 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.'
+        : '통계 데이터베이스 연결 중 오류가 발생했습니다.',
+    };
+  }
+}
+
+

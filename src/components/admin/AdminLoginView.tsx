@@ -7,9 +7,15 @@ import { GAME_NAME, GAME_VERSION } from '../../config/appMeta';
 
 export interface AdminLoginViewProps {
   envConfigured: boolean;
+  title?: string;
+  description?: string;
 }
 
-export function AdminLoginView({ envConfigured }: AdminLoginViewProps) {
+export function AdminLoginView({
+  envConfigured,
+  title = '피드백 관리 로그인',
+  description = '서버 환경변수에 등록된 관리자 비밀번호로 인증해야 피드백 목록과 상세 정보를 조회할 수 있습니다.',
+}: AdminLoginViewProps) {
   const router = useRouter();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -76,11 +82,11 @@ export function AdminLoginView({ envConfigured }: AdminLoginViewProps) {
                 <Lock className="w-4 h-4" />
               </div>
               <h1 className="text-[22px] font-bold tracking-[-0.03em] text-[var(--t-g900)] leading-tight">
-                피드백 관리 로그인
+                {title}
               </h1>
             </div>
             <p className="text-[13px] text-[var(--t-g600)] leading-relaxed">
-              서버 환경변수에 등록된 관리자 비밀번호로 인증해야 피드백 목록과 상세 정보를 조회할 수 있습니다.
+              {description}
             </p>
           </div>
 

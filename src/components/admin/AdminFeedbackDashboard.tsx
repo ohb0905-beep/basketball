@@ -30,6 +30,7 @@ import {
   formatStoredGameContextRows,
 } from '../../lib/feedback';
 import { Modal } from '../common/Modal';
+import { AdminConsoleNav } from './AdminConsoleNav';
 
 const PAGE_SIZE = 25;
 
@@ -548,14 +549,19 @@ export function AdminFeedbackDashboard() {
 
       {/* 상단 관리자 헤더 */}
       <header className="sticky top-0 z-30 bg-[var(--t-bg)]/92 backdrop-blur-md border-b border-[var(--t-g200)]">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-baseline gap-2.5 min-w-0">
-            <h1 className="text-[18px] font-bold tracking-[-0.03em] text-[var(--t-g900)] whitespace-nowrap truncate">
-              피드백 관리
-            </h1>
-            <span className="hidden sm:inline text-[12px] font-medium text-[var(--t-g500)] whitespace-nowrap">
-              {GAME_NAME} · v{GAME_VERSION}
-            </span>
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-baseline gap-2 min-w-0">
+              <h1 className="text-[17px] sm:text-[18px] font-bold tracking-[-0.03em] text-[var(--t-g900)] whitespace-nowrap truncate">
+                {GAME_NAME} 관리자
+              </h1>
+              <span className="hidden md:inline text-[12px] font-medium text-[var(--t-g500)] whitespace-nowrap tabular-nums">
+                v{GAME_VERSION}
+              </span>
+            </div>
+            <div className="hidden sm:block">
+              <AdminConsoleNav active="feedback" />
+            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -583,6 +589,10 @@ export function AdminFeedbackDashboard() {
               )}
               <span>로그아웃</span>
             </button>
+          </div>
+
+          <div className="w-full sm:hidden pt-1">
+            <AdminConsoleNav active="feedback" />
           </div>
         </div>
       </header>
