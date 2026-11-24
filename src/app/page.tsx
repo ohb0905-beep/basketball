@@ -20,6 +20,7 @@ import { DraftCombine } from '../components/draft/DraftCombine';
 import { DraftLiveStage } from '../components/draft/DraftLiveStage';
 import { HeroSection } from '../components/home/HeroSection';
 import { RetirementCeremony } from '../components/retirement/RetirementCeremony';
+import { attachCareerAnalyticsTracker } from '../lib/analytics';
 import { useCareerStore } from '../store/useCareerStore';
 import { hasSeasonBottomDock } from '../utils/formatters';
 
@@ -51,6 +52,10 @@ export default function BenchToMvpApp() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [showSaveGuideModal, setShowSaveGuideModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
+  useEffect(() => {
+    return attachCareerAnalyticsTracker(useCareerStore);
+  }, []);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;

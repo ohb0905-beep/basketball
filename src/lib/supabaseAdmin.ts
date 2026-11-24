@@ -277,3 +277,96 @@ export async function updateFeedbackInSupabase(
     };
   }
 }
+
+const ANALYTICS_TABLE_MISSING_COOLDOWN_MS = 60_000;
+let analyticsTableMissingUntilMs = 0;
+
+export function __resetAnalyticsSupabaseCooldownForTest(): void {
+  analyticsTableMissingUntilMs = 0;
+}
+
+/**
+ * 익명 플레이 통계 이벤트를 Supabase analytics_events 테이블에 적재합니다.
+ * - 서버 전용 service_role 키만 사용합니다.
+ * - 환경변수 미설정 또는 테이블 마이그레이션 미적용(HTTP 404) 시에도
+ *   예외나 오류 로그 없이 무해하게(stored: false) 반환하며,
+ *   테이블 생성 후 최대 60초 이내에 자동으로 정상 적재를 재개합니다.
+ */
+export async function insertAnalyticsEventToSupabase(
+  event: {
+    event_name: string;
+    anonymous_id: string;
+    session_id: string;
+    career_run_id: string | null;
+    game_version: string | null;
+    device_type: string | null;
+    payload: Record<string, unknown>;
+  },
+  env: NodeJS.ProcessEnv = process.env
+): Promise<
+  | { ok: true; stored: true }
+  | {
+      ok: true;
+      stored: false;
+      reason: 'not_configured' | 'table_not_ready';
+    }
+  | { ok: false; status: number; error: string }
+> {
+  const resolved = resolveSupabaseAdminConfig(env);
+  if (!resolved.ok) {
+    return { ok: true, stored: false, reason: 'not_configured' };
+  }
+
+  const nowMs = Date.now();
+  if (nowMs < analyticsTableMissingUntilMs) {
+    return { ok: true, stored: false, reason: 'table_not_ready' };
+  }
+
+  let endpoint = '';
+  try {
+    const parsedOrigin = new URL(resolved.config.restBaseUrl).origin;
+    endpoint = `${parsedOrigin}/rest/v1/analytics_events`;
+  } catch {
+    return { ok: true, stored: false, reason: 'not_configured' };
+  }
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(resolved.config.serviceRoleKey, {
+        Prefer: 'return=minimal',
+      }),
+      body: JSON.stringify(event),
+      signal: AbortSignal.timeout(8_000),
+      cache: 'no-store',
+    });
+
+    if (res.status === 404) {
+      analyticsTableMissingUntilMs = Date.now() + ANALYTICS_TABLE_MISSING_COOLDOWN_MS;
+      return { ok: true, stored: false, reason: 'table_not_ready' };
+    }
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: 502,
+        error: '통계 저장 중 일시적인 서버 오류가 발생했습니다.',
+      };
+    }
+
+    analyticsTableMissingUntilMs = 0;
+    return { ok: true, stored: true };
+  } catch (err) {
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === 'TimeoutError' || err.name === 'AbortError');
+    return {
+      ok: false,
+      status: 502,
+      error: isTimeout
+        ? '통계 저장 응답이 지연되었습니다.'
+        : '통계 저장 서버 연결에 실패했습니다.',
+    };
+  }
+}
+
