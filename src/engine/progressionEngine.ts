@@ -176,3 +176,129 @@ export function getEffectiveStoryArcs(
     },
   };
 }
+
+export type NationalTeamRetirementTier =
+  | 'HONORABLE'
+  | 'RESPECTED'
+  | 'EARLY_CONTROVERSY';
+
+export interface NationalTeamRetirementOutcome {
+  tier: NationalTeamRetirementTier;
+  mediaFanDelta: number;
+  lockerRoomDelta: number;
+  reactionTitle: string;
+  reactionSummary: string;
+  milestoneDescription: string;
+  caps: number;
+  totalMedals: number;
+}
+
+/**
+ * 국가대표 은퇴 시점의 만 나이·A매치 경력·메달·국대 아크 완결 여부에 따라
+ * 여론(언론·팬심, 라커룸) 반응과 공식 기록 문구를 산출합니다.
+ */
+export function evaluateNationalTeamRetirement(
+  career: Pick<
+    CareerState,
+    | 'age'
+    | 'seasonYear'
+    | 'totals'
+    | 'storyArcs'
+    | 'militaryExempt'
+    | 'militaryServiceSeasonsLeft'
+  >
+): NationalTeamRetirementOutcome {
+  const caps = career.totals?.internationalCaps || 0;
+  const medals = career.totals?.internationalMedals || {
+    gold: 0,
+    silver: 0,
+    bronze: 0,
+  };
+  const totalMedals = medals.gold + medals.silver + medals.bronze;
+  const natArcCompleted = Boolean(career.storyArcs?.NATIONAL_TORCH_ARC?.completed);
+
+  const medalParts: string[] = [];
+  if (medals.gold > 0) medalParts.push(`금 ${medals.gold}`);
+  if (medals.silver > 0) medalParts.push(`은 ${medals.silver}`);
+  if (medals.bronze > 0) medalParts.push(`동 ${medals.bronze}`);
+  const careerRecordTag =
+    caps > 0
+      ? medalParts.length > 0
+        ? `A매치 ${caps}경기 (${medalParts.join(' · ')})`
+        : `A매치 ${caps}경기`
+      : 'A매치 미출전';
+
+  if (career.age >= 31 || totalMedals >= 1 || caps >= 12 || natArcCompleted) {
+    const reactionSummary =
+      totalMedals > 0
+        ? `${careerRecordTag}의 빛나는 헌신을 남긴 채 명예롭게 태극마크를 내려놓았습니다. 팬들과 언론이 뜨거운 박수로 배웅했습니다.`
+        : caps > 0
+        ? `만 ${career.age}세까지 ${careerRecordTag}를 소화하며 한국 농구에 헌신한 노고를 인정받아 박수 속에 대표팀에서 물러났습니다.`
+        : `만 ${career.age}세 베테랑으로서 소속팀 커리어 마무리에 집중하겠다는 결단을 내렸고, 팬들과 언론도 이를 존중했습니다.`;
+
+    return {
+      tier: 'HONORABLE',
+      mediaFanDelta: 6,
+      lockerRoomDelta: 3,
+      reactionTitle: '태극마크 헌정에 쏟아진 박수',
+      reactionSummary,
+      milestoneDescription: `만 ${career.age}세에 대한민국 국가대표 은퇴를 공식 선언했습니다. (${careerRecordTag}) ${reactionSummary}`,
+      caps,
+      totalMedals,
+    };
+  }
+
+  if (career.age >= 26 && caps >= 1) {
+    const reactionSummary = `만 ${career.age}세에 대표팀 은퇴를 선언하자 팬들 사이에서 아쉬움이 남았지만, ${careerRecordTag}의 헌신과 소속팀 집중 의지를 존중하는 분위기입니다.`;
+    return {
+      tier: 'RESPECTED',
+      mediaFanDelta: -2,
+      lockerRoomDelta: 1,
+      reactionTitle: '아쉬움 속 소속팀 집중 결정 존중',
+      reactionSummary,
+      milestoneDescription: `만 ${career.age}세에 대한민국 국가대표 은퇴를 공식 선언했습니다. (${careerRecordTag}) ${reactionSummary}`,
+      caps,
+      totalMedals,
+    };
+  }
+
+  const isUnexempt =
+    !career.militaryExempt && career.militaryServiceSeasonsLeft === 0;
+  const mediaFanDelta = isUnexempt ? -10 : -8;
+  const reactionSummary =
+    caps === 0
+      ? `공식 A매치 출전 없이 만 ${career.age}세에 국가대표 은퇴를 선언해 농구 팬들과 언론의 아쉬움과 논쟁이 이어졌습니다.`
+      : `만 ${career.age}세의 이른 나이에 대표팀 은퇴를 결정하자 팬들의 아쉬움이 커지며 여론이 일시적으로 차가워졌습니다.`;
+
+  return {
+    tier: 'EARLY_CONTROVERSY',
+    mediaFanDelta,
+    lockerRoomDelta: -2,
+    reactionTitle: '이른 국가대표 은퇴 선언에 여론 술렁',
+    reactionSummary,
+    milestoneDescription: `만 ${career.age}세에 대한민국 국가대표 은퇴를 공식 선언했습니다. (${careerRecordTag}) ${reactionSummary}`,
+    caps,
+    totalMedals,
+  };
+}
+
+/**
+ * 국가대표 국제대회 차출 또는 국가대표 세대교체 스토리 아크 이벤트인지 판별합니다.
+ */
+export function isNationalTeamEvent(
+  evt: { id?: string; arcId?: StoryArcId; choices?: { enterInternationalTournament?: string; enterAsianGamesTournament?: boolean }[] } | null | undefined
+): boolean {
+  if (!evt) return false;
+  if (evt.arcId === 'NATIONAL_TORCH_ARC') return true;
+  if (
+    evt.id === 'EVT_ASIAN_GAMES_GOLD' ||
+    (typeof evt.id === 'string' && evt.id.startsWith('EVT_INTL_'))
+  ) {
+    return true;
+  }
+  return Boolean(
+    evt.choices?.some(
+      (c) => Boolean(c.enterInternationalTournament) || Boolean(c.enterAsianGamesTournament)
+    )
+  );
+}

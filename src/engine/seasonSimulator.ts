@@ -1741,9 +1741,8 @@ export function checkPotentialBreakthrough(params: {
       return {
         nextPotential: currentPot + gain,
         breakthroughGain: gain,
-        reason: `프로 무대에서의 활약과 타이틀 수상을 발판으로 스카우팅 예상치를 뛰어넘어 잠재력 상한선이 ${
-          currentPot + gain
-        }(+${gain})로 상향되었습니다.`,
+        reason:
+          '프로 무대에서의 활약과 타이틀 수상을 발판으로 스카우팅 예상치를 뛰어넘어 성장 한계가 한 단계 상향되었습니다.',
       };
     }
   }
@@ -1758,9 +1757,8 @@ export function checkPotentialBreakthrough(params: {
       return {
         nextPotential: currentPot + gain,
         breakthroughGain: gain,
-        reason: `프로 시즌 내내 이어진 고효율 경기력으로 성장 한계를 넓히며 잠재력이 ${
-          currentPot + gain
-        }(+${gain})로 확장되었습니다.`,
+        reason:
+          '프로 시즌 내내 이어진 고효율 경기력으로 성장 한계를 넓히며 한 단계 더 도약할 잠재력을 깨웠습니다.',
       };
     }
   }

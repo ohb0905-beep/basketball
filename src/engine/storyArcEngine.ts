@@ -306,7 +306,7 @@ function buildCoachTacticsArcEvent(
         effectSummary:
           career.age >= 31
             ? 'OUT +2 · 언론·팬심 +8 · 프런트 -5'
-            : '잠재력 +1 · OUT +1 · 언론·팬심 +8 · 프런트 -5',
+            : '성장 한계 확장 · OUT +1 · 언론·팬심 +8 · 프런트 -5',
         riskTier: 'SAFE',
         statChanges: career.age >= 31 ? { out: 2 } : { out: 1 },
         ...(career.age >= 31 ? {} : { potentialDelta: 1 }),
@@ -978,7 +978,7 @@ function buildNationalTorchArcEvent(
         effectSummary:
           career.age >= 31
             ? '라커룸 +12 · 언론·팬심 +12 · 프런트 +6 · PLY +1, OUT +1 확정'
-            : '라커룸 +12 · 언론·팬심 +12 · 프런트 +6 · 잠재력 +1 확정',
+            : '라커룸 +12 · 언론·팬심 +12 · 프런트 +6 · 성장 한계 확장 확정',
         riskTier: 'SAFE',
         isExclusiveChoice: true,
         requirements: {
@@ -1091,6 +1091,7 @@ export function rollStoryArcEvent(
   }
 
   if (
+    !career.nationalTeamRetired &&
     canAdvance(arcs.NATIONAL_TORCH_ARC, 1) &&
     ((career.totals.internationalCaps || 0) >= 1 || career.ovr >= 75)
   ) {

@@ -435,11 +435,8 @@ export function CareerEventModal({
       ...(lastOutcome.potentialDelta !== 0
         ? [
             {
-              label: '잠재력',
-              value:
-                lastOutcome.potentialDelta > 0
-                  ? `+${lastOutcome.potentialDelta}`
-                  : String(lastOutcome.potentialDelta),
+              label: '성장 한계',
+              value: lastOutcome.potentialDelta > 0 ? '확장' : '하향',
               positive: lastOutcome.potentialDelta > 0,
             },
           ]

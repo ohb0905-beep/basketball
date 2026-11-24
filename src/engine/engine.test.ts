@@ -106,7 +106,9 @@ import {
 } from './retirementEngine';
 import {
   applyRelationshipDelta,
+  evaluateNationalTeamRetirement,
   getEffectiveRelationships,
+  isNationalTeamEvent,
   syncCareerRelationships,
 } from './progressionEngine';
 import {
@@ -7827,6 +7829,234 @@ test('66. 리그별 승률·플레이오프·라이브 결승·국제대회 정�
   );
   assert.ok(hsLiveFinal.subtitle.includes('단판 우승 결정전'));
 });
+
+test('67. 국가대표 영구 은퇴(여론 반응·차출/아크 차단) 및 잠재력 수치 비공개 정성화 검증', () => {
+  // 1) 나이·경력 기반 국가대표 은퇴 여론 반응 3단계 분기 검증
+  const medalistVet = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 32,
+    seasonYear: 2035,
+    militaryExempt: true,
+    totals: {
+      ...createBaseCareer().totals,
+      internationalCaps: 14,
+      internationalMedals: { gold: 1, silver: 0, bronze: 0 },
+    },
+  });
+  const honorable = evaluateNationalTeamRetirement(medalistVet);
+  assert.equal(honorable.tier, 'HONORABLE');
+  assert.ok(honorable.mediaFanDelta > 0);
+  assert.ok(honorable.lockerRoomDelta > 0);
+
+  const midCareerCapped = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    age: 28,
+    seasonYear: 2032,
+    militaryExempt: true,
+    totals: {
+      ...createBaseCareer().totals,
+      internationalCaps: 6,
+      internationalMedals: { gold: 0, silver: 0, bronze: 0 },
+    },
+  });
+  const respected = evaluateNationalTeamRetirement(midCareerCapped);
+  assert.equal(respected.tier, 'RESPECTED');
+  assert.equal(respected.mediaFanDelta, -2);
+  assert.equal(respected.lockerRoomDelta, 1);
+
+  const earlyUncappedUnexempt = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    age: 22,
+    seasonYear: 2029,
+    militaryExempt: false,
+    militaryServiceSeasonsLeft: 0,
+    totals: {
+      ...createBaseCareer().totals,
+      internationalCaps: 0,
+      internationalMedals: { gold: 0, silver: 0, bronze: 0 },
+    },
+  });
+  const controversy = evaluateNationalTeamRetirement(earlyUncappedUnexempt);
+  assert.equal(controversy.tier, 'EARLY_CONTROVERSY');
+  assert.equal(controversy.mediaFanDelta, -10);
+  assert.ok(controversy.lockerRoomDelta < 0);
+
+  // 2) 국가대표 은퇴 후 4대 국제대회 차출 및 병역 직전 마지막 특례 차출 완전 차단
+  const retiredAce = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    age: 25,
+    ovr: 82,
+    seasonYear: 2026,
+    militaryExempt: true,
+    nationalTeamRetired: true,
+    nationalTeamRetiredYear: 2026,
+    nationalTeamRetiredAge: 25,
+  });
+  const agQueue = rollSeasonEventQueue(retiredAce, () => 0.1, 2026);
+  assert.ok(
+    agQueue.every((evt) => !isNationalTeamEvent(evt)),
+    'Retired national team player must never receive international call-up in 2026 Asian Games'
+  );
+
+  const olympicQueue = rollSeasonEventQueue(
+    { ...retiredAce, seasonYear: 2028, age: 27 },
+    () => 0.1,
+    2028
+  );
+  assert.ok(
+    olympicQueue.every((evt) => !isNationalTeamEvent(evt)),
+    'Retired national team player must never receive international call-up in 2028 Olympics'
+  );
+
+  // 미필 만 27세 시점에 국가대표 은퇴 상태라면 특례 차출 대신 즉시 상무 입대 영장 발부
+  const unexemptRetiredAt27 = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    age: 27,
+    ovr: 80,
+    seasonYear: 2026,
+    militaryExempt: false,
+    militaryServiceSeasonsLeft: 0,
+    nationalTeamRetired: true,
+  });
+  const sangmuQueue = rollSeasonEventQueue(unexemptRetiredAt27, () => 0.1, 2026);
+  assert.equal(
+    sangmuQueue[0]?.id,
+    'EVT_SANGMU_ENLISTMENT',
+    'Unexempt player retired from national team must proceed straight to Sangmu enlistment'
+  );
+
+  // 3) 국가대표 은퇴 시 NATIONAL_TORCH_ARC 신규 단계 차단
+  const natArcCandidate = createBaseCareer({
+    league: 'KBL',
+    team: KBL_TEAMS[0],
+    age: 25,
+    ovr: 82,
+    seasonsPlayed: 4,
+    nationalTeamRetired: true,
+    storyArcs: {
+      COACH_TACTICS_ARC: {
+        id: 'COACH_TACTICS_ARC',
+        title: 't',
+        stage: 3,
+        maxStage: 3,
+        completed: true,
+        lastTriggeredYear: 2025,
+        summary: 'done',
+      },
+      RIVAL_DESTINY_ARC: {
+        id: 'RIVAL_DESTINY_ARC',
+        title: 't',
+        stage: 3,
+        maxStage: 3,
+        completed: true,
+        lastTriggeredYear: 2025,
+        summary: 'done',
+      },
+      BRAND_EMPIRE_ARC: {
+        id: 'BRAND_EMPIRE_ARC',
+        title: 't',
+        stage: 3,
+        maxStage: 3,
+        completed: true,
+        lastTriggeredYear: 2025,
+        summary: 'done',
+      },
+      NATIONAL_TORCH_ARC: {
+        id: 'NATIONAL_TORCH_ARC',
+        title: 't',
+        stage: 0,
+        maxStage: 3,
+        completed: false,
+        lastTriggeredYear: null,
+        summary: 'wait',
+      },
+    },
+  });
+  assert.equal(
+    rollStoryArcEvent(natArcCandidate, () => 0.05),
+    null,
+    'NATIONAL_TORCH_ARC must not roll after national team retirement'
+  );
+
+  // isNationalTeamEvent 판별 검증
+  assert.equal(
+    isNationalTeamEvent(createInternationalCallupEvent(medalistVet, 2028, 'OLYMPICS')),
+    true
+  );
+  assert.equal(
+    isNationalTeamEvent(buildStoryArcEventById(medalistVet, 'NATIONAL_TORCH_ARC', 1)),
+    true
+  );
+  assert.equal(isNationalTeamEvent(VETERAN_CRITICAL_INJURY_EVENT), false);
+
+  // 4) 잠재력 수치 비공개(정성화) 검증
+  const btCareer = createBaseCareer({
+    league: 'NBA',
+    team: NBA_TEAMS[0],
+    age: 24,
+    potential: 84,
+    potentialBreakthroughCount: 0,
+  });
+  const btRes = checkPotentialBreakthrough({
+    career: btCareer,
+    wonMip: true,
+    wonMvp: false,
+    wonDpoy: false,
+    wonSixthMan: false,
+    mpg: 34.0,
+    ppg: 24.0,
+    fgPct: 51.0,
+    nextCoachTrust: 82,
+    rng: () => 0.01,
+  });
+  assert.ok(btRes.breakthroughGain > 0 && btRes.reason !== null);
+  assert.ok(
+    !/\d|POT/.test(btRes.reason || ''),
+    `Breakthrough reason must not leak numeric potential, got: ${btRes.reason}`
+  );
+
+  const proCamps = getSpecialCampOptions(btCareer);
+  const legendCamp = proCamps.find((c) => c.id === 'LEGEND_SKILL_CAMP');
+  assert.ok(legendCamp && !legendCamp.effectText.includes('POT'));
+  const campApplied = applySpecialCampProgram(btCareer, 'LEGEND_SKILL_CAMP', () => 0.01);
+  assert.ok(
+    !campApplied.summary.includes('POT') && !/\(\+\d+\)/.test(campApplied.summary),
+    `Special camp summary must not leak numeric potential, got: ${campApplied.summary}`
+  );
+
+  const coachArcS3 = buildStoryArcEventById(btCareer, 'COACH_TACTICS_ARC', 3);
+  const natArcS3 = buildStoryArcEventById(btCareer, 'NATIONAL_TORCH_ARC', 3);
+  assert.ok(
+    coachArcS3.choices.every((c) => !c.effectSummary.includes('잠재력 +') && !c.effectSummary.includes('POT')),
+    'COACH_TACTICS_ARC S3 must not leak numeric potential delta'
+  );
+  assert.ok(
+    natArcS3.choices.every((c) => !c.effectSummary.includes('잠재력 +') && !c.effectSummary.includes('POT')),
+    'NATIONAL_TORCH_ARC S3 must not leak numeric potential delta'
+  );
+
+  const midEvt = rollMidSeasonCrossroadsEvent(
+    createBaseCareer({
+      league: 'NBA',
+      team: NBA_TEAMS[0],
+      role: '벤치 식스맨',
+      age: 22,
+    }),
+    () => 0.1
+  );
+  if (midEvt) {
+    assert.ok(
+      midEvt.choices.every((c) => !c.effectSummary.includes('POT')),
+      'Mid-season showcase event must not leak POT number'
+    );
+  }
+});
+
 
 
 

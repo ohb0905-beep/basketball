@@ -97,8 +97,12 @@ export function TrainingTab() {
   const switchPrimaryPosition = useCareerStore((s) => s.switchPrimaryPosition);
   const unlockSecondaryPosition = useCareerStore((s) => s.unlockSecondaryPosition);
   const runSpecialCamp = useCareerStore((s) => s.runSpecialCamp);
+  const declareNationalTeamRetirement = useCareerStore(
+    (s) => s.declareNationalTeamRetirement
+  );
 
   const [showPositionSheet, setShowPositionSheet] = useState(false);
+  const [showNatRetireModal, setShowNatRetireModal] = useState(false);
 
   if (!career) return null;
 
@@ -144,18 +148,13 @@ export function TrainingTab() {
     <div className="space-y-3">
       {/* 1. 6대 핵심 능력치 (1줄 슬림 바) */}
       <section className="t-card space-y-4">
-        <div className="flex items-baseline justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-              능력치
-            </h2>
-            <p className="text-[12px] text-[var(--t-g500)] mt-0.5 truncate">
-              {dnaInfo.label} · {agingPhase.label} · 누적 {careerMinutes.toLocaleString()}분
-            </p>
-          </div>
-          <span className="text-[12px] font-semibold text-[var(--t-g500)] tabular-nums shrink-0">
-            잠재력 {career.potential}
-          </span>
+        <div className="min-w-0">
+          <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
+            능력치
+          </h2>
+          <p className="text-[12px] text-[var(--t-g500)] mt-0.5 truncate">
+            {dnaInfo.label} · {agingPhase.label} · 누적 {careerMinutes.toLocaleString()}분
+          </p>
         </div>
 
         {(career.campAgingShield || agingPhase.phaseId === 'VETERAN_MANAGE' || agingPhase.phaseId === 'DECLINE') && (
@@ -231,13 +230,10 @@ export function TrainingTab() {
 
       {/* 1-B. 4축 관계도 & 멀티 시즌 스토리 아크 */}
       <section className="t-card space-y-4" data-testid="relationships-arcs-section">
-        <div className="flex items-baseline justify-between gap-2">
+        <div>
           <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
             관계도 · 커리어 서사
           </h2>
-          <span className="text-[12px] text-[var(--t-g500)]">
-            전용 분기 연동
-          </span>
         </div>
 
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -272,8 +268,14 @@ export function TrainingTab() {
 
         <div className="pt-3.5 border-t border-[var(--t-g100)] divide-y divide-[var(--t-g100)]">
           {arcList.map((arc) => {
+            const isNatRetiredArc =
+              arc.id === 'NATIONAL_TORCH_ARC' &&
+              Boolean(career.nationalTeamRetired) &&
+              !arc.completed;
             const statusText = arc.completed
               ? '완결'
+              : isNatRetiredArc
+              ? '은퇴 종료'
               : arc.stage > 0
               ? `${arc.stage}/${arc.maxStage}단계`
               : '대기';
@@ -287,6 +289,8 @@ export function TrainingTab() {
                     className={`text-[12px] font-bold tabular-nums shrink-0 ${
                       arc.completed
                         ? 'text-[var(--t-ok)]'
+                        : isNatRetiredArc
+                        ? 'text-[var(--t-g400)]'
                         : arc.stage > 0
                         ? 'text-[var(--t-accent-ink)]'
                         : 'text-[var(--t-g400)]'
@@ -519,6 +523,139 @@ export function TrainingTab() {
           <ChevronRight className="w-4 h-4 text-[var(--t-g400)]" />
         </button>
       </section>
+
+      {/* 5. 대한민국 국가대표 활동 관리 */}
+      {(() => {
+        const caps = career.totals.internationalCaps || 0;
+        const medals = career.totals.internationalMedals || {
+          gold: 0,
+          silver: 0,
+          bronze: 0,
+        };
+        const totalMedals = medals.gold + medals.silver + medals.bronze;
+        const isRetiredNat = Boolean(career.nationalTeamRetired);
+        const isUnexempt =
+          !career.militaryExempt && career.militaryServiceSeasonsLeft === 0;
+
+        return (
+          <>
+            <section
+              className="t-card space-y-3.5"
+              data-testid="national-team-section"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <h2 className="text-[17px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
+                  국가대표 활동
+                </h2>
+                <span
+                  data-testid="national-team-status"
+                  className={`text-[12px] font-semibold tabular-nums shrink-0 ${
+                    isRetiredNat ? 'text-[var(--t-g500)]' : 'text-[var(--t-accent-ink)]'
+                  }`}
+                >
+                  {isRetiredNat
+                    ? `${career.nationalTeamRetiredYear ?? career.seasonYear}년 · 만 ${
+                        career.nationalTeamRetiredAge ?? career.age
+                      }세 은퇴`
+                    : '소집 가능'}
+                </span>
+              </div>
+
+              <div className="divide-y divide-[var(--t-g100)] text-[13px]">
+                <div className="py-2 flex items-center justify-between gap-3">
+                  <span className="text-[var(--t-g600)]">대표팀 누적 기록</span>
+                  <span className="font-semibold text-[var(--t-g900)] tabular-nums text-right">
+                    {caps > 0
+                      ? `A매치 ${caps}G${
+                          totalMedals > 0
+                            ? ` · 금 ${medals.gold} · 은 ${medals.silver} · 동 ${medals.bronze}`
+                            : ''
+                        }`
+                      : '출전 이력 없음'}
+                  </span>
+                </div>
+              </div>
+
+              {isRetiredNat ? (
+                <div
+                  data-testid="national-team-retired-note"
+                  className="px-3.5 py-3 rounded-2xl bg-[var(--t-g100)] text-[12px] text-[var(--t-g700)] leading-relaxed"
+                >
+                  {career.nationalTeamRetirementNote ||
+                    '대한민국 국가대표팀에서 영구 은퇴했습니다. 향후 국제대회 차출과 대표팀 서사가 발생하지 않습니다.'}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <p className="text-[12px] text-[var(--t-g500)] leading-snug">
+                    대표팀에서 은퇴하면 이후 국제대회 차출 없이 소속팀 커리어에 집중합니다.
+                  </p>
+                  <button
+                    type="button"
+                    data-testid="open-national-team-retire-btn"
+                    onClick={() => setShowNatRetireModal(true)}
+                    className="min-h-[44px] px-4 rounded-xl bg-[var(--t-g100)] text-[var(--t-g800)] hover:bg-[var(--t-g200)] font-bold text-[13px] whitespace-nowrap shrink-0 cursor-pointer t-tap"
+                  >
+                    국가대표 은퇴
+                  </button>
+                </div>
+              )}
+            </section>
+
+            <Modal
+              open={showNatRetireModal}
+              title="국가대표 영구 은퇴 선언"
+              subtitle="대한민국 남자농구 국가대표팀"
+              onClose={() => setShowNatRetireModal(false)}
+            >
+              <div className="space-y-4">
+                <div className="space-y-2 text-[14px] text-[var(--t-g700)] leading-relaxed">
+                  <p>
+                    국가대표 은퇴를 확정하면 이후 커리어 동안{' '}
+                    <strong className="font-bold text-[var(--t-g900)]">
+                      번복하거나 복귀할 수 없습니다.
+                    </strong>
+                  </p>
+                  <p className="text-[13px] text-[var(--t-g600)]">
+                    아시안게임·아시아컵·월드컵·올림픽 차출과 국가대표 스토리 아크가 영구 중단되며,
+                    현재 나이(만 {career.age}세)와 대표팀 경력에 따른 여론 반응 및 공식 연대기 기록이 남습니다.
+                  </p>
+                </div>
+
+                {isUnexempt && (
+                  <div
+                    data-testid="national-team-retire-military-warning"
+                    className="px-3.5 py-3 rounded-2xl bg-[var(--t-g100)] text-[12px] text-[var(--t-up)] font-semibold leading-relaxed"
+                  >
+                    주의: 현재 병역 미필 상태입니다. 국가대표에서 은퇴하면 아시안게임·올림픽 메달을 통한
+                    병역특례 도전 기회가 영구 상실됩니다.
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowNatRetireModal(false)}
+                    className="min-h-[48px] flex-1 px-4 rounded-2xl bg-[var(--t-g100)] text-[var(--t-g800)] font-bold text-[14px] whitespace-nowrap cursor-pointer t-tap"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="confirm-national-team-retire-btn"
+                    onClick={() => {
+                      declareNationalTeamRetirement();
+                      setShowNatRetireModal(false);
+                    }}
+                    className="min-h-[48px] flex-1 px-4 rounded-2xl bg-[var(--t-up)] text-white font-bold text-[14px] whitespace-nowrap cursor-pointer t-tap"
+                  >
+                    영구 은퇴 확정
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          </>
+        );
+      })()}
 
       <Modal
         open={showPositionSheet}

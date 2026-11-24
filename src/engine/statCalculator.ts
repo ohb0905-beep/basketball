@@ -605,7 +605,7 @@ export function getSpecialCampOptions(career: CareerState): {
       subtitle:
         '은퇴 올스타 출신 트레이너와 비공개 워크아웃을 진행해 주력 기술을 다듬고 잠재력 확장을 노립니다.',
       costUsd: baseUnit,
-      effectText: '중점 능력치 +2~3 · 프로 잠재력(POT) +1 기회 · 스카우트 평가 +4',
+      effectText: '중점 능력치 +2~3 · 프로 성장 한계 확장 기회 · 스카우트 평가 +4',
       isVeteranMode: false,
     },
     {
@@ -784,7 +784,7 @@ export function applySpecialCampProgram(
     nextPotential = Math.min(97, career.potential + potGain);
     summary =
       potGain > 0
-        ? `베테랑 스킬 워크아웃 수료: 핵심 능력치 상승 및 잠재력 상한이 ${nextPotential}(+${potGain})로 확장되었습니다.`
+        ? '베테랑 스킬 워크아웃 수료: 핵심 능력치 상승과 함께 성장 한계가 한 단계 확장되었습니다.'
         : '베테랑 스킬 워크아웃 수료: 중점 기술 완성도가 한 단계 올라갔습니다.';
   } else if (campType === 'BULK_UP') {
     const rebal = applyCappedBodyRebalance(

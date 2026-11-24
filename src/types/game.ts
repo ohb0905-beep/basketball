@@ -1123,6 +1123,10 @@ export interface CareerState {
   seasonLogs: SeasonBoxScore[];
   milestones: CareerMilestone[];
   internationalHistory?: InternationalTournamentRecord[];
+  nationalTeamRetired?: boolean;
+  nationalTeamRetiredYear?: number | null;
+  nationalTeamRetiredAge?: number | null;
+  nationalTeamRetirementNote?: string | null;
   lastInternationalSummary?: InternationalTournamentRecord | null;
   careerHighs: CareerHighs;
   totals: {

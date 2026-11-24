@@ -147,7 +147,8 @@ export function HistoryTab() {
       </section>
 
       {/* 1.5 국가대표 국제대회 이력 */}
-      {career.internationalHistory && career.internationalHistory.length > 0 && (
+      {((career.internationalHistory && career.internationalHistory.length > 0) ||
+        career.nationalTeamRetired) && (
         <section
           data-testid="international-history-section"
           className="t-card space-y-3"
@@ -157,47 +158,57 @@ export function HistoryTab() {
               국가대표 국제대회 기록
             </h2>
             <span className="text-[12px] font-semibold text-[var(--t-g500)] tabular-nums">
+              {career.nationalTeamRetired
+                ? `${career.nationalTeamRetiredYear ?? career.seasonYear}년 은퇴 · `
+                : ''}
               A매치 {totals.internationalCaps || 0}G · 금 {totals.internationalMedals?.gold || 0} · 은{' '}
               {totals.internationalMedals?.silver || 0} · 동{' '}
               {totals.internationalMedals?.bronze || 0}
             </span>
           </div>
 
-          <div className="divide-y divide-[var(--t-g100)]">
-            {career.internationalHistory.map((rec) => {
-              const isGold = rec.result === 'GOLD';
-              const isMedal =
-                rec.result === 'GOLD' ||
-                rec.result === 'SILVER' ||
-                rec.result === 'BRONZE';
-              return (
-                <div key={rec.id} className="py-2.5 first:pt-0 last:pb-0 space-y-0.5">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-[14px] font-bold text-[var(--t-g900)] truncate">
-                      {rec.year} {rec.tournamentName}
-                    </span>
-                    <span
-                      className={`text-[13px] font-bold shrink-0 ${
-                        isGold
-                          ? 'text-[var(--t-gold)]'
-                          : isMedal
-                          ? 'text-[var(--t-accent-ink)]'
-                          : 'text-[var(--t-g500)]'
-                      }`}
-                    >
-                      {getIntlResultLabel(rec.result)}
-                      {rec.wonMvp ? ' · MVP' : ''}
-                    </span>
+          {career.internationalHistory && career.internationalHistory.length > 0 ? (
+            <div className="divide-y divide-[var(--t-g100)]">
+              {career.internationalHistory.map((rec) => {
+                const isGold = rec.result === 'GOLD';
+                const isMedal =
+                  rec.result === 'GOLD' ||
+                  rec.result === 'SILVER' ||
+                  rec.result === 'BRONZE';
+                return (
+                  <div key={rec.id} className="py-2.5 first:pt-0 last:pb-0 space-y-0.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[14px] font-bold text-[var(--t-g900)] truncate">
+                        {rec.year} {rec.tournamentName}
+                      </span>
+                      <span
+                        className={`text-[13px] font-bold shrink-0 ${
+                          isGold
+                            ? 'text-[var(--t-gold)]'
+                            : isMedal
+                            ? 'text-[var(--t-accent-ink)]'
+                            : 'text-[var(--t-g500)]'
+                        }`}
+                      >
+                        {getIntlResultLabel(rec.result)}
+                        {rec.wonMvp ? ' · MVP' : ''}
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-[var(--t-g500)] tabular-nums">
+                      평균 {rec.avgPts.toFixed(1)}점 · {rec.avgReb.toFixed(1)}리바 ·{' '}
+                      {rec.avgAst.toFixed(1)}도움 ({rec.matches.length}경기)
+                      {rec.grantedMilitaryExemption ? ' · 병역 특례' : ''}
+                    </p>
                   </div>
-                  <p className="text-[12px] text-[var(--t-g500)] tabular-nums">
-                    평균 {rec.avgPts.toFixed(1)}점 · {rec.avgReb.toFixed(1)}리바 ·{' '}
-                    {rec.avgAst.toFixed(1)}도움 ({rec.matches.length}경기)
-                    {rec.grantedMilitaryExemption ? ' · 병역 특례' : ''}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-[13px] text-[var(--t-g500)] leading-relaxed">
+              {career.nationalTeamRetirementNote ||
+                `만 ${career.nationalTeamRetiredAge ?? career.age}세에 국가대표 은퇴를 선언했습니다.`}
+            </p>
+          )}
         </section>
       )}
 

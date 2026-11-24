@@ -60,8 +60,10 @@ import {
   applyRelationshipDelta,
   createInitialRelationships,
   createInitialStoryArcs,
+  evaluateNationalTeamRetirement,
   getEffectiveRelationships,
   getEffectiveStoryArcs,
+  isNationalTeamEvent,
   syncCareerRelationships,
 } from '../engine/progressionEngine';
 import { checkEncounterChoiceUnlock } from '../engine/storyArcEngine';
@@ -102,6 +104,7 @@ import {
 import {
   CareerEvent,
   CareerEventChoice,
+  CareerMilestone,
   CareerState,
   ClutchChoiceId,
   ContractType,
@@ -850,6 +853,7 @@ interface CareerStoreState {
   purchasePersonalCare: (careId: PersonalCareId) => void;
   reapplyLastPersonalCare: () => void;
   requestTrade: () => void;
+  declareNationalTeamRetirement: () => void;
   triggerMidSeasonCrossroads: () => void;
 
   playSeason: () => void;
@@ -1158,6 +1162,10 @@ export const useCareerStore = create<CareerStoreState>()(
           previousTeamBeforeMilitary: null,
           isFarewellTour: false,
           farewellTourCompleted: false,
+          nationalTeamRetired: false,
+          nationalTeamRetiredYear: null,
+          nationalTeamRetiredAge: null,
+          nationalTeamRetirementNote: null,
           isOutOfLeagueWarning: false,
           agentAdviceShown: false,
           midSeasonEventTriggeredThisYear: false,
@@ -2022,7 +2030,7 @@ export const useCareerStore = create<CareerStoreState>()(
             id: `MS_BREAKTHROUGH_${bs.year}`,
             year: bs.year,
             age: bs.age,
-            title: `잠재력 한계 돌파 (POT ${career.potential} → ${sim.nextPotential})`,
+            title: '성장 한계 돌파',
             description: sim.potentialBreakthroughReason,
             type: 'SPECIAL',
             teamName: bs.teamName,
@@ -4199,6 +4207,107 @@ export const useCareerStore = create<CareerStoreState>()(
             description:
               '경신했던 모든 리그 역대 기록이 초기 기준 기록으로 복원되었습니다.',
             tone: 'emerald',
+          },
+        });
+      },
+
+      declareNationalTeamRetirement: () => {
+        const career = get().career;
+        if (!career || career.retirementReason || career.nationalTeamRetired) {
+          return;
+        }
+
+        const evalRes = evaluateNationalTeamRetirement(career);
+        const syncedRel = syncCareerRelationships(career, {
+          mediaFan: evalRes.mediaFanDelta,
+          lockerRoom: evalRes.lockerRoomDelta,
+        });
+
+        const currentArcs = getEffectiveStoryArcs(career);
+        const natArc = currentArcs.NATIONAL_TORCH_ARC;
+        const nextStoryArcs = natArc.completed
+          ? currentArcs
+          : {
+              ...currentArcs,
+              NATIONAL_TORCH_ARC: {
+                ...natArc,
+                summary: `국가대표 은퇴 선언(${career.seasonYear}년 · 만 ${career.age}세)으로 대표팀 세대교체 서사가 마무리되었습니다.`,
+              },
+            };
+
+        const retirementMilestone: CareerMilestone = {
+          id: `MS_NAT_RETIRE_${career.seasonYear}_${career.age}`,
+          year: career.seasonYear,
+          age: career.age,
+          title: '대한민국 국가대표 은퇴 선언',
+          description: evalRes.milestoneDescription,
+          type: 'SPECIAL',
+          teamName: '대한민국 국가대표팀',
+        };
+
+        const filteredQueue = (career.pendingEventQueue || []).filter(
+          (evt) => !isNationalTeamEvent(evt)
+        );
+        const pendingWasNat = isNationalTeamEvent(career.pendingEvent);
+        const filteredPendingChain = isNationalTeamEvent(career.pendingChainEvent)
+          ? null
+          : career.pendingChainEvent ?? null;
+
+        let nextCareer: CareerState = {
+          ...career,
+          nationalTeamRetired: true,
+          nationalTeamRetiredYear: career.seasonYear,
+          nationalTeamRetiredAge: career.age,
+          nationalTeamRetirementNote: evalRes.reactionSummary,
+          relationships: syncedRel.relationships,
+          coachTrust: syncedRel.coachTrust,
+          storyArcs: nextStoryArcs,
+          milestones: [...career.milestones, retirementMilestone],
+          pendingEvent: pendingWasNat ? null : career.pendingEvent,
+          pendingEventQueue: filteredQueue,
+          pendingChainEvent: filteredPendingChain,
+        };
+
+        if (pendingWasNat) {
+          nextCareer = dequeueNextPendingEvent(nextCareer);
+        }
+
+        const tone: ToastMessage['tone'] =
+          evalRes.tier === 'HONORABLE'
+            ? 'emerald'
+            : evalRes.tier === 'RESPECTED'
+            ? 'amber'
+            : 'rose';
+
+        const deltaParts: string[] = [];
+        if (evalRes.mediaFanDelta !== 0) {
+          deltaParts.push(
+            `언론·팬 평판 ${
+              evalRes.mediaFanDelta > 0
+                ? `+${evalRes.mediaFanDelta}`
+                : evalRes.mediaFanDelta
+            }`
+          );
+        }
+        if (evalRes.lockerRoomDelta !== 0) {
+          deltaParts.push(
+            `라커룸 ${
+              evalRes.lockerRoomDelta > 0
+                ? `+${evalRes.lockerRoomDelta}`
+                : evalRes.lockerRoomDelta
+            }`
+          );
+        }
+
+        set({
+          career: nextCareer,
+          toast: {
+            id: `TOAST_${Date.now()}`,
+            title: evalRes.reactionTitle,
+            description: `${evalRes.reactionSummary}${
+              deltaParts.length > 0 ? ` (${deltaParts.join(' · ')})` : ''
+            }`,
+            tone,
           },
         });
       },

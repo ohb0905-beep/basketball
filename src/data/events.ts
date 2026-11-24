@@ -391,7 +391,7 @@ export function rollMidSeasonCrossroadsEvent(
           description: '과감한 1대1 돌파와 외곽슛으로 공격 재능을 증명합니다.',
           riskTier: 'HIGH_RISK',
           effectSummary: isPro
-            ? '성공 시 INS +2, OUT +1, POT +1, 주가 +8 · 실패 시 신뢰도 -6, 주가 -3'
+            ? '성공 시 INS +2, OUT +1, 성장 한계 확장, 주가 +8 · 실패 시 신뢰도 -6, 주가 -3'
             : '성공 시 INS +2, OUT +1, 주가 +8 · 실패 시 신뢰도 -6, 주가 -3',
           successCheck: {
             statKey: 'ins',
@@ -656,6 +656,7 @@ export function rollSeasonEventQueue(
       completedSeasonYear !== undefined ? career.age - 1 : career.age;
     const isExemptionTournament = tourneyCfg.militaryExemptionMinMedal !== null;
     const eligibleForLastChanceExemption =
+      !career.nationalTeamRetired &&
       completedSeasonAge <= exemptionMaxAge &&
       isExemptionTournament &&
       !alreadyPlayedThisTournament &&
@@ -698,6 +699,7 @@ export function rollSeasonEventQueue(
 
   // 4) 4년 주기 국제대회 국가대표 차출 (Slot A) + 서사 이벤트 동시 큐 적재 (Slot B)
   if (
+    !career.nationalTeamRetired &&
     !alreadyPlayedThisTournament &&
     career.militaryServiceSeasonsLeft === 0 &&
     career.age >= 19 &&
