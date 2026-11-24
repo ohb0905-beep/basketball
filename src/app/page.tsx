@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { BookMarked, Calendar, SlidersHorizontal } from 'lucide-react';
 import { FeedbackModal } from '../components/common/FeedbackModal';
+import { Footer } from '../components/common/Footer';
 import { Header } from '../components/common/Header';
 import {
   CareerEventModal,
@@ -126,14 +127,8 @@ export default function BenchToMvpApp() {
 
         {view === 'DASHBOARD' && career && (
           <div
-            className={`mx-auto px-4 pt-2 space-y-3 transition-[max-width] duration-200 ${
+            className={`mx-auto px-4 pt-2 pb-4 space-y-3 transition-[max-width] duration-200 ${
               isWideDashboard ? 'max-w-[760px]' : 'max-w-[560px]'
-            } ${
-              hasSeasonDock
-                ? 'pb-[156px]'
-                : showBottomTabBar
-                ? 'pb-[88px]'
-                : 'pb-10'
             }`}
           >
             {!isLiveBroadcast && <PlayerHeader career={career} />}
@@ -156,6 +151,14 @@ export default function BenchToMvpApp() {
 
         {view === 'RETIREMENT' && <RetirementCeremony />}
       </main>
+
+      <Footer
+        wide={isWideHeader}
+        bottomSpacing={
+          hasSeasonDock ? 'dock' : showBottomTabBar ? 'tabbar' : 'default'
+        }
+        onRequestFeedbackModal={() => setShowFeedbackModal(true)}
+      />
 
       {/* 고정 하단 탭바 (토스형 모바일 앱 내비게이션) */}
       {showBottomTabBar && (
