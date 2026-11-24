@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { BookOpen, Moon, RotateCcw, Sun } from 'lucide-react';
+import { BookOpen, MessageSquare, Moon, RotateCcw, Sun } from 'lucide-react';
 import { generateLeagueFallbackSvgDataUri } from '../../data/logoFallbacks';
 import {
   ALL_INTERNATIONAL_TEAMS,
@@ -16,6 +16,7 @@ import { useCareerStore } from '../../store/useCareerStore';
 interface HeaderProps {
   onRequestResetModal?: () => void;
   onRequestSaveGuideModal?: () => void;
+  onRequestFeedbackModal?: () => void;
   wide?: boolean;
 }
 
@@ -25,6 +26,7 @@ const CLIENT_LOGO_CACHE_TTL = 60 * 60 * 1000;
 export function Header({
   onRequestResetModal,
   onRequestSaveGuideModal,
+  onRequestFeedbackModal,
   wide = false,
 }: HeaderProps = {}) {
   const {
@@ -191,6 +193,22 @@ export function Header({
               aria-label="저장 및 가이드"
             >
               <BookOpen className="w-[18px] h-[18px]" />
+            </button>
+          )}
+
+          {onRequestFeedbackModal && (
+            <button
+              type="button"
+              data-testid="open-feedback-btn"
+              onClick={onRequestFeedbackModal}
+              className="min-h-[44px] min-w-[44px] sm:px-2.5 flex items-center justify-center gap-1.5 rounded-xl text-[var(--t-g600)] hover:bg-[var(--t-g200)]/60 cursor-pointer t-tap shrink-0"
+              title="피드백"
+              aria-label="피드백"
+            >
+              <MessageSquare className="w-[18px] h-[18px] shrink-0" />
+              <span className="hidden sm:inline text-[13px] font-semibold whitespace-nowrap">
+                피드백
+              </span>
             </button>
           )}
 

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { BookMarked, Calendar, SlidersHorizontal } from 'lucide-react';
+import { FeedbackModal } from '../components/common/FeedbackModal';
 import { Header } from '../components/common/Header';
 import {
   CareerEventModal,
@@ -48,6 +49,7 @@ export default function BenchToMvpApp() {
   const [activeTab, setActiveTab] = useState<'SEASON' | 'TRAINING' | 'HISTORY'>('SEASON');
   const [showResetModal, setShowResetModal] = useState(false);
   const [showSaveGuideModal, setShowSaveGuideModal] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -105,6 +107,7 @@ export default function BenchToMvpApp() {
         wide={isWideHeader}
         onRequestResetModal={() => setShowResetModal(true)}
         onRequestSaveGuideModal={() => setShowSaveGuideModal(true)}
+        onRequestFeedbackModal={() => setShowFeedbackModal(true)}
       />
 
       <main className="flex-1 w-full">
@@ -221,6 +224,13 @@ export default function BenchToMvpApp() {
       <SaveAndGuideModal
         open={showSaveGuideModal}
         onClose={() => setShowSaveGuideModal(false)}
+      />
+
+      {/* 버그 제보 · 피드백 바텀시트 */}
+      <FeedbackModal
+        open={showFeedbackModal}
+        activeTab={activeTab}
+        onClose={() => setShowFeedbackModal(false)}
       />
 
       <ToastBanner />
