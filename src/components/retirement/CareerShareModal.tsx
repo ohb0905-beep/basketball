@@ -59,14 +59,28 @@ export function CareerShareModal({ open, retro, legacyEmoji, isReplay, onClose }
 
   const teamIds = data.stints.map((s) => s.teamId);
   const anyFailed = teamIds.some((id) => logoSrcs[id] === null || logoStatus[id] === 'fail');
-  const allLoaded = teamIds.every((id) => logoStatus[id] === 'ok');
-  const state: 'loading-logos' | 'ready' | 'logo-failed' | 'capturing' = capturing
+  const logosReady = !anyFailed && teamIds.every((id) => logoStatus[id] === 'ok');
+
+  // 아이폰 사파리는 버튼을 누른 직후에만 공유 창을 열어 주므로,
+  // 로고가 모두 나오면 이미지를 미리 만들어 두고 버튼은 그 이미지가 생긴 뒤에 켭니다.
+  // 저장·공유를 해도 카드 내용은 그대로이므로 만든 이미지를 버리지 않습니다.
+  // 다시 시도(retryToken)마다 새로 만들므로, 어느 시도의 결과인지 함께 저장합니다.
+  const [prepared, setPrepared] = useState<{ token: number; blob: Blob | null; failed: boolean } | null>(
+    null
+  );
+  const current = prepared && prepared.token === retryToken ? prepared : null;
+  const preparedBlob = current?.blob ?? null;
+  const prepareFailed = current?.failed ?? false;
+
+  const state: 'loading-logos' | 'preparing' | 'ready' | 'logo-failed' | 'capturing' = capturing
     ? 'capturing'
     : anyFailed
     ? 'logo-failed'
-    : allLoaded
-    ? 'ready'
-    : 'loading-logos';
+    : !logosReady
+    ? 'loading-logos'
+    : !preparedBlob && !prepareFailed
+    ? 'preparing'
+    : 'ready';
 
   const handleLogoStatus = useCallback((teamId: string, ok: boolean) => {
     setLogoStatus((prev) => ({ ...prev, [teamId]: ok ? 'ok' : 'fail' }));
@@ -89,29 +103,30 @@ export function CareerShareModal({ open, retro, legacyEmoji, isReplay, onClose }
     return () => observer.disconnect();
   }, [open]);
 
-  // 아이폰 사파리는 버튼을 누른 직후에만 공유 창을 열어 주므로,
-  // 로고가 모두 나오면 이미지를 미리 만들어 두고 버튼을 누르면 바로 씁니다.
-  const readyBlobRef = useRef<Blob | null>(null);
-  const isReady = state === 'ready';
   useEffect(() => {
-    readyBlobRef.current = null;
-    if (!open || !isReady || !cardRef.current) return;
+    if (!open || !logosReady || !cardRef.current) return;
     let cancelled = false;
+    const token = retryToken;
     renderCardToPngBlob(cardRef.current)
       .then((blob) => {
-        if (!cancelled) readyBlobRef.current = blob;
+        if (!cancelled) setPrepared({ token, blob, failed: false });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        // 미리 만들기에 실패하면 버튼을 켜고, 누를 때 다시 만들어 봅니다.
+        if (!cancelled) setPrepared({ token, blob: null, failed: true });
+      });
     return () => {
       cancelled = true;
     };
-  }, [open, isReady, data, retryToken]);
+  }, [open, logosReady, data, retryToken]);
 
   const capture = async (): Promise<Blob | null> => {
-    if (readyBlobRef.current) return readyBlobRef.current;
+    if (preparedBlob) return preparedBlob;
     if (!cardRef.current) return null;
     try {
-      return await renderCardToPngBlob(cardRef.current);
+      const blob = await renderCardToPngBlob(cardRef.current);
+      setPrepared({ token: retryToken, blob, failed: false });
+      return blob;
     } catch {
       showToast('이미지를 만들지 못했어요', '잠시 후 다시 시도해 주세요', 'rose');
       return null;
@@ -230,7 +245,7 @@ export function CareerShareModal({ open, retro, legacyEmoji, isReplay, onClose }
             disabled={locked}
             className="t-cta-sub inline-flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            {state === 'capturing' || state === 'loading-logos' ? (
+            {state === 'capturing' || state === 'loading-logos' || state === 'preparing' ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <Download className="w-4 h-4" />
