@@ -6,6 +6,7 @@ import {
   EUROLEAGUE_TEAMS,
   GLEAGUE_TEAMS,
   HIGH_SCHOOL_TEAMS,
+  US_HIGH_SCHOOL_TEAMS,
   KBL_TEAMS,
   NBA_TEAMS,
   NBL_TEAMS,
@@ -105,6 +106,7 @@ export async function GET(request: NextRequest) {
 
   const allRegisteredTeams: TeamInfo[] = [
     ...HIGH_SCHOOL_TEAMS,
+    ...US_HIGH_SCHOOL_TEAMS,
     ...U_LEAGUE_TEAMS,
     ...KBL_TEAMS,
     SANGMU_TEAM,

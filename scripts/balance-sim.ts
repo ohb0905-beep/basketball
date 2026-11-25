@@ -148,6 +148,7 @@ for (let run = 0; run < CAREERS; run++) {
     heightCm: HEIGHT[pos],
     primaryPos: pos,
     highSchoolTeamId: 'HS_SAMIL',
+    nationality: 'KOR',
   });
   const initCareer: any = S().career!;
   const initPotential: number = initCareer.potential;

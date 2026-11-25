@@ -2,6 +2,7 @@
 
 import { GAME_VERSION } from '../config/appMeta';
 import { detectDisplayMode } from './pwa';
+import { getCareerNationality } from '../data/nationalities';
 import type {
   CareerState,
   HallOfFameEntry,
@@ -37,6 +38,7 @@ const MAX_PERSISTENT_DEDUPE_KEYS = 200;
 
 const LEAGUE_TIER_RANK: Record<LeagueId, number> = {
   HIGH_SCHOOL: 1,
+  US_HIGH_SCHOOL: 1,
   U_LEAGUE: 2,
   NCAA: 3,
   KBL: 4,
@@ -615,6 +617,7 @@ export function emitCareerStateTransitionEvents(
         heightCm: nextCareer.heightCm,
         startingLeague: nextCareer.league,
         startingTeamId: nextCareer.team.id,
+        nationality: getCareerNationality(nextCareer),
         startingAge: nextCareer.age,
         growthDna: nextCareer.growthDna ?? null,
         playstyle: nextCareer.playstyle ?? null,

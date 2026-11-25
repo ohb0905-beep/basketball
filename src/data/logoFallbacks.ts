@@ -66,7 +66,7 @@ export function generateLeagueFallbackSvgDataUri(team: TeamInfo): string {
       <text x="90" y="64" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="38" font-weight="900" letter-spacing="3">${code}</text>
       <text x="90" y="106" text-anchor="middle" fill="#0F172A" font-family="sans-serif" font-size="13" font-weight="800" letter-spacing="1.5">NATIONAL TEAM</text>
     </svg>`;
-  } else if (league === 'HIGH_SCHOOL') {
+  } else if (league === 'HIGH_SCHOOL' || league === 'US_HIGH_SCHOOL') {
     // 고교 리그 규격: 전통 방패 교표 + 월계수 크레스트 + 상단 리본
     svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
       <defs>

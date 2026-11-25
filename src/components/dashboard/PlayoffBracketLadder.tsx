@@ -9,6 +9,7 @@ import {
   StandingEntry,
 } from '../../types/game';
 import { TeamEmblem } from '../common/TeamEmblem';
+import { isHighSchoolLeague } from '../../data/leagues';
 
 interface PlayoffBracketLadderProps {
   bracket: PlayoffBracketState;
@@ -372,7 +373,7 @@ export function PlayoffBracketLadder({
     (bracket.league === 'B_LEAGUE' ||
       bracket.league === 'EUROLEAGUE' ||
       bracket.league === 'U_LEAGUE' ||
-      bracket.league === 'HIGH_SCHOOL');
+      isHighSchoolLeague(bracket.league));
   const isSixTeam = !isPlayInStage && bracket.league === 'KBL';
 
   const finalsSeries =

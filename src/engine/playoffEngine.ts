@@ -23,7 +23,7 @@ import {
   getNationalTeamsForTournament,
   getTeamsByLeague,
 } from '../data/teams';
-import { LEAGUE_CONFIG } from '../data/leagues';
+import { isHighSchoolLeague, LEAGUE_CONFIG } from '../data/leagues';
 import {
   INTERNATIONAL_TOURNAMENT_CONFIG,
   LEAGUE_BALANCE_META,
@@ -96,7 +96,7 @@ export function getPlayoffCutoffByLeague(
   if (
     league === 'B_LEAGUE' ||
     league === 'U_LEAGUE' ||
-    league === 'HIGH_SCHOOL'
+    isHighSchoolLeague(league)
   ) {
     return Math.min(8, totalTeams);
   }
@@ -344,7 +344,7 @@ function getSeriesConfig(
           : 'NCAA 전국 결승전',
     };
   }
-  if (league === 'HIGH_SCHOOL' || league === 'U_LEAGUE') {
+  if (isHighSchoolLeague(league) || league === 'U_LEAGUE') {
     return {
       bestOf: 1,
       winsNeeded: 1,
@@ -1428,7 +1428,7 @@ function getEliminationLabel(
     if (roundNumber === 2) return 'NCAA 8강 탈락';
     return 'NCAA 4강(Final Four) 탈락';
   }
-  if (league === 'U_LEAGUE' || league === 'HIGH_SCHOOL') {
+  if (league === 'U_LEAGUE' || isHighSchoolLeague(league)) {
     if (roundNumber === totalRounds) return '전국 결승 준우승';
     return roundNumber === 1 ? '8강 토너먼트 탈락' : '4강 토너먼트 탈락';
   }

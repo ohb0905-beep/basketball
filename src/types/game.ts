@@ -1,5 +1,6 @@
 export type LeagueId =
   | 'HIGH_SCHOOL'
+  | 'US_HIGH_SCHOOL'
   | 'U_LEAGUE'
   | 'KBL'
   | 'B_LEAGUE'
@@ -10,6 +11,34 @@ export type LeagueId =
   | 'NBA';
 
 export type Position = 'PG' | 'SG' | 'SF' | 'PF' | 'C';
+
+/** 1.2.0: 고를 수 있는 선수 국적 (목록과 표시 이름은 src/data/nationalities.ts) */
+export type NationalityCode =
+  | 'KOR'
+  | 'USA'
+  | 'CAN'
+  | 'JPN'
+  | 'CHN'
+  | 'PHI'
+  | 'AUS'
+  | 'NZL'
+  | 'FRA'
+  | 'ESP'
+  | 'SRB'
+  | 'GRE'
+  | 'LTU'
+  | 'GER'
+  | 'SLO'
+  | 'TUR'
+  | 'ITA'
+  | 'CRO'
+  | 'ARG'
+  | 'BRA'
+  | 'NGA'
+  | 'CMR'
+  | 'SEN'
+  | 'DOM'
+  | 'PUR';
 
 export type ContractType =
   | 'AMATEUR'
@@ -1051,6 +1080,8 @@ export interface CombineState {
 export interface CareerState {
   id: string;
   name: string;
+  /** 1.2.0: 선수 국적 (예전 세이브는 'KOR'로 이어집니다) */
+  nationality: NationalityCode;
   jerseyNumber: string;
   heightCm: number;
   primaryPos: Position;

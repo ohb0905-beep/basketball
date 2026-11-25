@@ -1,5 +1,6 @@
 import { MILITARY_SERVICE_CONFIG } from '../config/balanceConfig';
 import { CareerState } from '../types/game';
+import { isHighSchoolLeague } from '../data/leagues';
 
 /**
  * 달러 금액 축약 포맷 (예: $12.5M, $450K, $800)
@@ -76,7 +77,13 @@ export function formatHeaderContractSummary(career: CareerState): string {
   if (career.militaryServiceSeasonsLeft > 0) {
     return `상무 · 잔여 ${career.militaryServiceSeasonsLeft}년`;
   }
-  if (career.league === 'HIGH_SCHOOL') {
+  if (career.league === 'US_HIGH_SCHOOL') {
+    // 미국 고교 4년제: 9학년(프레시맨) ~ 12학년(시니어)
+    if (career.contractYearsLeft <= 0) return '고교 졸업';
+    const grade = Math.min(12, Math.max(9, 13 - career.contractYearsLeft));
+    return `학생 · ${grade}학년`;
+  }
+  if (isHighSchoolLeague(career.league)) {
     if (career.contractYearsLeft <= 0) return '고교 졸업';
     const grade = Math.min(3, Math.max(1, 4 - career.contractYearsLeft));
     return `학생 · 고${grade}`;

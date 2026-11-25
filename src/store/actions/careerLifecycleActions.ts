@@ -4,10 +4,12 @@
  */
 import {
   ECONOMY_CONFIG,
+  US_HIGH_SCHOOL_DEVELOPMENT_CONFIG,
 } from '../../config/balanceConfig';
 import {
   ALL_TEAMS,
   HIGH_SCHOOL_TEAMS,
+  US_HIGH_SCHOOL_TEAMS,
 } from '../../data/teams';
 import {
   createInitialRelationships,
@@ -42,8 +44,14 @@ import {
 import {
   CareerMilestone,
   CareerState,
+  NationalityCode,
   TeamInfo,
 } from '../../types/game';
+import {
+  DEFAULT_NATIONALITY,
+  isKoreanNational,
+  isNationalityCode,
+} from '../../data/nationalities';
 import {
   dequeueNextPendingEvent,
 } from '../careerStoreHelpers';
@@ -67,10 +75,27 @@ export function createCareerLifecycleActions(
       heightCm,
       primaryPos,
       highSchoolTeamId,
+      nationality: requestedNationality,
     }) => {
+      const nationality: NationalityCode = isNationalityCode(requestedNationality)
+        ? requestedNationality
+        : DEFAULT_NATIONALITY;
+      // 병역 의무는 대한민국 국적에만 있습니다. 다른 국적은 처음부터 병역 대상이 아닙니다.
+      const isKorean = nationality === 'KOR';
+      // 1.2.0: 한국 고교와 미국 고교 중 고른 학교의 리그로 출발합니다.
+      // 한국 고교는 대한민국 국적만 입학할 수 있어, 외국 국적이 한국 고교를 고르면 미국 고교로 바꿉니다.
+      const selectableSchools = isKorean
+        ? [...HIGH_SCHOOL_TEAMS, ...US_HIGH_SCHOOL_TEAMS]
+        : US_HIGH_SCHOOL_TEAMS;
       const hsTeam: TeamInfo =
-        HIGH_SCHOOL_TEAMS.find((t) => t.id === highSchoolTeamId) ||
-        HIGH_SCHOOL_TEAMS[0];
+        selectableSchools.find((t) => t.id === highSchoolTeamId) ||
+        (isKorean ? HIGH_SCHOOL_TEAMS[0] : US_HIGH_SCHOOL_TEAMS[0]);
+      const startingLeague: 'HIGH_SCHOOL' | 'US_HIGH_SCHOOL' =
+        hsTeam.league === 'US_HIGH_SCHOOL' ? 'US_HIGH_SCHOOL' : 'HIGH_SCHOOL';
+      // 미국 고교는 4년제(만 15세 입학), 한국 고교는 3년제(만 16세 입학). 둘 다 만 19세에 졸업합니다.
+      const isUsHighSchoolStart = startingLeague === 'US_HIGH_SCHOOL';
+      const startAge = isUsHighSchoolStart ? US_HIGH_SCHOOL_DEVELOPMENT_CONFIG.startAge : 16;
+      const schoolYears = isUsHighSchoolStart ? US_HIGH_SCHOOL_DEVELOPMENT_CONFIG.schoolYears : 3;
 
       const trimmedNum = jerseyNumber.trim();
       const assignedJersey =
@@ -90,11 +115,19 @@ export function createCareerLifecycleActions(
       const styleInfo = getPlaystyleInfo(playstyle, primaryPos);
 
       // 잠재력(Potential) 스펙트럼 전면 개방 (68 ~ 96 연속 분포)
-      const potential = rollInitialPotential(
+      const rolledPotential = rollInitialPotential(
         initialOvr,
         growthDna,
         innateTrait
       );
+      // 1.2.0: 미국 고교 출발은 잠재력을 높게 시작합니다.
+      const potential =
+        startingLeague === 'US_HIGH_SCHOOL'
+          ? Math.min(
+              US_HIGH_SCHOOL_DEVELOPMENT_CONFIG.potentialMax,
+              rolledPotential + US_HIGH_SCHOOL_DEVELOPMENT_CONFIG.potentialBonus
+            )
+          : rolledPotential;
 
       const initialRatingsMap: Record<string, number> = {};
       for (const t of ALL_TEAMS) {
@@ -107,7 +140,7 @@ export function createCareerLifecycleActions(
         coachTrust: 32,
         secondaryPos: null,
         contractType: 'AMATEUR' as const,
-        league: 'HIGH_SCHOOL' as const,
+        league: startingLeague,
         stats: initialStats,
         primaryPos,
         growthDna,
@@ -118,6 +151,7 @@ export function createCareerLifecycleActions(
       const newCareer: CareerState = {
         id: `PLAYER_${Date.now()}`,
         name: name.trim(),
+        nationality,
         jerseyNumber: assignedJersey,
         heightCm,
         primaryPos,
@@ -125,7 +159,7 @@ export function createCareerLifecycleActions(
         growthDna,
         playstyle,
         traits: [innateTrait],
-        age: 16,
+        age: startAge,
         seasonYear: 2026,
         seasonsPlayed: 0,
         ovr: initialOvr,
@@ -135,10 +169,10 @@ export function createCareerLifecycleActions(
         potentialBreakthroughCount: 0,
         stats: initialStats,
         lastSeasonDelta: { ins: 0, out: 0, ply: 0, def: 0, reb: 0, phy: 0 },
-        league: 'HIGH_SCHOOL',
+        league: startingLeague,
         team: hsTeam,
         contractType: 'AMATEUR',
-        contractYearsLeft: 3,
+        contractYearsLeft: schoolYears,
         annualSalary: 0,
         careerEarnings: 0, // 프로 통산 누적 연봉 (아마추어 장학금과 엄격히 분리)
         cashBalance: ECONOMY_CONFIG.amateurInitialScholarshipUsd, // 고교 유망주 훈련 장학금($20K) 가용 자산
@@ -153,7 +187,7 @@ export function createCareerLifecycleActions(
         draftStock: 20,
         trainingFocus: 'BALANCED',
         lastCampYear: 0,
-        militaryExempt: false,
+        militaryExempt: !isKorean,
         militaryServiceSeasonsLeft: 0,
         previousTeamBeforeMilitary: null,
         isFarewellTour: false,
@@ -193,7 +227,7 @@ export function createCareerLifecycleActions(
           {
             id: `MS_DEBUT_${Date.now()}`,
             year: 2026,
-            age: 16,
+            age: startAge,
             title: `${hsTeam.name} 농구부 입부 (초기 OVR ${initialOvr} · ${dnaInfo.label})`,
             description: `등번호 #${assignedJersey} · ${dnaInfo.label} · ${styleInfo.label} · ${traitInfo.name}`,
             type: 'DEBUT',
@@ -337,6 +371,8 @@ export function createCareerLifecycleActions(
       if (!career || career.retirementReason || career.nationalTeamRetired) {
         return;
       }
+      // 1.2.0: 국가대표는 대한민국 국적만 해당합니다.
+      if (!isKoreanNational(career)) return;
 
       const evalRes = evaluateNationalTeamRetirement(career);
       const syncedRel = syncCareerRelationships(career, {

@@ -14,6 +14,7 @@ import {
   generateSeasonHeadline,
 } from '../data/headlines';
 import {
+  isHighSchoolLeague,
   LEAGUE_CONFIG,
 } from '../data/leagues';
 import {
@@ -357,7 +358,7 @@ export function finalizeSeasonAndEnterOffseason(career: CareerState): {
   };
 
   if (
-    settledBase.league === 'HIGH_SCHOOL' &&
+    isHighSchoolLeague(settledBase.league) &&
     (settledBase.age >= 19 || settledBase.contractYearsLeft === 0)
   ) {
     const hsEval = evaluateHighSchoolProspect(settledBase);

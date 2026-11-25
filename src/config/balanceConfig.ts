@@ -44,6 +44,19 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     royBoardTitle: '신입생 유망주 랭킹 TOP 5',
     allStarLabel: '전국대회 베스트 5',
   },
+  US_HIGH_SCHOOL: {
+    isPro: false,
+    isAmateur: true,
+    foulLimit: 5,
+    playerBaselineOvr: 53,
+    liveQuarterBasePts: 17,
+    liveOppQuarterBasePts: 17,
+    liveOvertimeBasePts: 8,
+    minAttendanceRatio: 0.65,
+    mvpBoardTitle: '전미 고교 최우수 유망주(MVP) 랭킹 TOP 5',
+    royBoardTitle: '전미 고교 신입생 랭킹 TOP 5',
+    allStarLabel: '전미 고교 올아메리칸 퍼스트팀',
+  },
   U_LEAGUE: {
     isPro: false,
     isAmateur: true,
@@ -219,6 +232,7 @@ export const ECONOMY_CONFIG = {
     NCAA: 15000,
     U_LEAGUE: 15000,
     HIGH_SCHOOL: 15000,
+    US_HIGH_SCHOOL: 15000,
   } as Record<LeagueId, number>,
   personalCare: {
     BIOMECH_SKILL_LAB: {
@@ -233,6 +247,7 @@ export const ECONOMY_CONFIG = {
         NCAA: 10000,
         U_LEAGUE: 8000,
         HIGH_SCHOOL: 8000,
+        US_HIGH_SCHOOL: 8000,
       } as Record<LeagueId, number>,
       growthMultiplier: 1.15,
       agingReductionFactor: 0.85,
@@ -249,6 +264,7 @@ export const ECONOMY_CONFIG = {
         NCAA: 8000,
         U_LEAGUE: 6000,
         HIGH_SCHOOL: 6000,
+        US_HIGH_SCHOOL: 6000,
       } as Record<LeagueId, number>,
       injuryRiskMultiplier: 0.52,
       injuryGamesMultiplier: 0.55,
@@ -265,6 +281,7 @@ export const ECONOMY_CONFIG = {
         NCAA: 0,
         U_LEAGUE: 0,
         HIGH_SCHOOL: 0,
+        US_HIGH_SCHOOL: 0,
       } as Record<LeagueId, number>,
       stockBoost: 7,
       fanPopularityBoost: 18,
@@ -405,6 +422,23 @@ export const GROWTH_CONFIG = {
   minPtFactor: 0.72, // 출전시간 성장 계수 하한 (기존 0.48 — 벤치 선수 성장 정체 완화)
   primeGrowthChance: 0.5, // 전성기(성장기 이후~전성기 종료) 능력치별 +1 확률
   primeGrowthChanceWithLab: 0.68, // 바이오메카닉스 스킬 랩 사용 시
+};
+
+/**
+ * 1.2.0: 미국 고교 육성 보정
+ * 미국 고교 출신이 더 높은 수준에서 경쟁하고 NBA에서도 평균적으로 더 나은 활약을 하도록,
+ * 잠재력을 높게 시작하고 고교 시절 성장 속도를 올립니다. (성장 상한은 src/data/leagues.ts의 growthCap)
+ */
+export const US_HIGH_SCHOOL_DEVELOPMENT_CONFIG = {
+  /** 커리어 시작 시 잠재력 가산 */
+  potentialBonus: 2,
+  /** 잠재력 상한 (한국 고교 출발은 96) */
+  potentialMax: 98,
+  /** 미국 고교 재학 중 시즌 성장량 배율 */
+  growthMultiplier: 1.03,
+  /** 1.2.0: 미국 고교는 현실대로 4년제 (만 15세 9학년 입학 → 만 19세 졸업). 한국 고교는 만 16세 입학 3년제 */
+  startAge: 15,
+  schoolYears: 4,
 };
 
 export const LIVE_GAME_CONFIG = {
@@ -641,6 +675,14 @@ export const LEAGUE_AWARD_QUOTAS: Record<LeagueId, LeagueAwardQuotaConfig> = {
     allLeagueTeamCount: 1,
     npcStarsPerTeam: 2,
   },
+  US_HIGH_SCHOOL: {
+    allStarTotal: 5,
+    allStarGuards: 2,
+    allStarFrontcourt: 3,
+    allStarWildcards: 0,
+    allLeagueTeamCount: 1,
+    npcStarsPerTeam: 2,
+  },
   U_LEAGUE: {
     allStarTotal: 5,
     allStarGuards: 2,
@@ -713,6 +755,7 @@ export const AWARD_VOTING_CONFIG = {
   // 리그별 NPC 주전·스타 득점 기준 보정 (구단별 전체 풀 생성 시 주인공의 리그 LDR 대비 커브와 대칭 정렬)
   npcMvpPpgOffsetByLeague: {
     HIGH_SCHOOL: 1.4,
+    US_HIGH_SCHOOL: 1.4,
     U_LEAGUE: 2.0,
     NCAA: -1.4,
     KBL: 2.5,

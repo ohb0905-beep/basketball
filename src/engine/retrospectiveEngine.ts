@@ -36,6 +36,7 @@ const LEAGUE_PRESTIGE_WEIGHT: Record<LeagueId, number> = {
   NCAA: 0.85,
   U_LEAGUE: 0.72,
   HIGH_SCHOOL: 0.6,
+  US_HIGH_SCHOOL: 0.6,
 };
 
 /**

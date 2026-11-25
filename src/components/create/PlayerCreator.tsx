@@ -8,18 +8,34 @@ import {
   POSITION_HEIGHT_RANGES,
   POSITION_LABELS,
 } from '../../data/archetypes';
-import { HIGH_SCHOOL_TEAMS } from '../../data/teams';
+import { HIGH_SCHOOL_TEAMS, US_HIGH_SCHOOL_TEAMS } from '../../data/teams';
+import {
+  DEFAULT_NATIONALITY,
+  getNationalityInfo,
+  NATIONALITIES,
+} from '../../data/nationalities';
 import {
   calculateBiomechanicalProfile,
   getBiomechanicalGrowthElasticity,
   getPreviewStatsAndOvrRange,
 } from '../../engine/statCalculator';
 import { useCareerStore } from '../../store/useCareerStore';
-import { BiomechanicalProfile, Position } from '../../types/game';
+import { BiomechanicalProfile, NationalityCode, Position } from '../../types/game';
 import { SelectionCheckCircle } from '../common/Modal';
 import { TeamEmblem } from '../common/TeamEmblem';
 
 const POSITIONS: Position[] = ['PG', 'SG', 'SF', 'PF', 'C'];
+
+/** 1.2.0: 입학할 고교의 나라 */
+type SchoolCountry = 'KR' | 'US';
+const SCHOOL_COUNTRY_TABS: { id: SchoolCountry; label: string; flag: string }[] = [
+  { id: 'KR', label: '한국 고교', flag: '🇰🇷' },
+  { id: 'US', label: '미국 고교', flag: '🇺🇸' },
+];
+
+function getSchoolsByCountry(country: SchoolCountry) {
+  return country === 'US' ? US_HIGH_SCHOOL_TEAMS : HIGH_SCHOOL_TEAMS;
+}
 
 export function getScoutingBalanceBadges(bio: BiomechanicalProfile): {
   overallBadge: { text: string; toneClass: string };
@@ -72,6 +88,10 @@ export function PlayerCreator() {
     HIGH_SCHOOL_TEAMS[0].id
   );
   const [schoolQuery, setSchoolQuery] = useState('');
+  const [nationality, setNationality] = useState<NationalityCode>(DEFAULT_NATIONALITY);
+  const [schoolCountry, setSchoolCountry] = useState<SchoolCountry>('KR');
+  const isKorean = nationality === 'KOR';
+  const schoolList = getSchoolsByCountry(schoolCountry);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const currentArch = POSITION_ARCHETYPES[primaryPos];
@@ -92,12 +112,20 @@ export function PlayerCreator() {
 
   const filteredSchools = useMemo(() => {
     const q = schoolQuery.trim().toLowerCase();
-    if (!q) return HIGH_SCHOOL_TEAMS;
-    return HIGH_SCHOOL_TEAMS.filter(
+    if (!q) return schoolList;
+    return schoolList.filter(
       (t) =>
         t.name.toLowerCase().includes(q) || t.city.toLowerCase().includes(q)
     );
-  }, [schoolQuery]);
+  }, [schoolQuery, schoolList]);
+
+  const handleSchoolCountryChange = (country: SchoolCountry) => {
+    if (country === schoolCountry) return;
+    if (country === 'KR' && !isKorean) return;
+    setSchoolCountry(country);
+    setSchoolQuery('');
+    setHighSchoolTeamId(getSchoolsByCountry(country)[0].id);
+  };
 
   const handlePosChange = (pos: Position) => {
     setPrimaryPos(pos);
@@ -142,12 +170,13 @@ export function PlayerCreator() {
       heightCm,
       primaryPos,
       highSchoolTeamId,
+      nationality,
     });
   };
 
   const selectedSchool =
-    HIGH_SCHOOL_TEAMS.find((t) => t.id === highSchoolTeamId) ||
-    HIGH_SCHOOL_TEAMS[0];
+    schoolList.find((t) => t.id === highSchoolTeamId) || schoolList[0];
+  const nationalityInfo = getNationalityInfo(nationality);
 
   return (
     <div className="max-w-[560px] mx-auto px-4 pt-2 pb-28 space-y-4">
@@ -190,7 +219,7 @@ export function PlayerCreator() {
               선수 프로필 입력
             </h1>
             <p className="text-[14px] text-[var(--t-g600)]">
-              만 16세 고교 신입생으로 커리어를 시작합니다.
+              고교 신입생으로 커리어를 시작합니다(한국 고교 만 16세 3년제, 미국 고교 만 15세 4년제). 국적은 자유롭게 고를 수 있습니다.
             </p>
           </div>
 
@@ -248,6 +277,45 @@ export function PlayerCreator() {
                 placeholder="0 ~ 99"
                 className="w-full h-[54px] px-4 rounded-2xl bg-[var(--t-g100)] text-[17px] font-bold text-[var(--t-g900)] placeholder:text-[var(--t-g400)] tabular-nums focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)]"
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <label
+                htmlFor="nationality-select"
+                className="block text-[13px] font-semibold text-[var(--t-g600)]"
+              >
+                국적
+              </label>
+              <select
+                id="nationality-select"
+                data-testid="nationality-select"
+                value={nationality}
+                onChange={(e) => {
+                  const next = e.target.value as NationalityCode;
+                  setNationality(next);
+                  // 한국 고교는 대한민국 국적만 입학할 수 있습니다.
+                  if (next !== 'KOR' && schoolCountry === 'KR') {
+                    setSchoolCountry('US');
+                    setSchoolQuery('');
+                    setHighSchoolTeamId(getSchoolsByCountry('US')[0].id);
+                  }
+                }}
+                className="w-full h-[54px] px-4 rounded-2xl bg-[var(--t-g100)] text-[17px] font-bold text-[var(--t-g900)] focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)] cursor-pointer"
+              >
+                {NATIONALITIES.map((n) => (
+                  <option key={n.code} value={n.code}>
+                    {n.flag} {n.name}
+                  </option>
+                ))}
+              </select>
+              <p
+                data-testid="nationality-note"
+                className="text-[12px] text-[var(--t-g500)] leading-relaxed"
+              >
+                {isKorean
+                  ? '병역(상무), 국가대표 소집, KBL 드래프트가 모두 적용됩니다.'
+                  : `${nationalityInfo.name} 국적은 미국 고교에서 시작합니다. 병역과 국가대표 소집이 없고, KBL은 드래프트 없이 외국인 선수 계약으로만 입단할 수 있습니다.`}
+              </p>
             </div>
           </div>
         </section>
@@ -406,9 +474,49 @@ export function PlayerCreator() {
             </h1>
             <p className="text-[13px] text-[var(--t-g600)] tabular-nums">
               {jerseyNumber ? `#${jerseyNumber} ` : ''}
-              {name} · {primaryPos} · {heightCm}cm
+              {name} · {nationalityInfo.flag} {nationalityInfo.name} · {primaryPos} · {heightCm}cm
             </p>
           </div>
+
+          <div
+            role="tablist"
+            aria-label="고교 나라 선택"
+            className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-[var(--t-g100)]"
+          >
+            {SCHOOL_COUNTRY_TABS.map((tab) => {
+              const active = schoolCountry === tab.id;
+              const locked = tab.id === 'KR' && !isKorean;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  disabled={locked}
+                  data-testid={`school-country-${tab.id}`}
+                  onClick={() => handleSchoolCountryChange(tab.id)}
+                  className={`min-h-[44px] rounded-xl text-[14px] font-bold t-tap ${
+                    active
+                      ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-sm'
+                      : locked
+                      ? 'text-[var(--t-g400)] opacity-60 cursor-not-allowed'
+                      : 'text-[var(--t-g500)] cursor-pointer'
+                  }`}
+                >
+                  <span aria-hidden="true">{tab.flag}</span> {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="text-[12px] text-[var(--t-g500)] leading-relaxed">
+            {!isKorean && '한국 고교는 대한민국 국적만 입학할 수 있습니다. '}
+            {schoolCountry === 'US'
+              ? `만 15세 9학년으로 입학해 4년을 다닙니다. 팀 수준이 한국 고교보다 훨씬 높아 신입생 때는 출전 기회를 얻기 어렵지만, 졸업 후 NBA로 가는 길은 훨씬 넓습니다. 졸업하면 NCAA 장학금 제안을 받을 수 있습니다.${
+                  isKorean ? ' 한국 대학(U-리그)과 KBL 얼리 드래프트도 선택할 수 있습니다.' : ''
+                }`
+              : '만 16세로 입학해 3년을 다닙니다. 미국 고교보다 일찍 주전이 될 수 있지만, NBA까지 가는 길은 더 험난합니다. 졸업하면 한국 대학(U-리그)으로 진학하거나, 실력이 뛰어나면 NCAA와 프로 직행 제안을 받을 수 있습니다. KBL 얼리 드래프트에도 도전할 수 있습니다.'}
+          </p>
 
           <div className="relative">
             <Search className="w-4 h-4 text-[var(--t-g400)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />

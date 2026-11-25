@@ -40,6 +40,8 @@ export const LEAGUE_TEAM_RATING_BOUNDS: Record<
   { low: number; high: number; minR: number; maxR: number }
 > = {
   HIGH_SCHOOL: { low: 59, high: 63, minR: 55, maxR: 68 },
+  // 1.2.0: 미국 고교는 가장 약한 팀도 한국 고교 최강팀(변동 상한 68)보다 강합니다. 변동 하한 69로 항상 유지.
+  US_HIGH_SCHOOL: { low: 69, high: 73, minR: 69, maxR: 80 },
   U_LEAGUE: { low: 65, high: 69, minR: 61, maxR: 74 },
   NCAA: { low: 76, high: 80, minR: 71, maxR: 85 },
   KBL: { low: 72, high: 76, minR: 68, maxR: 83 },
@@ -421,6 +423,300 @@ export const HIGH_SCHOOL_TEAMS: TeamInfo[] = [
     secondaryColor: '#FEE2E2',
     logoUrl: '/logos/HS_GIMHAE_GAYA.svg',
     prestigeDesc: '경남권의 패기 넘치는 팀으로 강한 풀코트 압박과 리바운드 가담이 돋보입니다.',
+  },
+];
+
+// ==========================================
+// 1-2. 미국 고교 농구 (전미 프렙 서킷 24개교, 1.2.0)
+// ==========================================
+export const US_HIGH_SCHOOL_TEAMS: TeamInfo[] = [
+  {
+    id: 'USHS_MONTVERDE',
+    name: '몬트버드 아카데미',
+    shortName: '몬트버드',
+    city: '플로리다',
+    league: 'US_HIGH_SCHOOL',
+    rating: 76,
+    primaryColor: '#1E3A8A',
+    secondaryColor: '#FACC15',
+    logoUrl: '/logos/USHS_MONTVERDE.svg',
+    prestigeDesc: '전국 랭킹 최상단을 지키는 플로리다의 프렙 명문으로, 매년 NBA 드래프트 지명자를 배출합니다.',
+  },
+  {
+    id: 'USHS_IMG',
+    name: 'IMG 아카데미',
+    shortName: 'IMG',
+    city: '플로리다',
+    league: 'US_HIGH_SCHOOL',
+    rating: 75,
+    primaryColor: '#111827',
+    secondaryColor: '#F59E0B',
+    logoUrl: '/logos/USHS_IMG.svg',
+    prestigeDesc: '스포츠 엘리트 아카데미답게 체계적인 훈련과 컨디셔닝으로 대학 스카우트의 단골 방문지입니다.',
+  },
+  {
+    id: 'USHS_OAK_HILL',
+    name: '오크힐 아카데미',
+    shortName: '오크힐',
+    city: '버지니아',
+    league: 'US_HIGH_SCHOOL',
+    rating: 74,
+    primaryColor: '#991B1B',
+    secondaryColor: '#FDE68A',
+    logoUrl: '/logos/USHS_OAK_HILL.svg',
+    prestigeDesc: '수십 년 동안 전설적인 가드들을 길러 낸 버지니아 산골의 농구 사관학교입니다.',
+  },
+  {
+    id: 'USHS_LA_LUMIERE',
+    name: '라루미에르 스쿨',
+    shortName: '라루미에르',
+    city: '인디애나',
+    league: 'US_HIGH_SCHOOL',
+    rating: 73,
+    primaryColor: '#1D4ED8',
+    secondaryColor: '#E5E7EB',
+    logoUrl: '/logos/USHS_LA_LUMIERE.svg',
+    prestigeDesc: '미국 중서부 농구 전통을 잇는 기숙학교로, 탄탄한 팀 수비가 강점입니다.',
+  },
+  {
+    id: 'USHS_SIERRA_CANYON',
+    name: '시에라캐니언 스쿨',
+    shortName: '시에라캐니언',
+    city: '캘리포니아',
+    league: 'US_HIGH_SCHOOL',
+    rating: 74,
+    primaryColor: '#7C2D12',
+    secondaryColor: '#FDBA74',
+    logoUrl: '/logos/USHS_SIERRA_CANYON.svg',
+    prestigeDesc: 'LA 연예계의 관심이 쏠리는 무대로, 전국 중계 경기가 많아 노출도가 높습니다.',
+  },
+  {
+    id: 'USHS_PROLIFIC',
+    name: '프롤리픽 프렙',
+    shortName: '프롤리픽',
+    city: '캘리포니아',
+    league: 'US_HIGH_SCHOOL',
+    rating: 72,
+    primaryColor: '#0F172A',
+    secondaryColor: '#38BDF8',
+    logoUrl: '/logos/USHS_PROLIFIC.svg',
+    prestigeDesc: '빠른 템포와 공격 농구로 해외 유망주까지 모여드는 서부 신흥 강호입니다.',
+  },
+  {
+    id: 'USHS_BREWSTER',
+    name: '브루스터 아카데미',
+    shortName: '브루스터',
+    city: '뉴햄프셔',
+    league: 'US_HIGH_SCHOOL',
+    rating: 73,
+    primaryColor: '#14532D',
+    secondaryColor: '#FDE047',
+    logoUrl: '/logos/USHS_BREWSTER.svg',
+    prestigeDesc: '뉴잉글랜드 프렙 리그의 강자로, 학업과 농구를 함께 챙기는 전통이 있습니다.',
+  },
+  {
+    id: 'USHS_LINK',
+    name: '링크 아카데미',
+    shortName: '링크',
+    city: '미주리',
+    league: 'US_HIGH_SCHOOL',
+    rating: 73,
+    primaryColor: '#4C1D95',
+    secondaryColor: '#C4B5FD',
+    logoUrl: '/logos/USHS_LINK.svg',
+    prestigeDesc: '짧은 역사에도 전국 대회 정상을 노리는 미주리의 신흥 프렙 강호입니다.',
+  },
+  {
+    id: 'USHS_COLUMBUS',
+    name: '콜럼버스 고등학교',
+    shortName: '콜럼버스',
+    city: '플로리다',
+    league: 'US_HIGH_SCHOOL',
+    rating: 72,
+    primaryColor: '#065F46',
+    secondaryColor: '#A7F3D0',
+    logoUrl: '/logos/USHS_COLUMBUS.svg',
+    prestigeDesc: '마이애미 지역 최강 공립 명문으로, 끈질긴 수비와 리바운드로 승부합니다.',
+  },
+  {
+    id: 'USHS_DUNCANVILLE',
+    name: '덩컨빌 고등학교',
+    shortName: '덩컨빌',
+    city: '텍사스',
+    league: 'US_HIGH_SCHOOL',
+    rating: 72,
+    primaryColor: '#B45309',
+    secondaryColor: '#FEF3C7',
+    logoUrl: '/logos/USHS_DUNCANVILLE.svg',
+    prestigeDesc: '텍사스 주 대회 단골 우승팀으로, 큰 체격과 몸싸움이 강한 팀입니다.',
+  },
+  {
+    id: 'USHS_MATER_DEI',
+    name: '메이터데이 고등학교',
+    shortName: '메이터데이',
+    city: '캘리포니아',
+    league: 'US_HIGH_SCHOOL',
+    rating: 72,
+    primaryColor: '#7F1D1D',
+    secondaryColor: '#E5E7EB',
+    logoUrl: '/logos/USHS_MATER_DEI.svg',
+    prestigeDesc: '남부 캘리포니아 가톨릭 리그의 전통 강호로, 조직적인 하프코트 농구를 합니다.',
+  },
+  {
+    id: 'USHS_DEMATHA',
+    name: '드마사 가톨릭',
+    shortName: '드마사',
+    city: '메릴랜드',
+    league: 'US_HIGH_SCHOOL',
+    rating: 72,
+    primaryColor: '#9F1239',
+    secondaryColor: '#FECDD3',
+    logoUrl: '/logos/USHS_DEMATHA.svg',
+    prestigeDesc: '워싱턴 DC 권역의 오랜 명문으로, 엄격한 규율과 기본기 교육으로 유명합니다.',
+  },
+  {
+    id: 'USHS_PAUL_VI',
+    name: '폴 6세 가톨릭',
+    shortName: '폴 6세',
+    city: '버지니아',
+    league: 'US_HIGH_SCHOOL',
+    rating: 71,
+    primaryColor: '#1E40AF',
+    secondaryColor: '#BFDBFE',
+    logoUrl: '/logos/USHS_PAUL_VI.svg',
+    prestigeDesc: '버지니아 가톨릭 리그 강호로, 가드진의 볼 핸들링과 외곽 슛이 돋보입니다.',
+  },
+  {
+    id: 'USHS_LI_LUTHERAN',
+    name: '롱아일랜드 루터런',
+    shortName: 'LI 루터런',
+    city: '뉴욕',
+    league: 'US_HIGH_SCHOOL',
+    rating: 71,
+    primaryColor: '#1E3A8A',
+    secondaryColor: '#FDE68A',
+    logoUrl: '/logos/USHS_LI_LUTHERAN.svg',
+    prestigeDesc: '뉴욕 농구의 거친 스타일을 이어받은 팀으로, 강한 압박 수비가 특징입니다.',
+  },
+  {
+    id: 'USHS_STEPINAC',
+    name: '아치비숍 스테피낙',
+    shortName: '스테피낙',
+    city: '뉴욕',
+    league: 'US_HIGH_SCHOOL',
+    rating: 70,
+    primaryColor: '#831843',
+    secondaryColor: '#FBCFE8',
+    logoUrl: '/logos/USHS_STEPINAC.svg',
+    prestigeDesc: '뉴욕 가톨릭 리그에서 꾸준히 상위권을 지키는 실속형 팀입니다.',
+  },
+  {
+    id: 'USHS_WASATCH',
+    name: '와사치 아카데미',
+    shortName: '와사치',
+    city: '유타',
+    league: 'US_HIGH_SCHOOL',
+    rating: 71,
+    primaryColor: '#0F766E',
+    secondaryColor: '#99F6E4',
+    logoUrl: '/logos/USHS_WASATCH.svg',
+    prestigeDesc: '세계 각국 유학생이 모이는 유타의 기숙학교로, 다양한 스타일이 섞여 있습니다.',
+  },
+  {
+    id: 'USHS_FINDLAY',
+    name: '핀들리 프렙',
+    shortName: '핀들리',
+    city: '네바다',
+    league: 'US_HIGH_SCHOOL',
+    rating: 70,
+    primaryColor: '#B91C1C',
+    secondaryColor: '#FECACA',
+    logoUrl: '/logos/USHS_FINDLAY.svg',
+    prestigeDesc: '라스베이거스의 프렙 팀으로, 빠른 전환 공격과 화려한 개인기를 앞세웁니다.',
+  },
+  {
+    id: 'USHS_HILLCREST',
+    name: '힐크레스트 프렙',
+    shortName: '힐크레스트',
+    city: '애리조나',
+    league: 'US_HIGH_SCHOOL',
+    rating: 70,
+    primaryColor: '#1F2937',
+    secondaryColor: '#FCD34D',
+    logoUrl: '/logos/USHS_HILLCREST.svg',
+    prestigeDesc: '애리조나 사막의 독립 프렙 팀으로, 젊은 유망주에게 출전 기회를 많이 줍니다.',
+  },
+  {
+    id: 'USHS_SUNRISE',
+    name: '선라이즈 크리스천',
+    shortName: '선라이즈',
+    city: '캔자스',
+    league: 'US_HIGH_SCHOOL',
+    rating: 71,
+    primaryColor: '#C2410C',
+    secondaryColor: '#FED7AA',
+    logoUrl: '/logos/USHS_SUNRISE.svg',
+    prestigeDesc: '캔자스 농구 열기 속에서 성장한 팀으로, 끈끈한 팀워크가 강점입니다.',
+  },
+  {
+    id: 'USHS_COMPASS',
+    name: '애리조나 컴패스 프렙',
+    shortName: '컴패스',
+    city: '애리조나',
+    league: 'US_HIGH_SCHOOL',
+    rating: 69,
+    primaryColor: '#334155',
+    secondaryColor: '#CBD5E1',
+    logoUrl: '/logos/USHS_COMPASS.svg',
+    prestigeDesc: '신생 프렙 팀으로, 아직 이름값은 낮지만 기회를 노리는 선수들이 모입니다.',
+  },
+  {
+    id: 'USHS_HARVARD_WESTLAKE',
+    name: '하버드웨스트레이크',
+    shortName: '하버드웨스트',
+    city: '캘리포니아',
+    league: 'US_HIGH_SCHOOL',
+    rating: 69,
+    primaryColor: '#7F1D1D',
+    secondaryColor: '#FBBF24',
+    logoUrl: '/logos/USHS_HARVARD_WESTLAKE.svg',
+    prestigeDesc: '학업 명문 사립학교로, 영리한 패스와 팀 농구를 중시합니다.',
+  },
+  {
+    id: 'USHS_GONZAGA_DC',
+    name: '곤자가 칼리지 고등학교',
+    shortName: '곤자가 DC',
+    city: '워싱턴 DC',
+    league: 'US_HIGH_SCHOOL',
+    rating: 70,
+    primaryColor: '#1E3A8A',
+    secondaryColor: '#E5E7EB',
+    logoUrl: '/logos/USHS_GONZAGA_DC.svg',
+    prestigeDesc: '수도 워싱턴의 전통 가톨릭 학교로, 꾸준히 대학 선수를 배출합니다.',
+  },
+  {
+    id: 'USHS_WHITNEY_YOUNG',
+    name: '휘트니영 고등학교',
+    shortName: '휘트니영',
+    city: '일리노이',
+    league: 'US_HIGH_SCHOOL',
+    rating: 69,
+    primaryColor: '#166534',
+    secondaryColor: '#BBF7D0',
+    logoUrl: '/logos/USHS_WHITNEY_YOUNG.svg',
+    prestigeDesc: '시카고 공립 명문으로, 도시 농구 특유의 빠른 템포를 자랑합니다.',
+  },
+  {
+    id: 'USHS_SIMEON',
+    name: '시미언 커리어 아카데미',
+    shortName: '시미언',
+    city: '일리노이',
+    league: 'US_HIGH_SCHOOL',
+    rating: 70,
+    primaryColor: '#991B1B',
+    secondaryColor: '#FDE68A',
+    logoUrl: '/logos/USHS_SIMEON.svg',
+    prestigeDesc: '시카고 남부의 전설적인 공립 강호로, NBA 스타를 여럿 길러 냈습니다.',
   },
 ];
 
@@ -3147,6 +3443,8 @@ export function getNationalTeamsForTournament(
   }
 }
 
+// 1.2.0: 미국 고교는 맨 뒤에 둡니다. 시즌마다 팀 전력을 바꾸는 순서(evolveLeagueTeamRatings)가
+// 기존 리그와 같아야 같은 시드에서 한국 경로 결과가 바뀌지 않습니다.
 export const ALL_TEAMS: TeamInfo[] = [
   ...HIGH_SCHOOL_TEAMS,
   ...U_LEAGUE_TEAMS,
@@ -3158,6 +3456,7 @@ export const ALL_TEAMS: TeamInfo[] = [
   ...GLEAGUE_TEAMS,
   ...NCAA_TEAMS,
   ...NBA_TEAMS,
+  ...US_HIGH_SCHOOL_TEAMS,
 ].map((t) => ({
   ...t,
   direction: t.direction || deriveDirection(t.rating, t.league),
@@ -3215,11 +3514,30 @@ export function createInitialTeamRatingsMap(): Record<string, number> {
  * - 구단의 태초 고정 레이팅이 아닌 '해당 리그 평균'을 기준으로 완만히 순환해
  *   2~4년 왕조 유지 후 자연 하락(샐러리캡·노쇠화)과 하위권 드래프트 반등이 모두 일어나도록 설계
  */
+function createSeededRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export function evolveLeagueTeamRatings(
   currentMap: Record<string, number>,
-  rng: () => number = Math.random
+  sharedRng: () => number = Math.random
 ): Record<string, number> {
   const nextMap: Record<string, number> = { ...currentMap };
+  // 1.2.0: 미국 고교 팀 전력 변동은 별도 난수로 계산합니다. 공용 난수를 쓰면 미국 고교 팀 수만큼
+  // 이후 난수 흐름이 밀려, 미국 고교와 상관없는 기존 커리어 결과까지 바뀌기 때문입니다.
+  const usHighSchoolRng = createSeededRng(
+    US_HIGH_SCHOOL_TEAMS.reduce(
+      (acc, t, i) => (acc * 31 + (currentMap[t.id] ?? t.rating) * (i + 7)) >>> 0,
+      0x9e3779b9
+    )
+  );
 
   // 리그별 기준 평균 레이팅 계산 (군팀 제외)
   const leagueSum: Partial<Record<LeagueId, number>> = {};
@@ -3235,6 +3553,7 @@ export function evolveLeagueTeamRatings(
       nextMap[t.id] = t.rating;
       continue;
     }
+    const rng = t.league === 'US_HIGH_SCHOOL' ? usHighSchoolRng : sharedRng;
     const cur = currentMap[t.id] ?? t.rating;
     const leagueMean =
       (leagueSum[t.league] ?? t.rating) / Math.max(1, leagueCnt[t.league] ?? 1);

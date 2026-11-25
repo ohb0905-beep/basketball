@@ -9,7 +9,7 @@ import {
   Position,
   RelationshipMetrics,
 } from '../types/game';
-import { LEAGUE_CONFIG } from '../data/leagues';
+import { isHighSchoolLeague, LEAGUE_CONFIG } from '../data/leagues';
 import { LEAGUE_BALANCE_META, clampNum } from '../config/balanceConfig';
 import { rollStoryArcEvent } from './storyArcEngine';
 
@@ -81,7 +81,7 @@ export function extractCareerContextTags(
     tags.push('INJURY_PRONE');
   }
   if (
-    career.league === 'HIGH_SCHOOL' ||
+    isHighSchoolLeague(career.league) ||
     career.league === 'U_LEAGUE' ||
     career.league === 'NCAA'
   ) {

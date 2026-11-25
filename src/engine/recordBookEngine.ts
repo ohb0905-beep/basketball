@@ -638,6 +638,17 @@ const LEAGUE_BASELINE_RECORDS: Record<LeagueId, BaselineRecordSpec[]> = {
       year: 2021,
     },
   ],
+  // 1.2.0: 미국 고교 공식 기록 (출처: NFHS 전국 기록집 기준, MaxPreps 전국 기록집·게토레이 올해의 선수)
+  // - 통산 득점은 9학년 이전 기록을 인정하지 않는 NFHS 기준 1위(프로셀)입니다.
+  // - 시즌 평균 리바운드·어시스트는 확인 가능한 공식 평균 기록이 없어 넣지 않았습니다.
+  // - 우승·올해의 선수는 공동 보유 기록이라 가장 최근 보유자를 표시합니다.
+  US_HIGH_SCHOOL: [
+    { category: 'CAREER_POINTS', label: '통산 득점', unit: '점', value: 6702, holderName: '그레그 프로셀', teamName: '에바브 고등학교 (루이지애나)', year: 1970 },
+    { category: 'SINGLE_GAME_POINTS', label: '단일 경기 최다 득점', unit: '점', value: 135, holderName: '대니 히터', teamName: '번스빌 고등학교 (웨스트버지니아)', year: 1960 },
+    { category: 'SEASON_PPG', label: '단일 시즌 평균 득점', unit: 'PPG', value: 54.0, holderName: '바비 조 더글러스', teamName: '매리언 고등학교 (루이지애나)', year: 1980 },
+    { category: 'CHAMPIONSHIPS', label: '최다 주 챔피언십 우승', unit: '회', value: 4, holderName: '캐머런 부저 외', teamName: '콜럼버스 고등학교 (플로리다)', year: 2025 },
+    { category: 'MVPS', label: '최다 전미 올해의 선수 (게토레이)', unit: '회', value: 2, holderName: '캐머런 부저 외', teamName: '콜럼버스 고등학교 (플로리다)', year: 2025 },
+  ],
 };
 
 export const LEGACY_TIER_CATALOG: {
@@ -692,6 +703,7 @@ const ALL_LEAGUE_IDS: LeagueId[] = [
   'NCAA',
   'U_LEAGUE',
   'HIGH_SCHOOL',
+  'US_HIGH_SCHOOL',
 ];
 
 export function createInitialRecordBook(): RecordBookState {

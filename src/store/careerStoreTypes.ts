@@ -10,6 +10,7 @@ import {
   EncounterResolutionResult,
   HallOfFameEntry,
   LiveTacticId,
+  NationalityCode,
   OffseasonOption,
   PersonalCareId,
   PlayerStats,
@@ -61,6 +62,8 @@ export interface CareerStoreState {
     heightCm: number;
     primaryPos: Position;
     highSchoolTeamId: string;
+    /** 1.2.0: 생략하면 대한민국 */
+    nationality?: NationalityCode;
   }) => void;
 
   setTrainingFocus: (focus: TrainingFocus) => void;
