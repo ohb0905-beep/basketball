@@ -45,6 +45,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
    - `20261126_analytics_capacity.sql`: 용량 대비 1단계. 커리어·플레이어·일별 요약 테이블과 자동 갱신 트리거, `analytics_daily_maintenance(보존일수)` 정리 함수, 집계 함수 v3(요약 테이블 + 최근 원본, DB 용량 표시). 실행만으로는 아무것도 지우지 않음
    - `20261126_analytics_capacity_cron.sql`: 매일 04:00 KST에 `analytics_daily_maintenance(14)` 실행 예약 (pg_cron). 14일이 지난 원본 통계를 지움 (난이도 설문은 남김). 위 파일 다음에 실행
    - `20261127_admin_analytics_v4.sql`: 집계 함수 v4. 최근 24시간·오늘 시간별 추이, 미리보기를 뺀 정식 버전 필터(`release`). 테이블 데이터는 바꾸지 않음 (다시 실행하면 교체됨)
+   - `20261128_analytics_career_card_event.sql`: 커리어 카드 저장·공유 이벤트(`career_card_shared`) 허용. CHECK 제약만 교체 (1.3.0 배포 전 실행)
    - SQL 편집기에 붙여 넣거나, Supabase CLI로 `supabase db push`를 실행하면 됩니다.
 3. 프로젝트 설정의 API 메뉴에서 URL과 service_role 키를 복사해 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`에 넣습니다.
 

@@ -27,6 +27,8 @@ export const ANALYTICS_EVENT_NAMES = [
   'draft_completed',
   // 1.1.2 난이도 설문 (1인 1회)
   'survey_response',
+  // 1.3.0 커리어 카드 저장·공유
+  'career_card_shared',
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -261,6 +263,17 @@ export interface AnalyticsEventPayloadMap {
   creation_started: CreationStartedPayload;
   draft_completed: DraftCompletedPayload;
   survey_response: SurveyResponsePayload;
+  career_card_shared: CareerCardSharedPayload;
+}
+
+/** 1.3.0 은퇴 커리어 카드를 실제로 저장했거나 공유에 성공했을 때 한 번씩 보냅니다. */
+export interface CareerCardSharedPayload {
+  action: 'save' | 'share';
+  legacyTierId: LegacyTierId;
+  seasonsPlayed: number;
+  reachedNba: boolean;
+  /** 명예의 전당 다시 보기에서 만들었는지 */
+  isReplay: boolean;
 }
 
 /** 설문 5단계 응답 (난이도: 1 너무 쉬움 ~ 5 너무 어려움 / 고교 속도: 1 너무 지루함 ~ 5 너무 빠름) */
@@ -566,6 +579,7 @@ const SESSION_EVENT_RULES: Record<AnalyticsEventName, RateRule> = {
   creation_started: { windowMs: 10 * 60 * 1000, maxCount: 3 },
   draft_completed: { windowMs: 60 * 1000, maxCount: 10 },
   survey_response: { windowMs: 10 * 60 * 1000, maxCount: 3 },
+  career_card_shared: { windowMs: 10 * 60 * 1000, maxCount: 20 },
 };
 
 const IP_BURST_RULE: RateRule = {

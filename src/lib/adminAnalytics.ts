@@ -32,6 +32,7 @@ export const ANALYTICS_EVENT_LABELS: Record<AnalyticsEventName, string> = {
   creation_started: '생성 화면 진입',
   draft_completed: '드래프트',
   survey_response: '난이도 설문',
+  career_card_shared: '커리어 카드 저장·공유',
 };
 
 export const ANALYTICS_DEVICE_LABELS: Record<AnalyticsDeviceType | 'unknown', string> = {

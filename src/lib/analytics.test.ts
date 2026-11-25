@@ -292,9 +292,9 @@ test('SQL migration for analytics_events enforces allowlist, indexes, and strict
 
   assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.analytics_events/);
 
-  // 최신 허용 목록은 1.1.2 설문 이벤트 마이그레이션이 CHECK 제약을 교체해 정의합니다.
+  // 최신 허용 목록은 1.3.0 커리어 카드 이벤트 마이그레이션이 CHECK 제약을 교체해 정의합니다.
   const latestAllowlistSql = fs.readFileSync(
-    path.join(process.cwd(), 'supabase/migrations/20261125_analytics_survey_event.sql'),
+    path.join(process.cwd(), 'supabase/migrations/20261128_analytics_career_card_event.sql'),
     'utf8'
   );
   assert.match(latestAllowlistSql, /ADD CONSTRAINT analytics_events_event_name_check/);
