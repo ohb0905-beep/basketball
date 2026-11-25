@@ -1,4 +1,4 @@
-# 벤치에서 MVP까지 (From Bench to MVP)
+# 로드 투 MVP (Road to MVP)
 
 고교 농구 벤치 끝자리에서 시작해 U리그·NCAA, KBL·해외 리그, G리그를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 선수 커리어 육성 시뮬레이션 웹 게임입니다.
 
