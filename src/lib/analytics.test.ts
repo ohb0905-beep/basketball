@@ -25,7 +25,7 @@ import {
   validateAnalyticsEventPayload,
   type SeasonCompletedPayload,
 } from './analyticsSchema';
-import { aggregateAnalyticsEvents } from './adminAnalytics';
+import { buildRecentLogs } from './adminAnalytics';
 import { POST } from '../app/api/analytics/event/route';
 import {
   __resetAnalyticsSupabaseCooldownForTest,
@@ -1004,9 +1004,8 @@ test('validateAnalyticsEventPayload accepts upgraded arrays and nested leagueHon
   assert.equal(badArray.ok, false);
 });
 
-test('aggregateAnalyticsEvents remains fully compatible with mixed legacy and upgraded rows', () => {
-  const now = new Date('2026-11-24T12:00:00.000Z');
-  const dashboard = aggregateAnalyticsEvents(
+test('buildRecentLogs stays compatible with mixed legacy and upgraded rows', () => {
+  const recentLogs = buildRecentLogs(
     [
       // 기존 레거시 season_completed (wonFmvp, awards 없음)
       {
@@ -1069,16 +1068,17 @@ test('aggregateAnalyticsEvents remains fully compatible with mixed legacy and up
         },
         created_at: '2026-11-24T11:00:00.000Z',
       },
-    ],
-    { range: '7d', version: 'all', nowMs: now.getTime() }
+    ]
   );
 
-  assert.equal(dashboard.kpi.seasonsCompleted, 2);
-  assert.equal(dashboard.kpi.careersEnded, 1);
-  assert.equal(dashboard.recentLogs.length, 3);
-  assert.ok(dashboard.recentLogs.some((m) => m.summary.includes('FMVP')));
+  assert.equal(recentLogs.length, 3);
+  // 레거시 행은 wonFinalsMvp만 있어도 FMVP 뱃지가 붙어야 함
+  assert.deepEqual(recentLogs[0].badges, ['우승', 'MVP', 'FMVP']);
+  assert.equal(recentLogs[0].position, null);
+  assert.equal(recentLogs[1].position, 'PG');
+  assert.ok(recentLogs.some((m) => m.summary.includes('FMVP')));
   assert.ok(
-    dashboard.recentLogs.some((m) => m.summary.includes('우승 3 · MVP 2 · FMVP 2'))
+    recentLogs.some((m) => m.summary.includes('우승 3 · MVP 2 · FMVP 2'))
   );
 });
 

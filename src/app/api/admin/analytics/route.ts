@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdminRequestAuthenticated } from '../../../../lib/adminAuth';
 import {
   AnalyticsDateRange,
-  aggregateAnalyticsEvents,
+  buildAdminAnalyticsReport,
   getAnalyticsRangeStartIso,
   isValidAnalyticsDateRange,
+  isValidAnalyticsLeagueFilter,
   isValidAnalyticsVersionFilter,
 } from '../../../../lib/adminAnalytics';
-import { queryAnalyticsEventsFromSupabase } from '../../../../lib/supabaseAdmin';
+import { fetchAdminAnalyticsFromSupabase } from '../../../../lib/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,27 +23,29 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // 2. 쿼리 파라미터 검증 (range=7d|30d|all, version=all|<semver>)
+  // 2. 쿼리 파라미터 검증 (range=7d|30d|90d|all, version=all|<semver>, league=all|<LeagueId>)
   const { searchParams } = request.nextUrl;
   const rawRange = (searchParams.get('range') || '7d').trim();
   const rawVersion = (searchParams.get('version') || 'all').trim();
+  const rawLeague = (searchParams.get('league') || 'all').trim();
 
   if (!isValidAnalyticsDateRange(rawRange)) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: '유효하지 않은 기간 필터입니다. (7d, 30d, all)',
-      },
+      { ok: false, error: '유효하지 않은 기간 필터입니다. (7d, 30d, 90d, all)' },
       { status: 400, headers: NO_STORE_HEADERS }
     );
   }
 
   if (!isValidAnalyticsVersionFilter(rawVersion)) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: '유효하지 않은 게임 버전 필터입니다.',
-      },
+      { ok: false, error: '유효하지 않은 게임 버전 필터입니다.' },
+      { status: 400, headers: NO_STORE_HEADERS }
+    );
+  }
+
+  if (!isValidAnalyticsLeagueFilter(rawLeague)) {
+    return NextResponse.json(
+      { ok: false, error: '유효하지 않은 리그 필터입니다.' },
       { status: 400, headers: NO_STORE_HEADERS }
     );
   }
@@ -51,35 +54,36 @@ export async function GET(request: NextRequest) {
   const nowMs = Date.now();
   const sinceIso = getAnalyticsRangeStartIso(range, nowMs);
 
-  // 3. Supabase 서버 조회 (상한 보호 포함)
-  const queryResult = await queryAnalyticsEventsFromSupabase({
+  // 3. Supabase 서버 집계 함수 호출 + 최근 마일스톤 로그 조회
+  const result = await fetchAdminAnalyticsFromSupabase({
     sinceIso,
     version: rawVersion,
+    league: rawLeague,
   });
 
-  if (!queryResult.ok) {
+  if (!result.ok) {
     return NextResponse.json(
-      { ok: false, error: queryResult.error },
-      { status: queryResult.status, headers: NO_STORE_HEADERS }
+      { ok: false, error: result.error },
+      { status: result.status, headers: NO_STORE_HEADERS }
     );
   }
 
-  // 4. 서버 집계 리포트 생성
-  const report = aggregateAnalyticsEvents(queryResult.data.rows, {
-    range,
-    version: rawVersion,
-    availableVersions: queryResult.data.availableVersions,
-    nowMs,
-    totalMatchingRows: queryResult.data.totalMatchingRows,
-    scanLimit: queryResult.data.scanLimit,
-    tableNotReady: queryResult.data.tableNotReady,
-  });
+  // 4. 대시보드 리포트 생성 (비율·모수·인사이트 계산)
+  const report = buildAdminAnalyticsReport(
+    result.data.aggregate,
+    result.data.recentRows,
+    {
+      range,
+      version: rawVersion,
+      league: rawLeague,
+      nowMs,
+      setupRequired: result.data.setupRequired,
+      tableNotReady: result.data.tableNotReady,
+    }
+  );
 
   return NextResponse.json(
-    {
-      ok: true,
-      report,
-    },
+    { ok: true, report },
     { status: 200, headers: NO_STORE_HEADERS }
   );
 }

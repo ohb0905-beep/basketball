@@ -4,8 +4,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
-  BarChart3,
+  Check,
+  ClipboardCopy,
   Database,
+  Download,
   Loader2,
   LogOut,
   RefreshCw,
@@ -17,98 +19,26 @@ import {
   AdminAnalyticsReport,
   AnalyticsDateRange,
   DailyTrendPoint,
-  DistributionItem,
+  LEAGUE_FUNNEL_ORDER,
+  LEAGUE_SHORT_LABELS,
+  buildShareableAnalyticsSummary,
   formatAnalyticsDateKst,
 } from '../../lib/adminAnalytics';
 import { AdminConsoleNav } from './AdminConsoleNav';
+import {
+  CARD_CLASS,
+  DistributionBarList,
+  InsightsCard,
+  LeagueAwardsTable,
+  PositionBalanceMatrix,
+  RecentLogsList,
+  ResetBottleneck,
+  SectionHeader,
+  SkeletonRows,
+  formatPercentText,
+} from './AdminAnalyticsSections';
 
-const EVENT_TONE_MAP: Record<string, { text: string; bg: string }> = {
-  session_start: {
-    text: 'text-[var(--t-g700)]',
-    bg: 'bg-[var(--t-g100)]',
-  },
-  career_created: {
-    text: 'text-[var(--t-accent)]',
-    bg: 'bg-[var(--t-accent-soft)]',
-  },
-  season_completed: {
-    text: 'text-[var(--t-ok)]',
-    bg: 'bg-[var(--t-ok-soft)]',
-  },
-  league_changed: {
-    text: 'text-[var(--t-gold)]',
-    bg: 'bg-[var(--t-gold-soft)]',
-  },
-  career_ended: {
-    text: 'text-[var(--t-down)]',
-    bg: 'bg-[var(--t-down-soft)]',
-  },
-  career_reset: {
-    text: 'text-[var(--t-up)]',
-    bg: 'bg-[var(--t-up-soft)]',
-  },
-};
-
-function formatPercentText(value: number): string {
-  if (!Number.isFinite(value) || value < 0) return '0.0%';
-  return `${value.toFixed(1)}%`;
-}
-
-function clampBarWidth(percent: number): number {
-  if (!Number.isFinite(percent) || percent <= 0) return 0;
-  return Math.min(100, Math.max(percent, 2));
-}
-
-function DistributionBarList({
-  items,
-  barColorClass = 'bg-[var(--t-accent)]',
-  emptyText = '수집된 데이터가 아직 없습니다.',
-  unitLabel = '건',
-}: {
-  items: DistributionItem[];
-  barColorClass?: string;
-  emptyText?: string;
-  unitLabel?: string;
-}) {
-  const hasAny = items.some((item) => item.count > 0);
-  if (!hasAny) {
-    return (
-      <p className="py-8 text-center text-[13px] text-[var(--t-g500)]">
-        {emptyText}
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {items.map((item) => {
-        const widthPct = clampBarWidth(item.percent);
-        return (
-          <div key={item.key} className="space-y-1.5">
-            <div className="flex items-baseline justify-between gap-2 text-[13px]">
-              <span className="font-semibold text-[var(--t-g800)] truncate">
-                {item.label}
-              </span>
-              <span className="text-[12px] font-semibold text-[var(--t-g600)] tabular-nums whitespace-nowrap shrink-0">
-                {item.count.toLocaleString()}
-                {unitLabel}{' '}
-                <span className="text-[var(--t-g400)] font-normal">
-                  ({formatPercentText(item.percent)})
-                </span>
-              </span>
-            </div>
-            <div className="h-2 w-full rounded-full bg-[var(--t-g100)] overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-[width] duration-300 ${barColorClass}`}
-                style={{ width: `${widthPct}%` }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+const SETUP_SQL_PATH = 'supabase/migrations/20261125_admin_analytics_report.sql';
 
 function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -140,7 +70,9 @@ function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
     );
   }
 
-  const labelStep = points.length <= 10 ? 1 : points.length <= 18 ? 2 : 5;
+  const labelStep =
+    points.length <= 10 ? 1 : points.length <= 18 ? 2 : points.length <= 45 ? 5 : 15;
+  const gapClass = points.length > 31 ? 'gap-px' : 'gap-1 sm:gap-1.5';
   const midTick = Math.ceil(maxValue / 2);
 
   return (
@@ -190,7 +122,7 @@ function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
 
           {/* 막대 영역 */}
           <div className="flex-1 min-w-0">
-            <div className="relative h-[180px] border-b border-[var(--t-g200)] flex items-end gap-1 sm:gap-1.5">
+            <div className={`relative h-[180px] border-b border-[var(--t-g200)] flex items-end ${gapClass}`}>
               {/* 가로 가이드선 */}
               <div
                 aria-hidden="true"
@@ -246,7 +178,7 @@ function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
             </div>
 
             {/* X축 날짜 레이블 */}
-            <div className="mt-2 flex items-center gap-1 sm:gap-1.5">
+            <div className={`mt-2 flex items-center ${gapClass}`}>
               {points.map((point, idx) => {
                 const showLabel =
                   idx === 0 ||
@@ -269,18 +201,28 @@ function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
   );
 }
 
+
+type CopyState = 'idle' | 'copied' | 'failed';
+
 export function AdminAnalyticsDashboard() {
   const router = useRouter();
 
   const [range, setRange] = useState<AnalyticsDateRange>('7d');
   const [versionFilter, setVersionFilter] = useState<string>('all');
-  const [seasonTab, setSeasonTab] = useState<'maxSeason' | 'resetSeason'>('maxSeason');
+  const [leagueFilter, setLeagueFilter] = useState<string>('all');
+  const [funnelTab, setFunnelTab] = useState<'reach' | 'maxSeason'>('reach');
   const [reloadTick, setReloadTick] = useState(0);
 
   const [report, setReport] = useState<AdminAnalyticsReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>('idle');
+
+  const beginLoad = () => {
+    setLoading(true);
+    setErrorMessage(null);
+  };
 
   const triggerReload = useCallback(() => {
     setLoading(true);
@@ -288,26 +230,12 @@ export function AdminAnalyticsDashboard() {
     setReloadTick((prev) => prev + 1);
   }, []);
 
-  const handleChangeRange = (nextRange: AnalyticsDateRange) => {
-    if (nextRange === range) return;
-    setLoading(true);
-    setErrorMessage(null);
-    setRange(nextRange);
-  };
-
-  const handleChangeVersion = (nextVersion: string) => {
-    if (nextVersion === versionFilter) return;
-    setLoading(true);
-    setErrorMessage(null);
-    setVersionFilter(nextVersion);
-  };
-
   useEffect(() => {
     let cancelled = false;
-
     const qs = new URLSearchParams({
       range,
       version: versionFilter,
+      league: leagueFilter,
     });
 
     fetch(`/api/admin/analytics?${qs.toString()}`, {
@@ -320,15 +248,12 @@ export function AdminAnalyticsDashboard() {
           router.refresh();
           return;
         }
-
         const data = (await res.json()) as {
           ok?: boolean;
           error?: string;
           report?: AdminAnalyticsReport;
         };
-
         if (cancelled) return;
-
         if (!res.ok || !data?.ok || !data.report) {
           setErrorMessage(
             data?.error ||
@@ -336,7 +261,6 @@ export function AdminAnalyticsDashboard() {
           );
           return;
         }
-
         setReport(data.report);
       })
       .catch(() => {
@@ -345,15 +269,13 @@ export function AdminAnalyticsDashboard() {
         }
       })
       .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [range, versionFilter, reloadTick, router]);
+  }, [range, versionFilter, leagueFilter, reloadTick, router]);
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -366,66 +288,64 @@ export function AdminAnalyticsDashboard() {
     }
   };
 
-  const kpi = report?.kpi ?? {
-    uniquePlayers: 0,
-    totalSessions: 0,
-    careersCreated: 0,
-    seasonsCompleted: 0,
-    careersEnded: 0,
-    careersReset: 0,
-    totalEvents: 0,
+  const shareableJson = useMemo(
+    () => (report ? JSON.stringify(buildShareableAnalyticsSummary(report), null, 2) : ''),
+    [report]
+  );
+
+  const handleCopyReport = async () => {
+    if (!shareableJson) return;
+    try {
+      await navigator.clipboard.writeText(shareableJson);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+    window.setTimeout(() => setCopyState('idle'), 2000);
   };
 
+  const handleDownloadReport = () => {
+    if (!shareableJson || !report) return;
+    const blob = new Blob([shareableJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const stamp = formatAnalyticsDateKst(report.generatedAt).replace(/[^0-9]/g, '').slice(0, 12);
+    anchor.href = url;
+    anchor.download = `road-to-mvp-balance-${report.range}-${report.league}-${stamp}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const kpi = report?.kpi;
+  const showSkeleton = loading && !report;
+  const aggregateMissing = Boolean(report?.setupRequired || report?.tableNotReady);
+  const leagueLabel =
+    leagueFilter === 'all'
+      ? null
+      : LEAGUE_SHORT_LABELS[leagueFilter as keyof typeof LEAGUE_SHORT_LABELS] ?? leagueFilter;
+  const leagueScopeNote = leagueLabel ? `리그 필터: ${leagueLabel}` : '전체 리그';
+
   const kpiCards = [
-    {
-      key: 'uniquePlayers',
-      label: '고유 플레이어',
-      value: kpi.uniquePlayers,
-      unit: '명',
-      subtext: '익명 ID 중복 제거',
-      toneClass: 'text-[var(--t-g900)]',
-    },
-    {
-      key: 'totalSessions',
-      label: '총 세션 수',
-      value: kpi.totalSessions,
-      unit: '회',
-      subtext: 'session_start 기준',
-      toneClass: 'text-[var(--t-accent)]',
-    },
-    {
-      key: 'careersCreated',
-      label: '생성된 커리어',
-      value: kpi.careersCreated,
-      unit: '건',
-      subtext:
-        kpi.careersReset > 0
-          ? `중도 리셋 ${kpi.careersReset.toLocaleString()}건`
-          : 'career_created 기준',
-      toneClass: 'text-[var(--t-ok)]',
-    },
-    {
-      key: 'seasonsCompleted',
-      label: '완료된 총 시즌',
-      value: kpi.seasonsCompleted,
-      unit: '시즌',
-      subtext: 'season_completed 기준',
-      toneClass: 'text-[var(--t-gold)]',
-    },
-    {
-      key: 'careersEnded',
-      label: '은퇴/엔딩 도달',
-      value: kpi.careersEnded,
-      unit: '건',
-      subtext: 'career_ended 기준',
-      toneClass: 'text-[var(--t-down)]',
-    },
+    { key: 'uniquePlayers', label: '고유 플레이어', value: kpi?.uniquePlayers, unit: '명', subtext: '익명 ID 중복 제거', tone: 'text-[var(--t-g900)]' },
+    { key: 'totalSessions', label: '총 세션 수', value: kpi?.totalSessions, unit: '회', subtext: 'session_start 기준', tone: 'text-[var(--t-accent)]' },
+    { key: 'careersCreated', label: '생성된 커리어', value: kpi?.careersCreated, unit: '건', subtext: kpi && kpi.careersReset > 0 ? `중도 리셋 ${kpi.careersReset.toLocaleString()}건` : 'career_created 기준', tone: 'text-[var(--t-ok)]' },
+    { key: 'seasonsCompleted', label: '완료된 총 시즌', value: kpi?.seasonsCompleted, unit: '시즌', subtext: 'season_completed 기준', tone: 'text-[var(--t-gold)]' },
+    { key: 'careersEnded', label: '은퇴/엔딩 도달', value: kpi?.careersEnded, unit: '건', subtext: 'career_ended 기준', tone: 'text-[var(--t-down)]' },
+    { key: 'championships', label: '시즌 우승', value: kpi?.championships, unit: '회', subtext: '전체 리그 합계', tone: 'text-[var(--t-gold)]' },
+    { key: 'mvps', label: '정규시즌 MVP', value: kpi?.mvps, unit: '회', subtext: '전체 리그 합계', tone: 'text-[var(--t-accent)]' },
+    { key: 'fmvps', label: '파이널 MVP', value: kpi?.fmvps, unit: '회', subtext: '구버전 wonFinalsMvp 포함', tone: 'text-[var(--t-up)]' },
   ];
 
   const availableVersions = report?.availableVersions ?? [];
+  const selectClass =
+    'min-h-[40px] px-3 rounded-xl bg-[var(--t-g100)] text-[13px] font-semibold text-[var(--t-g900)] focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)] cursor-pointer disabled:opacity-60';
+  const toolButtonClass =
+    'min-h-[40px] px-3 rounded-xl bg-[var(--t-card)] border border-[var(--t-g200)] text-[13px] font-semibold text-[var(--t-g700)] hover:bg-[var(--t-g100)] inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer t-tap disabled:opacity-50';
 
   return (
-    <div className="min-h-screen bg-[var(--t-bg)] text-[var(--t-g900)]">
+    <div className="min-h-screen bg-[var(--t-bg)] text-[var(--t-g900)] overflow-x-hidden">
       {/* 상단 관리자 헤더 (피드백 관리와 동일한 내비게이션 구조) */}
       <header className="sticky top-0 z-30 bg-[var(--t-bg)]/92 backdrop-blur-md border-b border-[var(--t-g200)]">
         <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
@@ -449,7 +369,7 @@ export function AdminAnalyticsDashboard() {
               data-testid="analytics-refresh-btn"
               disabled={loading}
               onClick={triggerReload}
-              className="min-h-[40px] px-3 rounded-xl bg-[var(--t-card)] border border-[var(--t-g200)] text-[13px] font-semibold text-[var(--t-g700)] hover:bg-[var(--t-g100)] inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer t-tap disabled:opacity-50"
+              className={toolButtonClass}
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">새로고침</span>
@@ -459,13 +379,9 @@ export function AdminAnalyticsDashboard() {
               data-testid="analytics-logout-btn"
               disabled={loggingOut}
               onClick={() => void handleLogout()}
-              className="min-h-[40px] px-3 rounded-xl bg-[var(--t-card)] border border-[var(--t-g200)] text-[13px] font-semibold text-[var(--t-g700)] hover:text-[var(--t-up)] hover:border-[var(--t-up)]/40 inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer t-tap disabled:opacity-50"
+              className={`${toolButtonClass} hover:text-[var(--t-up)] hover:border-[var(--t-up)]/40`}
             >
-              {loggingOut ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <LogOut className="w-4 h-4" />
-              )}
+              {loggingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
               <span>로그아웃</span>
             </button>
           </div>
@@ -477,81 +393,136 @@ export function AdminAnalyticsDashboard() {
       </header>
 
       <main className="max-w-[1200px] mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5">
-        {/* 필터 및 집계 범위 컨트롤 바 */}
+        {/* 필터 · 리포트 내보내기 */}
         <section
           aria-label="통계 필터"
-          className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+          className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] p-4 space-y-3"
         >
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div
-              role="group"
-              aria-label="조회 기간"
-              className="inline-flex items-center p-1 rounded-xl bg-[var(--t-g100)]"
-            >
-              {ANALYTICS_DATE_RANGES.map((option) => {
-                const active = range === option;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    data-testid={`analytics-range-${option}`}
-                    onClick={() => handleChangeRange(option)}
-                    className={`min-h-[34px] px-3 rounded-lg text-[13px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                      active
-                        ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-xs'
-                        : 'text-[var(--t-g600)] hover:text-[var(--t-g900)]'
-                    }`}
-                  >
-                    {ANALYTICS_RANGE_LABELS[option]}
-                  </button>
-                );
-              })}
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div
+                role="group"
+                aria-label="조회 기간"
+                className="inline-flex items-center p-1 rounded-xl bg-[var(--t-g100)]"
+              >
+                {ANALYTICS_DATE_RANGES.map((option) => {
+                  const active = range === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      data-testid={`analytics-range-${option}`}
+                      onClick={() => {
+                        if (option === range) return;
+                        beginLoad();
+                        setRange(option);
+                      }}
+                      className={`min-h-[34px] px-2.5 sm:px-3 rounded-lg text-[13px] font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-xs'
+                          : 'text-[var(--t-g600)] hover:text-[var(--t-g900)]'
+                      }`}
+                    >
+                      {ANALYTICS_RANGE_LABELS[option]}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <label className="flex items-center gap-2">
+                <span className="text-[12px] font-bold text-[var(--t-g500)] whitespace-nowrap">버전</span>
+                <select
+                  data-testid="analytics-version-select"
+                  value={versionFilter}
+                  disabled={loading}
+                  onChange={(e) => {
+                    beginLoad();
+                    setVersionFilter(e.target.value);
+                  }}
+                  className={selectClass}
+                >
+                  <option value="all">전체 버전</option>
+                  {availableVersions.map((ver) => (
+                    <option key={ver} value={ver}>
+                      v{ver}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex items-center gap-2">
+                <span className="text-[12px] font-bold text-[var(--t-g500)] whitespace-nowrap">리그</span>
+                <select
+                  data-testid="analytics-league-select"
+                  value={leagueFilter}
+                  disabled={loading}
+                  onChange={(e) => {
+                    beginLoad();
+                    setLeagueFilter(e.target.value);
+                  }}
+                  className={selectClass}
+                >
+                  <option value="all">전체 리그</option>
+                  {LEAGUE_FUNNEL_ORDER.map((lg) => (
+                    <option key={lg} value={lg}>
+                      {LEAGUE_SHORT_LABELS[lg]}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
-            <div className="flex items-center gap-2">
-              <label
-                htmlFor="analytics-version-select"
-                className="text-[12px] font-bold text-[var(--t-g500)] whitespace-nowrap"
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="analytics-copy-report"
+                disabled={!report || aggregateMissing}
+                onClick={() => void handleCopyReport()}
+                className={toolButtonClass}
               >
-                버전
-              </label>
-              <select
-                id="analytics-version-select"
-                data-testid="analytics-version-select"
-                value={versionFilter}
-                disabled={loading}
-                onChange={(e) => handleChangeVersion(e.target.value)}
-                className="min-h-[40px] px-3 rounded-xl bg-[var(--t-g100)] text-[13px] font-semibold text-[var(--t-g900)] focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)] cursor-pointer disabled:opacity-60"
+                {copyState === 'copied' ? (
+                  <Check className="w-4 h-4 text-[var(--t-ok)]" />
+                ) : (
+                  <ClipboardCopy className="w-4 h-4" />
+                )}
+                {copyState === 'copied'
+                  ? '복사됨'
+                  : copyState === 'failed'
+                    ? '복사 실패'
+                    : '밸런스 리포트 복사'}
+              </button>
+              <button
+                type="button"
+                data-testid="analytics-download-report"
+                disabled={!report || aggregateMissing}
+                onClick={handleDownloadReport}
+                className={toolButtonClass}
               >
-                <option value="all">전체 버전</option>
-                {availableVersions.map((ver) => (
-                  <option key={ver} value={ver}>
-                    v{ver}
-                  </option>
-                ))}
-              </select>
+                <Download className="w-4 h-4" />
+                JSON 다운로드
+              </button>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--t-g500)] tabular-nums">
+          <p className="text-[12px] text-[var(--t-g500)] tabular-nums">
             {report ? (
               <>
-                <span>
-                  분석 이벤트 {report.scanMeta.scannedRows.toLocaleString()}건
-                  {report.scanMeta.truncated
-                    ? ` (최근 ${report.scanMeta.scanLimit.toLocaleString()}건 상한 적용 / 전체 ${report.scanMeta.totalMatchingRows.toLocaleString()}건)`
-                    : ''}
-                </span>
-                <span aria-hidden="true">·</span>
-                <span>기준 {formatAnalyticsDateKst(report.generatedAt)} KST</span>
+                전체 이벤트 {report.kpi.totalEvents.toLocaleString()}건을 서버에서 집계했습니다 (행 수 상한 없음)
+                <span aria-hidden="true"> · </span>
+                기준 {formatAnalyticsDateKst(report.generatedAt)} KST
+                {leagueLabel && (
+                  <>
+                    <span aria-hidden="true"> · </span>
+                    리그 필터는 포지션·리셋·역할·수상 섹션에 적용됩니다
+                  </>
+                )}
               </>
             ) : (
-              <span>통계 집계 준비 중...</span>
+              '통계 집계 준비 중...'
             )}
-          </div>
+          </p>
         </section>
 
-        {/* 에러 알림 배너 */}
         {errorMessage && (
           <div
             role="alert"
@@ -560,9 +531,7 @@ export function AdminAnalyticsDashboard() {
           >
             <div className="flex items-start gap-2.5">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-              <p className="text-[13px] font-semibold leading-snug">
-                {errorMessage}
-              </p>
+              <p className="text-[13px] font-semibold leading-snug">{errorMessage}</p>
             </div>
             <button
               type="button"
@@ -574,12 +543,11 @@ export function AdminAnalyticsDashboard() {
           </div>
         )}
 
-        {/* analytics_events 테이블 미생성 안내 배너 */}
         {report?.tableNotReady && (
           <div
             role="status"
             data-testid="analytics-table-not-ready"
-            className="p-4 rounded-[20px] bg-[var(--t-gold-soft)] border border-[var(--t-gold)]/20 text-[var(--t-g900)] flex items-start gap-3"
+            className="p-4 rounded-[20px] bg-[var(--t-gold-soft)] border border-[var(--t-gold)]/20 flex items-start gap-3"
           >
             <Database className="w-4 h-4 mt-0.5 text-[var(--t-gold)] shrink-0" />
             <div className="space-y-1 text-[13px]">
@@ -587,381 +555,327 @@ export function AdminAnalyticsDashboard() {
                 Supabase에 analytics_events 테이블이 아직 생성되지 않았습니다
               </p>
               <p className="text-[12px] text-[var(--t-g700)] leading-relaxed">
-                저장소의{' '}
-                <code className="font-mono font-semibold">
-                  supabase/migrations/20261124_create_analytics_events.sql
-                </code>{' '}
-                SQL을 Supabase SQL Editor에서 실행하면 익명 플레이 통계가 자동 적재되고 이 대시보드에 실시간 반영됩니다.
+                <code className="font-mono font-semibold">supabase/migrations/20261124_create_analytics_events.sql</code>
+                과 <code className="font-mono font-semibold">{SETUP_SQL_PATH}</code>를 Supabase SQL Editor에서 차례로 실행해 주세요.
               </p>
             </div>
           </div>
         )}
 
-        {/* 핵심 요약 KPI 카드 5종 */}
+        {report?.setupRequired && !report.tableNotReady && (
+          <div
+            role="status"
+            data-testid="analytics-setup-required"
+            className="p-4 rounded-[20px] bg-[var(--t-gold-soft)] border border-[var(--t-gold)]/20 flex items-start gap-3"
+          >
+            <Database className="w-4 h-4 mt-0.5 text-[var(--t-gold)] shrink-0" />
+            <div className="space-y-1 text-[13px]">
+              <p className="font-bold text-[var(--t-g900)]">
+                서버 집계 함수가 아직 설치되지 않았습니다
+              </p>
+              <p className="text-[12px] text-[var(--t-g700)] leading-relaxed">
+                저장소의 <code className="font-mono font-semibold">{SETUP_SQL_PATH}</code> 내용을 Supabase SQL Editor에서 한 번 실행하면 집계 지표가 표시됩니다. 기존 테이블과 데이터는 변경되지 않습니다. 아래 최근 로그는 지금도 확인할 수 있습니다.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 핵심 요약 KPI 카드 */}
         <section
           aria-label="핵심 플레이 지표"
           data-testid="analytics-kpi-grid"
-          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"
+          className="grid grid-cols-2 sm:grid-cols-4 gap-3"
         >
           {kpiCards.map((card) => (
             <div
               key={card.key}
               data-testid={`kpi-card-${card.key}`}
-              className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[18px] p-4 space-y-1.5"
+              className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[18px] p-4 space-y-1.5 min-w-0"
             >
-              <p className="text-[12px] font-semibold text-[var(--t-g500)]">
-                {card.label}
-              </p>
-              {loading && !report ? (
+              <p className="text-[12px] font-semibold text-[var(--t-g500)] truncate">{card.label}</p>
+              {showSkeleton ? (
                 <div className="h-8 w-20 rounded-md bg-[var(--t-g100)] animate-pulse" />
               ) : (
-                <p
-                  className={`text-[24px] sm:text-[26px] font-bold tracking-[-0.03em] tabular-nums leading-tight ${card.toneClass}`}
-                >
-                  {card.value.toLocaleString()}
-                  <span className="ml-0.5 text-[13px] font-semibold text-[var(--t-g500)]">
-                    {card.unit}
-                  </span>
+                <p className={`text-[22px] sm:text-[26px] font-bold tracking-[-0.03em] tabular-nums leading-tight ${card.tone}`}>
+                  {(card.value ?? 0).toLocaleString()}
+                  <span className="ml-0.5 text-[13px] font-semibold text-[var(--t-g500)]">{card.unit}</span>
                 </p>
               )}
-              <p className="text-[11px] text-[var(--t-g500)] truncate">
-                {card.subtext}
-              </p>
+              <p className="text-[11px] text-[var(--t-g500)] truncate">{card.subtext}</p>
             </div>
           ))}
         </section>
 
-        {/* 일별 추이 차트 (KST 기준) */}
-        <section
-          aria-label="일별 추이"
-          data-testid="analytics-daily-trend"
-          className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] p-5 space-y-4"
-        >
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div>
-              <h2 className="text-[16px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-                일별 플레이 추이
-              </h2>
-              <p className="text-[12px] text-[var(--t-g500)]">
-                한국 시간(KST) 기준 날짜별 고유 플레이어 수 및 신규 커리어 생성 건수
-              </p>
+        {report && !aggregateMissing && <InsightsCard insights={report.insights} />}
+
+        {/* 🏆 리그별 수상 테이블 */}
+        <section aria-label="리그별 MVP FMVP 우승" data-testid="analytics-league-awards" className={CARD_CLASS}>
+          <SectionHeader
+            title="🏆 리그별 MVP · FMVP · 우승"
+            description="season_completed 기준. 비율 아래 숫자는 발생/모수이며, 모수는 해당 필드가 실제로 수집된 시즌만 셉니다 (구버전 FMVP는 wonFinalsMvp 사용)."
+            aside="열 제목을 눌러 정렬"
+          />
+          {showSkeleton ? (
+            <SkeletonRows count={6} />
+          ) : (
+            <LeagueAwardsTable rows={report?.leagueAwards ?? []} activeLeague={leagueFilter} />
+          )}
+        </section>
+
+        {/* 🏀 포지션 밸런스 */}
+        <section aria-label="포지션별 밸런스" data-testid="analytics-position-balance" className={CARD_CLASS}>
+          <SectionHeader
+            title="🏀 포지션별 밸런스 매트릭스"
+            description="커리어 선택은 career_created 기준, 시즌 지표는 season_completed 기준 (구버전 시즌은 같은 커리어의 생성 포지션으로 보완)."
+            aside={leagueScopeNote}
+          />
+          {showSkeleton ? (
+            <SkeletonRows count={5} />
+          ) : report ? (
+            <PositionBalanceMatrix data={report.positionBalance} />
+          ) : null}
+        </section>
+
+        {/* 📈 퍼널 · 리셋 */}
+        <section aria-label="커리어 퍼널과 이탈" className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div data-testid="analytics-funnel" className={CARD_CLASS}>
+            <SectionHeader
+              title="📈 커리어 성장 퍼널"
+              description="고유 커리어(career_run_id) 단위 리그 도달률과 최대 도달 시즌"
+              aside={
+                report && report.funnel.leagueReachDenominator > 0
+                  ? `모수 ${report.funnel.leagueReachDenominator.toLocaleString()}커리어`
+                  : undefined
+              }
+            />
+            <div className="inline-flex items-center p-1 rounded-xl bg-[var(--t-g100)]">
+              {(
+                [
+                  ['reach', '리그 도달'],
+                  ['maxSeason', '최대 도달 시즌'],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFunnelTab(key)}
+                  className={`min-h-[30px] px-2.5 rounded-lg text-[12px] font-semibold whitespace-nowrap cursor-pointer ${
+                    funnelTab === key
+                      ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-xs'
+                      : 'text-[var(--t-g600)] hover:text-[var(--t-g900)]'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <span className="text-[12px] font-medium text-[var(--t-g500)]">
-              {ANALYTICS_RANGE_LABELS[range]}
-            </span>
+            {showSkeleton ? (
+              <SkeletonRows count={6} />
+            ) : (
+              <DistributionBarList
+                items={
+                  funnelTab === 'reach'
+                    ? report?.funnel.leagueReach ?? []
+                    : report?.funnel.maxSeasonReached ?? []
+                }
+                barColorClass={funnelTab === 'reach' ? 'bg-[var(--t-ok)]' : 'bg-[var(--t-gold)]'}
+                unitLabel="커리어"
+                emptyText="커리어 진행 기록이 아직 없습니다."
+              />
+            )}
           </div>
 
-          {loading && !report ? (
+          <div data-testid="analytics-resets" className={CARD_CLASS}>
+            <SectionHeader
+              title="🚪 이탈(리셋) 병목"
+              description="career_reset 발생 구간. 초반 벽 포기와 목표 달성 후 재도전을 구분합니다."
+              aside={
+                report
+                  ? `${leagueScopeNote} · ${report.resets.total.toLocaleString()}건`
+                  : undefined
+              }
+            />
+            {showSkeleton ? (
+              <SkeletonRows count={5} />
+            ) : report ? (
+              <ResetBottleneck resets={report.resets} />
+            ) : null}
+          </div>
+        </section>
+
+        {/* 역할 · 플레이오프 단계 */}
+        <section aria-label="시즌 역할과 플레이오프" className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div data-testid="analytics-roles" className={CARD_CLASS}>
+            <SectionHeader
+              title="🪑 벤치 → 주전 역할 분포"
+              description="시즌 종료 시점 역할 (1차 고도화 이후 수집분)"
+              aside={report ? `${leagueScopeNote} · 표본 ${report.seasonMeta.roleSample.toLocaleString()}시즌` : undefined}
+            />
+            {showSkeleton ? (
+              <SkeletonRows count={6} />
+            ) : (
+              <DistributionBarList
+                items={report?.seasonMeta.roles ?? []}
+                barColorClass="bg-[var(--t-accent)]"
+                unitLabel="시즌"
+                emptyText="역할 데이터가 아직 없습니다."
+              />
+            )}
+          </div>
+          <div data-testid="analytics-playoffs" className={CARD_CLASS}>
+            <SectionHeader
+              title="🏟️ 플레이오프 최종 단계"
+              description="시즌별 최종 성적 (1차 고도화 이후 수집분)"
+              aside={report ? `${leagueScopeNote} · 표본 ${report.seasonMeta.playoffSample.toLocaleString()}시즌` : undefined}
+            />
+            {showSkeleton ? (
+              <SkeletonRows count={6} />
+            ) : (
+              <DistributionBarList
+                items={report?.seasonMeta.playoffResults ?? []}
+                barColorClass="bg-[var(--t-ok)]"
+                unitLabel="시즌"
+                emptyText="플레이오프 데이터가 아직 없습니다."
+              />
+            )}
+          </div>
+        </section>
+
+        {/* 🎖️ 수상 · 엔딩 · 육성 메타 */}
+        <section aria-label="수상 엔딩 육성 메타" className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div data-testid="analytics-awards" className={CARD_CLASS}>
+            <SectionHeader
+              title="🎖️ 기타 수상 TOP"
+              description="awards 배열 기준. 비율은 수상 데이터가 있는 시즌 대비 수상 시즌 비율"
+              aside={
+                report
+                  ? `${leagueScopeNote} · 모수 ${report.awards.seasonsWithAwardData.toLocaleString()}시즌`
+                  : undefined
+              }
+            />
+            {showSkeleton ? (
+              <SkeletonRows count={6} />
+            ) : (
+              <DistributionBarList
+                items={report?.awards.items ?? []}
+                barColorClass="bg-[var(--t-gold)]"
+                unitLabel="회"
+                limit={10}
+                emptyText="수상 데이터가 아직 없습니다."
+              />
+            )}
+          </div>
+
+          <div data-testid="analytics-endings" className={CARD_CLASS}>
+            <SectionHeader
+              title="🏁 커리어 엔딩 · 명예의 전당"
+              description="career_ended 기준"
+              aside={
+                report
+                  ? `명예의 전당 ${formatPercentText(report.endings.hallOfFame.percent)} (${report.endings.hallOfFame.count}/${report.endings.hallOfFame.n})`
+                  : undefined
+              }
+            />
+            {showSkeleton ? (
+              <SkeletonRows count={5} />
+            ) : (
+              <DistributionBarList
+                items={report?.endings.byType ?? []}
+                barColorClass="bg-[var(--t-down)]"
+                emptyText="엔딩 유형이 기록된 은퇴가 아직 없습니다."
+              />
+            )}
+          </div>
+
+          <div data-testid="analytics-build-meta" className={`${CARD_CLASS} lg:col-span-2`}>
+            <SectionHeader
+              title="🧬 초기 빌드 · 육성 · 이동 메타"
+              description="career_created의 플레이스타일·성장 DNA·훈련 방향, league_changed의 이동 사유와 드래프트 라운드"
+            />
+            {showSkeleton ? (
+              <SkeletonRows count={4} />
+            ) : report ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {(
+                  [
+                    ['플레이스타일', report.buildMeta.playstyle, 'bg-[var(--t-accent)]'],
+                    ['성장 DNA', report.buildMeta.growthDna, 'bg-[var(--t-ok)]'],
+                    ['훈련 방향', report.buildMeta.trainingFocus, 'bg-[var(--t-gold)]'],
+                    ['리그 이동 사유', report.buildMeta.leagueChangeReasons, 'bg-[var(--t-down)]'],
+                    ['드래프트 라운드', report.buildMeta.draftRounds, 'bg-[var(--t-g700)]'],
+                  ] as const
+                ).map(([title, items, color]) => (
+                  <div key={title} className="space-y-3 min-w-0">
+                    <h3 className="text-[13px] font-bold text-[var(--t-g800)]">{title}</h3>
+                    <DistributionBarList items={items} barColorClass={color} emptyText="수집 전" />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {/* 일별 추이 · 환경 분포 */}
+        <section aria-label="일별 추이" data-testid="analytics-daily-trend" className={CARD_CLASS}>
+          <SectionHeader
+            title="일별 플레이 추이"
+            description="한국 시간(KST) 기준 날짜별 고유 플레이어 수 및 신규 커리어 생성 건수"
+            aside={ANALYTICS_RANGE_LABELS[range]}
+          />
+          {showSkeleton ? (
             <div className="h-[220px] rounded-xl bg-[var(--t-g50)] animate-pulse" />
           ) : (
             <DailyTrendChart points={report?.dailyTrend ?? []} />
           )}
         </section>
 
-        {/* 게임 밸런스 & 플레이 분포 2x2 그리드 */}
-        <section
-          aria-label="게임 밸런스 및 플레이 분포"
-          className="grid grid-cols-1 lg:grid-cols-2 gap-5"
-        >
-          {/* 1. 포지션별 선택 비율 */}
-          <div
-            data-testid="analytics-dist-positions"
-            className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] p-5 space-y-4"
-          >
-            <div>
-              <h2 className="text-[15px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-                포지션별 선택 비율
-              </h2>
-              <p className="text-[12px] text-[var(--t-g500)]">
-                신규 커리어 생성(career_created) 시 선택된 주 포지션 분포
-              </p>
-            </div>
-            {loading && !report ? (
-              <div className="space-y-3 animate-pulse">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="h-8 rounded-lg bg-[var(--t-g100)]" />
-                ))}
-              </div>
+        <section aria-label="접속 환경" data-testid="analytics-dist-env" className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className={CARD_CLASS}>
+            <SectionHeader title="기기별 플레이어" description="기기 유형별 고유 플레이어 수" />
+            {showSkeleton ? (
+              <SkeletonRows count={3} />
             ) : (
               <DistributionBarList
-                items={report?.distributions.positions ?? []}
-                barColorClass="bg-[var(--t-accent)]"
-                emptyText="아직 생성된 커리어 데이터가 없습니다."
+                items={report?.environment.devices ?? []}
+                barColorClass="bg-[var(--t-down)]"
+                unitLabel="명"
+                emptyText="기기 데이터가 아직 없습니다."
               />
             )}
           </div>
-
-          {/* 2. 리그별 도달 퍼널 */}
-          <div
-            data-testid="analytics-dist-leagues"
-            className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] p-5 space-y-4"
-          >
-            <div className="flex items-baseline justify-between gap-2">
-              <div>
-                <h2 className="text-[15px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-                  리그별 도달 퍼널
-                </h2>
-                <p className="text-[12px] text-[var(--t-g500)]">
-                  추적된 고유 커리어 중 각 리그에 도달한 비율
-                </p>
-              </div>
-              {report && report.distributions.leagueReachDenominator > 0 && (
-                <span className="text-[12px] font-medium text-[var(--t-g500)] tabular-nums shrink-0">
-                  모수 {report.distributions.leagueReachDenominator.toLocaleString()}커리어
-                </span>
-              )}
-            </div>
-            {loading && !report ? (
-              <div className="space-y-3 animate-pulse">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-7 rounded-lg bg-[var(--t-g100)]" />
-                ))}
-              </div>
+          <div className={CARD_CLASS}>
+            <SectionHeader title="게임 버전별 이벤트" description="game_version별 이벤트 수" />
+            {showSkeleton ? (
+              <SkeletonRows count={2} />
             ) : (
               <DistributionBarList
-                items={report?.distributions.leagueReach ?? []}
-                barColorClass="bg-[var(--t-ok)]"
-                unitLabel="커리어"
-                emptyText="리그 도달 이력이 아직 없습니다."
+                items={report?.environment.versions ?? []}
+                barColorClass="bg-[var(--t-g700)]"
+                emptyText="버전 데이터가 아직 없습니다."
               />
             )}
-          </div>
-
-          {/* 3. 시즌 진행 및 중도 리셋 분포 */}
-          <div
-            data-testid="analytics-dist-seasons"
-            className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] p-5 space-y-4"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h2 className="text-[15px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-                  시즌 진행 · 이탈 구간 분포
-                </h2>
-                <p className="text-[12px] text-[var(--t-g500)]">
-                  커리어별 최대 도달 시즌 및 중도 리셋 발생 시즌 구간
-                </p>
-              </div>
-              <div className="inline-flex items-center p-1 rounded-xl bg-[var(--t-g100)]">
-                <button
-                  type="button"
-                  onClick={() => setSeasonTab('maxSeason')}
-                  className={`min-h-[30px] px-2.5 rounded-lg text-[12px] font-semibold whitespace-nowrap cursor-pointer ${
-                    seasonTab === 'maxSeason'
-                      ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-xs'
-                      : 'text-[var(--t-g600)] hover:text-[var(--t-g900)]'
-                  }`}
-                >
-                  최대 도달 시즌
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSeasonTab('resetSeason')}
-                  className={`min-h-[30px] px-2.5 rounded-lg text-[12px] font-semibold whitespace-nowrap cursor-pointer ${
-                    seasonTab === 'resetSeason'
-                      ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-xs'
-                      : 'text-[var(--t-g600)] hover:text-[var(--t-g900)]'
-                  }`}
-                >
-                  리셋 발생 구간
-                </button>
-              </div>
-            </div>
-
-            {loading && !report ? (
-              <div className="space-y-3 animate-pulse">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="h-8 rounded-lg bg-[var(--t-g100)]" />
-                ))}
-              </div>
-            ) : seasonTab === 'maxSeason' ? (
-              <DistributionBarList
-                items={report?.distributions.maxSeasonReached ?? []}
-                barColorClass="bg-[var(--t-gold)]"
-                unitLabel="커리어"
-                emptyText="완료된 시즌 기록이 아직 없습니다."
-              />
-            ) : (
-              <DistributionBarList
-                items={report?.distributions.resetSeasons ?? []}
-                barColorClass="bg-[var(--t-up)]"
-                unitLabel="건"
-                emptyText="중도 초기화(리셋) 이벤트가 없습니다."
-              />
-            )}
-          </div>
-
-          {/* 4. 접속 기기 및 게임 버전 분포 */}
-          <div
-            data-testid="analytics-dist-env"
-            className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] p-5 space-y-5"
-          >
-            <div className="space-y-3">
-              <div>
-                <h2 className="text-[15px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-                  기기별 접속 비율
-                </h2>
-                <p className="text-[12px] text-[var(--t-g500)]">
-                  조회된 이벤트 기준 모바일 · 태블릿 · 데스크톱 비중
-                </p>
-              </div>
-              {loading && !report ? (
-                <div className="space-y-2.5 animate-pulse">
-                  {Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="h-7 rounded-lg bg-[var(--t-g100)]" />
-                  ))}
-                </div>
-              ) : (
-                <DistributionBarList
-                  items={report?.distributions.devices ?? []}
-                  barColorClass="bg-[var(--t-down)]"
-                  emptyText="기기 접속 데이터가 아직 없습니다."
-                />
-              )}
-            </div>
-
-            <div className="pt-4 border-t border-[var(--t-g100)] space-y-3">
-              <div>
-                <h3 className="text-[14px] font-bold text-[var(--t-g900)]">
-                  게임 버전별 분포
-                </h3>
-              </div>
-              {loading && !report ? (
-                <div className="h-12 rounded-lg bg-[var(--t-g100)] animate-pulse" />
-              ) : (
-                <DistributionBarList
-                  items={report?.distributions.versions ?? []}
-                  barColorClass="bg-[var(--t-g700)]"
-                  emptyText="버전 분포 데이터가 아직 없습니다."
-                />
-              )}
-            </div>
           </div>
         </section>
 
-        {/* 최근 주요 마일스톤 로그 (최신 25건) */}
+        {/* 최근 마일스톤 로그 */}
         <section
           aria-label="최근 주요 마일스톤 로그"
           data-testid="analytics-recent-logs"
           className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] overflow-hidden"
         >
-          <div className="px-5 py-4 border-b border-[var(--t-g100)] flex items-baseline justify-between gap-2">
-            <div>
-              <h2 className="text-[15px] font-bold tracking-[-0.02em] text-[var(--t-g900)]">
-                최근 주요 마일스톤 로그
-              </h2>
-              <p className="text-[12px] text-[var(--t-g500)]">
-                최신 25건 기준 익명 플레이 이벤트 요약 (선수명·개인정보 미포함)
-              </p>
-            </div>
-            <span className="text-[12px] font-medium text-[var(--t-g500)] tabular-nums shrink-0">
-              {report ? `${report.recentLogs.length}건 표시` : ''}
-            </span>
+          <div className="px-5 py-4 border-b border-[var(--t-g100)]">
+            <SectionHeader
+              title="최근 주요 마일스톤 로그"
+              description="세션 시작을 제외한 최신 30건 (선수명·개인정보 미포함). 항목을 누르면 원본 payload JSON이 펼쳐집니다."
+              aside={report ? `${report.recentLogs.length}건 표시` : undefined}
+            />
           </div>
-
-          {loading && !report ? (
-            <div className="divide-y divide-[var(--t-g100)]">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="px-5 py-3.5 animate-pulse flex gap-4">
-                  <div className="h-4 w-28 rounded bg-[var(--t-g100)]" />
-                  <div className="h-4 w-20 rounded bg-[var(--t-g100)]" />
-                  <div className="h-4 flex-1 rounded bg-[var(--t-g100)]" />
-                </div>
-              ))}
-            </div>
-          ) : !report || report.recentLogs.length === 0 ? (
-            <div
-              data-testid="analytics-empty-state"
-              className="py-14 px-6 text-center space-y-2"
-            >
-              <div className="w-11 h-11 mx-auto rounded-2xl bg-[var(--t-g100)] text-[var(--t-g400)] flex items-center justify-center">
-                <BarChart3 className="w-5 h-5" />
-              </div>
-              <p className="text-[15px] font-bold text-[var(--t-g800)]">
-                조건에 맞는 플레이 통계 이벤트가 없습니다
-              </p>
-              <p className="text-[13px] text-[var(--t-g500)]">
-                조회 기간이나 버전 필터를 변경하거나, 유저 플레이가 기록된 뒤 새로고침해 주세요.
-              </p>
+          {showSkeleton ? (
+            <div className="p-5">
+              <SkeletonRows count={5} />
             </div>
           ) : (
-            <>
-              {/* 데스크톱 테이블 */}
-              <div className="hidden md:block overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-[var(--t-g100)] text-[12px] font-bold text-[var(--t-g500)] bg-[var(--t-g50)]">
-                      <th className="py-3 px-5 whitespace-nowrap">발생 시각 (KST)</th>
-                      <th className="py-3 px-4 whitespace-nowrap">이벤트</th>
-                      <th className="py-3 px-4">핵심 요약</th>
-                      <th className="py-3 px-4 whitespace-nowrap">기기</th>
-                      <th className="py-3 px-5 text-right whitespace-nowrap">버전</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--t-g100)] text-[13px]">
-                    {report.recentLogs.map((log) => {
-                      const tone =
-                        EVENT_TONE_MAP[log.eventName] || EVENT_TONE_MAP.session_start;
-                      return (
-                        <tr
-                          key={log.id}
-                          className="hover:bg-[var(--t-g50)]/70 transition-colors"
-                        >
-                          <td className="py-3 px-5 font-mono text-[12px] text-[var(--t-g500)] tabular-nums whitespace-nowrap">
-                            {log.formattedDateKst}
-                          </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold ${tone.bg} ${tone.text}`}
-                            >
-                              {log.eventLabel}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-[var(--t-g800)] font-medium break-words">
-                            {log.summary}
-                          </td>
-                          <td className="py-3 px-4 text-[12px] text-[var(--t-g600)] whitespace-nowrap">
-                            {log.deviceLabel}
-                          </td>
-                          <td className="py-3 px-5 text-right font-mono text-[12px] text-[var(--t-g500)] tabular-nums whitespace-nowrap">
-                            {log.gameVersion ? `v${log.gameVersion}` : '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* 모바일 스택 리스트 (가로 넘침 방지) */}
-              <ul className="md:hidden divide-y divide-[var(--t-g100)]">
-                {report.recentLogs.map((log) => {
-                  const tone =
-                    EVENT_TONE_MAP[log.eventName] || EVENT_TONE_MAP.session_start;
-                  return (
-                    <li key={log.id} className="px-4 py-3.5 space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold ${tone.bg} ${tone.text}`}
-                        >
-                          {log.eventLabel}
-                        </span>
-                        <span className="font-mono text-[11px] text-[var(--t-g500)] tabular-nums">
-                          {log.formattedDateKst}
-                        </span>
-                      </div>
-                      <p className="text-[13px] font-medium text-[var(--t-g800)] leading-snug break-words">
-                        {log.summary}
-                      </p>
-                      <div className="flex items-center gap-1.5 text-[11px] text-[var(--t-g500)] tabular-nums">
-                        <span>{log.deviceLabel}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>{log.gameVersion ? `v${log.gameVersion}` : '버전 미상'}</span>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </>
+            <RecentLogsList logs={report?.recentLogs ?? []} />
           )}
         </section>
       </main>

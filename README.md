@@ -37,6 +37,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 2. `supabase/migrations/`의 SQL을 순서대로 실행해 테이블을 만듭니다.
    - `20261124_create_feedbacks.sql`: 버그 제보·피드백 (`feedbacks`)
    - `20261124_create_analytics_events.sql`: 익명 플레이 통계 (`analytics_events`)
+   - `20261125_admin_analytics_report.sql`: `/admin/analytics` 대시보드용 서버 집계 함수 (테이블은 변경하지 않음, service_role만 실행 가능)
    - SQL 편집기에 붙여 넣거나, Supabase CLI로 `supabase db push`를 실행하면 됩니다.
 3. 프로젝트 설정의 API 메뉴에서 URL과 service_role 키를 복사해 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`에 넣습니다.
 
@@ -45,7 +46,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 `ADMIN_PASSWORD`와 `ADMIN_SESSION_SECRET`을 설정한 뒤 아래 주소로 접속해 비밀번호로 로그인합니다.
 
 - `/admin/feedback`: 피드백 목록 조회, 상태 변경, 관리자 메모
-- `/admin/analytics`: 익명 플레이 통계 대시보드
+- `/admin/analytics`: 익명 플레이 통계 대시보드 (리그별 우승·MVP·FMVP, 포지션 밸런스, 리셋 병목, 밸런스 리포트 JSON 복사)
 
 세션은 12시간 유지되고, 10분 동안 로그인을 8회 실패하면 잠시 차단됩니다.
 
