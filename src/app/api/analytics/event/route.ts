@@ -5,6 +5,7 @@ import {
 } from '../../../../lib/adminAuth';
 import {
   createAnalyticsRateLimiter,
+  tagPreviewGameVersion,
   validateAnalyticsEventPayload,
 } from '../../../../lib/analyticsSchema';
 import { insertAnalyticsEventToSupabase } from '../../../../lib/supabaseAdmin';
@@ -91,7 +92,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = await insertAnalyticsEventToSupabase(validated.data);
+  // 미리보기 배포에서 들어온 이벤트는 정식 통계와 분리 (game_version에 '-preview')
+  const eventToStore = {
+    ...validated.data,
+    game_version: tagPreviewGameVersion(validated.data.game_version, process.env.VERCEL_ENV),
+  };
+  const result = await insertAnalyticsEventToSupabase(eventToStore);
   if (!result.ok) {
     return jsonNoStore(
       { ok: false, stored: false, error: result.error },

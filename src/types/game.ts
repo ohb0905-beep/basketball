@@ -572,6 +572,12 @@ export interface SeasonBoxScore {
   royRace?: AwardRaceEntry[];
   royRaceNarrative?: string;
   playerRoyRank?: number | null;
+  /** NCAA 신입 적응 목표 결과 (NCAA 첫 시즌만) */
+  freshmanAdaptation?: {
+    goals: Array<{ id: 'ROTATION' | 'ROY_RACE'; label: string; achieved: boolean; detail: string }>;
+    achievedCount: number;
+    draftStockBonus: number;
+  };
 }
 
 export interface CareerHighs {
@@ -704,6 +710,8 @@ export interface CareerEventChoice {
   startFarewellTour?: boolean;
   executeTradeToContender?: boolean;
   negotiateMidSeasonTrade?: boolean;
+  /** 이번 시즌 로테이션 진입 보장 (고교 '코치의 기회') */
+  grantRotationThisSeason?: boolean;
   markAgentAdviceDismissed?: boolean;
   triggerVeteranReinvention?: boolean;
   bypassAgeStatCap?: boolean;
@@ -758,6 +766,8 @@ export interface OffseasonOption {
     | 'RETURN_KBL_FAREWELL';
   isExistingContract?: boolean;
   tradeAcceptChancePct?: number;
+  /** 1.1.0 '우승 도전팀 이적 요청' 카드 */
+  contenderPath?: boolean;
   locked?: boolean;
   lockReason?: string;
 }
@@ -1093,6 +1103,10 @@ export interface CareerState {
   isOutOfLeagueWarning: boolean;
   agentAdviceShown?: boolean;
   midSeasonEventTriggeredThisYear?: boolean;
+  /** 고교 '코치의 기회' 인카운터를 잡은 시즌 (해당 시즌 로테이션 진입 보장) */
+  coachChanceRotationYear?: number | null;
+  /** '우승 도전팀 이적 요청'으로 합류한 팀 (2옵션 역할 적용) */
+  contenderPathTeamId?: string | null;
   lastTradeRumorYear?: number | null;
   seasonsOnCurrentTeam?: number;
   seenEventIds?: string[];

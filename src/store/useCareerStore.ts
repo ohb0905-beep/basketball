@@ -43,6 +43,10 @@ import {
 } from '../engine/draftEngine';
 import { resolveEncounterChoiceOutcome } from '../engine/encounterEngine';
 import {
+  evaluateFreshmanAdaptation,
+  isNcaaFreshmanSeason,
+} from '../engine/freshmanAdaptation';
+import {
   advancePlayoffRound,
   batchAdvanceEarlyPlayoffRounds,
   createLiveFinalGame,
@@ -106,6 +110,7 @@ import {
   CareerEventChoice,
   CareerMilestone,
   CareerState,
+  SeasonBoxScore,
   ClutchChoiceId,
   ContractType,
   EncounterResolutionResult,
@@ -1914,7 +1919,12 @@ export const useCareerStore = create<CareerStoreState>()(
         }
 
         const sim = simulateSeason(career);
-        const bs = sim.boxScore;
+        const freshmanAdaptation = isNcaaFreshmanSeason(career)
+          ? evaluateFreshmanAdaptation(sim.boxScore)
+          : null;
+        const bs: SeasonBoxScore = freshmanAdaptation
+          ? { ...sim.boxScore, freshmanAdaptation }
+          : sim.boxScore;
 
         const seasonPts = Math.round(bs.ppg * bs.gp);
         const seasonReb = Math.round(bs.rpg * bs.gp);
@@ -1989,6 +1999,23 @@ export const useCareerStore = create<CareerStoreState>()(
             title: `${bs.leagueName} 정규시즌 MVP 수상`,
             description: `평균 ${bs.ppg}점 · ${bs.rpg}리바운드 · ${bs.apg}도움으로 정규시즌 MVP에 선정되었습니다.`,
             type: 'AWARD',
+            teamName: bs.teamName,
+          });
+        }
+        if (freshmanAdaptation && freshmanAdaptation.achievedCount > 0) {
+          newMilestones.push({
+            id: `MS_FRESHMAN_ADAPT_${bs.year}`,
+            year: bs.year,
+            age: bs.age,
+            title:
+              freshmanAdaptation.achievedCount === freshmanAdaptation.goals.length
+                ? 'NCAA 신입 적응 완벽 달성'
+                : 'NCAA 신입 적응 목표 달성',
+            description: `${freshmanAdaptation.goals
+              .filter((g) => g.achieved)
+              .map((g) => g.label)
+              .join(', ')} · 스카우트 주가 +${freshmanAdaptation.draftStockBonus}`,
+            type: 'SPECIAL',
             teamName: bs.teamName,
           });
         }
@@ -2110,7 +2137,9 @@ export const useCareerStore = create<CareerStoreState>()(
             nextPotential: sim.nextPotential,
             potentialBreakthroughReason: sim.potentialBreakthroughReason,
             nextCoachTrust: sim.nextCoachTrust,
-            nextDraftStock: sim.nextDraftStock,
+            nextDraftStock: freshmanAdaptation
+              ? Math.min(100, sim.nextDraftStock + freshmanAdaptation.draftStockBonus)
+              : sim.nextDraftStock,
             nextBadges: sim.nextBadges,
             nextTraits: sim.nextTraits,
             brokenRolePromise: sim.brokenRolePromise,
@@ -3238,6 +3267,8 @@ export const useCareerStore = create<CareerStoreState>()(
               coachTrust: nextTrust,
               promisedRole: nextPromisedRole,
             }).role
+          : choice.grantRotationThisSeason && career.role.includes('가비지')
+          ? '벤치 로테이션'
           : career.role;
 
         const nextStoryArcs = getEffectiveStoryArcs(career);
@@ -3298,6 +3329,9 @@ export const useCareerStore = create<CareerStoreState>()(
             choice.enlistSangmu ? 0 : nextSeasonsOnTeam,
           tradeRequestedThisYear:
             career.tradeRequestedThisYear || isMidSeasonTradeAttempt,
+          coachChanceRotationYear: choice.grantRotationThisSeason
+            ? career.seasonYear
+            : career.coachChanceRotationYear ?? null,
           agentAdviceShown:
             career.agentAdviceShown || Boolean(choice.markAgentAdviceDismissed),
           militaryExempt: nextMilitaryExempt,
@@ -3550,11 +3584,14 @@ export const useCareerStore = create<CareerStoreState>()(
             return;
           }
 
-          const acceptProb = calculateOffseasonTradeAcceptProb(
-            career,
-            nextTeam,
-            option.scoutingScore ?? 70
-          );
+          const acceptProb =
+            option.contenderPath && typeof option.tradeAcceptChancePct === 'number'
+              ? option.tradeAcceptChancePct / 100
+              : calculateOffseasonTradeAcceptProb(
+                  career,
+                  nextTeam,
+                  option.scoutingScore ?? 70
+                );
           if (Math.random() >= acceptProb) {
             const trCfg = DRAFT_SCOUTING_CONFIG.trade;
             const nextRejectedTrust = Math.max(
@@ -3583,12 +3620,19 @@ export const useCareerStore = create<CareerStoreState>()(
                 relationships: syncedOffseasonReject.relationships,
                 offseasonOptions: lockedOptions,
               },
-              toast: {
-                id: `TOAST_${Date.now()}`,
-                title: `${career.team.shortName} 구단이 트레이드 요청을 반려했습니다`,
-                description: `${nextTeam.shortName}와의 패키지 협상이 결렬되었습니다. 소속팀 잔류 탭에서 기존 계약을 이어가세요.`,
-                tone: 'amber',
-              },
+              toast: option.contenderPath
+                ? {
+                    id: `TOAST_${Date.now()}`,
+                    title: `${nextTeam.shortName} 우승 도전 이적이 무산되었습니다`,
+                    description: '이번 오프시즌 이적 요청이 반려되었습니다. 남은 선택지에서 다음 시즌을 준비하세요.',
+                    tone: 'amber',
+                  }
+                : {
+                    id: `TOAST_${Date.now()}`,
+                    title: `${career.team.shortName} 구단이 트레이드 요청을 반려했습니다`,
+                    description: `${nextTeam.shortName}와의 패키지 협상이 결렬되었습니다. 소속팀 잔류 탭에서 기존 계약을 이어가세요.`,
+                    tone: 'amber',
+                  },
             });
             return;
           }
@@ -3660,7 +3704,11 @@ export const useCareerStore = create<CareerStoreState>()(
             year: career.seasonYear,
             age: career.age,
             title: `${nextTeam.name} (${LEAGUE_CONFIG[nextLeague].shortName}) ${
-              option.actionType === 'REQUEST_TRADE' ? '트레이드 이적' : '계약 체결'
+              option.contenderPath
+                ? '우승 도전 이적'
+                : option.actionType === 'REQUEST_TRADE'
+                ? '트레이드 이적'
+                : '계약 체결'
             }`,
             description: `약속 역할 ${ROLE_PROMISE_LABELS[nextPromisedRole]} · ${role} 입지로 새 시즌을 시작합니다.`,
             type: 'SPECIAL',
@@ -3705,6 +3753,11 @@ export const useCareerStore = create<CareerStoreState>()(
               ? 0
               : career.seasonsOnCurrentTeam ?? 0,
             tradeRequestedThisYear: false,
+            contenderPathTeamId: option.contenderPath
+              ? nextTeam.id
+              : isTeamChanged
+              ? null
+              : career.contenderPathTeamId ?? null,
             rivals: nextRivals,
             coachTrust: nextTrust,
             relationships: isTeamChanged

@@ -87,7 +87,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: true,
     isAmateur: false,
     foulLimit: 5,
-    playerBaselineOvr: 70,
+    playerBaselineOvr: 66, // 1.1.0: 70→66 (약팀 에이스 PO 진출 11.8%에 그쳐 캐리 상향)
     liveQuarterBasePts: 19,
     liveOppQuarterBasePts: 19,
     liveOvertimeBasePts: 9,
@@ -113,7 +113,7 @@ export const LEAGUE_BALANCE_META: Record<LeagueId, LeagueBalanceMeta> = {
     isPro: true,
     isAmateur: false,
     foulLimit: 5,
-    playerBaselineOvr: 78,
+    playerBaselineOvr: 75, // 1.1.0: 78→75 (약팀 에이스 PO 진출 14.3%에 그쳐 캐리 상향)
     liveQuarterBasePts: 20,
     liveOppQuarterBasePts: 20,
     liveOvertimeBasePts: 9,
@@ -470,8 +470,87 @@ export const LIVE_GAME_CONFIG = {
   >,
 };
 
+/**
+ * 1.1.0 NBA 진입·루키 적응 밸런스
+ * - NBA 첫 시즌부터 1옵션 에이스가 되는 비율을 줄이고, 로테이션에서 시작해 2~4년에 걸쳐 에이스로 올라가도록 조정합니다.
+ */
+export const NBA_ENTRY_CONFIG = {
+  /** NBA 드래프트 지명 위상 보너스 (roleIndex) — 기존 15/12/9 */
+  pedigreeBonus: { top5: 9.0, lottery: 7.0, firstRound: 5.0, secondRound: 2.0 },
+  /** NBA 출전 시즌 수별 적응 페널티 (roleIndex) — 0시즌(루키), 1시즌, 2시즌 */
+  adaptationPenaltyBySeason: [5.0, 3.0, 1.5] as readonly number[],
+  /** NBA 첫 시즌에는 하위 리그에서 쌓은 효율 모멘텀을 이 비율만 반영 */
+  rookieMomentumCarryover: 0.3,
+  /** NBA 신규 입성 시 1옵션 에이스 약속에 필요한 OVR-팀 전력 격차 */
+  newcomerAcePromiseGap: 7,
+  /** NBA 신규 입성 시 주전 보장 약속에 필요한 OVR-팀 전력 격차 */
+  newcomerStarterPromiseGap: 1,
+  /** 타 리그 → NBA 오퍼 스카우팅 기준선 추가 가산 */
+  outsideOfferBarBonus: 3,
+  /** G리그 → NBA 콜업에 필요한 36분당 득점 — 기존 17.5 */
+  gleagueCallUpPer36Pts: 19.0,
+  /** NBA 드래프트 예상 순위 기준점 (75 - 준비도 점수 → 값이 클수록 지명이 어려움) — 기존 75 */
+  draftPickAnchor: 83,
+  /** 미지명 선수 투웨이 오퍼 스카우팅 기준 — 기존 62 */
+  undraftedTwoWayMinScore: 66,
+  /** 미지명 투웨이 오퍼는 예상 순위가 이 값 이내인 '아깝게 놓친' 선수에게만 — 60순위 밖 8칸 */
+  undraftedTwoWayMaxPick: 68,
+  /** NBA 지명에 필요한 최소 OVR (NBA 기준치 대비 격차) — 이보다 낮으면 미지명 */
+  draftMinOvrBelowLdr: 15,
+  /** 미지명 투웨이 오퍼에 필요한 최소 OVR (NBA 기준치 대비 격차) */
+  undraftedTwoWayMinOvrBelowLdr: 13,
+} as const;
+
+/**
+ * 1.1.0 '우승 도전팀 이적 요청' (컨텐더 경로)
+ * - 플레이오프에 2년 연속 실패한 NBA 에이스에게 오프시즌 우승 도전팀 이적 카드를 제시합니다.
+ * - 이적하면 2옵션 주전으로 뛰며 출전 시간·MVP 기회는 줄지만 우승 확률이 올라갑니다.
+ */
+export const CONTENDER_PATH_CONFIG = {
+  /** 연속 PO 실패 시즌 수 조건 */
+  missedPlayoffSeasons: 2,
+  /** 제시할 우승 도전팀 수 (최대) */
+  maxOffers: 3,
+  /** 카드가 열리는 최대 나이 */
+  maxAge: 34,
+  /** 2옵션 역할이 유지되는 시즌 수 (이적 후) */
+  secondOptionSeasons: 2,
+  /** 2옵션 기간 최대 출전 시간 (주전 스타터 구간) */
+  secondOptionMaxMpg: 30.5,
+  /** 수락 확률 보정 (우승팀은 에이스 영입에 적극적) */
+  acceptProbBonus: 0.05,
+  /** 전력이 더 강한 우승 도전팀일수록 낮아지는 수락 확률 (순위 1칸당) */
+  acceptProbStepByRank: 0.08,
+  /** 수락 확률 범위 */
+  minAcceptProb: 0.2,
+  maxAcceptProb: 0.85,
+  /** FA 신분 이적 시 계약 기간 */
+  faContractYears: 2,
+} as const;
+
+/**
+ * 1.1.0 KBL 신인 적응 (NBA 복귀·해외 복귀 베테랑에는 적용하지 않음)
+ */
+export const KBL_ROOKIE_CONFIG = {
+  /** KBL 드래프트 지명 위상 보너스 (roleIndex) — 기존 14.5/11.5/9 */
+  pedigreeBonus: { top3: 9.5, top6: 7.5, firstRound: 5.5 },
+  /** 프로 경력이 없는 KBL 신인의 첫 시즌·2번째 시즌 적응 페널티 (roleIndex) */
+  adaptationPenaltyBySeason: [5.5, 2.5] as readonly number[],
+} as const;
+
 export const ROLE_MPG_CONFIG = {
   trustHonorThreshold: 38,
+  /** 고교 '코치의 기회': 가비지 타임 선수에게 시즌 중반 찾아오는 로테이션 진입 기회 */
+  coachChance: {
+    /** 고교 가비지 타임 선수에게 시즌 중반 인카운터로 등장할 확률 */
+    triggerProb: 0.6,
+    /** 기회를 잡으면 보장되는 최소 출전 시간 (벤치 로테이션 구간) */
+    minMpg: 11.5,
+    /** 보장 출전 시간 위 무작위 폭 */
+    mpgJitter: 3.0,
+    /** 보장 시 최소 출전 경기 비율 */
+    minGpRatio: 0.72,
+  },
   minMpg: 4.2,
   maxMpg: 37.2,
   minBasePer36: 9.8,

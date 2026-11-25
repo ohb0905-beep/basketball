@@ -10,6 +10,11 @@ import {
 import { LEAGUE_CONFIG } from '../../data/leagues';
 import { getLeagueRecordChases } from '../../engine/recordBookEngine';
 import {
+  FRESHMAN_ADAPTATION_CONFIG,
+  describeFreshmanAdaptationGoals,
+  isNcaaFreshmanSeason,
+} from '../../engine/freshmanAdaptation';
+import {
   getEffectiveCashBalance,
   getPersonalCarePackageCost,
   useCareerStore,
@@ -303,13 +308,19 @@ export function SeasonTab() {
   const stayOption = career.offseasonOptions.find(
     (o) => o.id === 'OPT_STAY_CURRENT_CONTRACT' && o.actionType === 'STAY_TEAM'
   );
+  const contenderPathOptions = career.offseasonOptions.filter(
+    (o) => o.contenderPath
+  );
   const tradeOptions = career.offseasonOptions.filter(
-    (o) => o.actionType === 'REQUEST_TRADE'
+    (o) => o.actionType === 'REQUEST_TRADE' && !o.contenderPath
   );
   const auxiliaryContractOptions = career.offseasonOptions.filter(
     (o) =>
       o.id !== 'OPT_STAY_CURRENT_CONTRACT' &&
       o.actionType !== 'REQUEST_TRADE'
+  );
+  const listedOffseasonOptions = career.offseasonOptions.filter(
+    (o) => !o.contenderPath
   );
   const isUnderActiveProContract =
     isProLeague &&
@@ -598,6 +609,61 @@ export function SeasonTab() {
             )}
           </div>
 
+          {/* 우승 도전팀 이적 요청 (PO 연속 실패 NBA 에이스 전용) */}
+          {contenderPathOptions.length > 0 && (
+            <div
+              data-testid="contender-path-card"
+              className="p-4 rounded-2xl bg-[var(--t-accent-soft)] space-y-3"
+            >
+              <div className="space-y-1">
+                <span className="block text-[12px] font-bold text-[var(--t-accent-ink)]">
+                  우승 도전팀 이적 요청
+                </span>
+                <p className="text-[13px] text-[var(--t-g700)] leading-relaxed">
+                  {career.team.shortName}에서 플레이오프에 연속으로 실패했습니다. 우승 도전팀으로 옮기면
+                  2옵션 주전으로 뛰게 되어 출전 시간과 MVP 기회는 줄지만 반지에 가까워집니다.
+                  요청은 오프시즌에 한 번만 할 수 있습니다.
+                </p>
+              </div>
+              <div className="divide-y divide-[var(--t-g200)]/60 -mx-1.5">
+                {contenderPathOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    data-testid="contender-path-option"
+                    disabled={option.locked}
+                    onClick={() => selectOffseasonOption(option)}
+                    className={`w-full min-h-[64px] px-1.5 py-2.5 text-left flex items-center gap-3 t-tap ${
+                      option.locked ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer'
+                    }`}
+                  >
+                    {option.targetTeam && <TeamEmblem team={option.targetTeam} size="sm" />}
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <span className="block text-[15px] font-bold text-[var(--t-g900)] truncate">
+                        {option.targetTeam?.name ?? option.title}
+                      </span>
+                      <span className="block text-[12px] text-[var(--t-g600)] truncate tabular-nums">
+                        {option.locked
+                          ? option.lockReason
+                          : option.isExistingContract
+                          ? `수락 예상 ${option.tradeAcceptChancePct ?? 0}% · 2옵션 주전 · 잔여 계약 승계`
+                          : `수락 예상 ${option.tradeAcceptChancePct ?? 0}% · 2옵션 주전 · ${formatSalaryOffer(
+                              option.annualSalary,
+                              option.contractYears
+                            )}`}
+                      </span>
+                    </div>
+                    {option.locked ? (
+                      <Lock className="w-3.5 h-3.5 text-[var(--t-g400)] shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-[var(--t-g400)] shrink-0" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 다년 계약 잔여 중: '소속팀 잔류' | '트레이드 요청' 전용 2탭 */}
           {isUnderActiveProContract && stayOption ? (
             <div className="space-y-3">
@@ -770,7 +836,7 @@ export function SeasonTab() {
           ) : (
             /* 계약 만료(FA) / 아마추어 / 투웨이 / 상무: 오퍼 리스트 행 */
             <div className="divide-y divide-[var(--t-g100)] -mx-2">
-              {career.offseasonOptions.map((option: OffseasonOption) => {
+              {listedOffseasonOptions.map((option: OffseasonOption) => {
                 const dirLabel = option.targetTeam
                   ? getTeamDirectionLabel(
                       option.targetTeam.direction,
@@ -930,6 +996,75 @@ export function SeasonTab() {
           </p>
         </section>
       )}
+
+      {/* NCAA 신입 적응 목표 (NCAA 첫 시즌 진행 전 / 직후 결과) */}
+      {isNcaaFreshmanSeason(career) &&
+        !career.offseasonLocked &&
+        seasonPhase === 'REGULAR_SEASON' && (
+          <section data-testid="freshman-goal-card" className="t-card space-y-2.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[12px] font-bold text-[var(--t-accent-ink)]">
+                NCAA 신입 적응
+              </span>
+              <span className="text-[12px] font-semibold text-[var(--t-g500)]">
+                목표당 스카우트 주가 +{FRESHMAN_ADAPTATION_CONFIG.stockBonusPerGoal}
+              </span>
+            </div>
+            <ul className="space-y-1.5">
+              {describeFreshmanAdaptationGoals().map((g) => (
+                <li
+                  key={g.id}
+                  className="flex items-center gap-2 text-[14px] font-semibold text-[var(--t-g900)]"
+                >
+                  <span className="w-4 h-4 rounded-full border-2 border-[var(--t-g300)] shrink-0" />
+                  {g.label}
+                </li>
+              ))}
+            </ul>
+            <p className="text-[12px] text-[var(--t-g500)]">
+              시즌이 끝나면 신인왕 레이스 순위와 함께 결과가 공개됩니다.
+            </p>
+          </section>
+        )}
+      {lastSeason?.freshmanAdaptation && (
+          <section data-testid="freshman-goal-result" className="t-card space-y-2.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[12px] font-bold text-[var(--t-accent-ink)]">
+                NCAA 신입 적응 결과
+              </span>
+              <span className="text-[12px] font-bold text-[var(--t-g700)] tabular-nums">
+                {lastSeason.freshmanAdaptation.achievedCount}/
+                {lastSeason.freshmanAdaptation.goals.length} 달성
+                {lastSeason.freshmanAdaptation.draftStockBonus > 0
+                  ? ` · 주가 +${lastSeason.freshmanAdaptation.draftStockBonus}`
+                  : ''}
+              </span>
+            </div>
+            <ul className="space-y-1.5">
+              {lastSeason.freshmanAdaptation.goals.map((g) => (
+                <li key={g.id} className="flex items-center justify-between gap-2">
+                  <span
+                    className={`flex items-center gap-2 text-[14px] font-semibold ${
+                      g.achieved ? 'text-[var(--t-g900)]' : 'text-[var(--t-g500)]'
+                    }`}
+                  >
+                    <span
+                      className={`w-4 h-4 rounded-full shrink-0 ${
+                        g.achieved
+                          ? 'bg-[var(--t-accent)]'
+                          : 'border-2 border-[var(--t-g300)]'
+                      }`}
+                    />
+                    {g.label}
+                  </span>
+                  <span className="text-[12px] text-[var(--t-g500)] tabular-nums shrink-0">
+                    {g.detail}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
       {/* 역할 보장 위반 시 긴급 트레이드 요청 행 (프로 비군인 계약 전용) */}
       {career.brokenRolePromise &&

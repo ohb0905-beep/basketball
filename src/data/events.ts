@@ -1,5 +1,6 @@
 import {
   DRAFT_SCOUTING_CONFIG,
+  ROLE_MPG_CONFIG,
   INTERNATIONAL_TOURNAMENT_CONFIG,
   MILITARY_SERVICE_CONFIG,
   canUseProTradeSystem,
@@ -298,6 +299,40 @@ export function createAgentRetirementAdviceEvent(
 }
 
 /**
+ * 고교 가비지 타임 선수용 '코치의 기회' 인카운터
+ * - 기회를 잡으면 이번 시즌 남은 경기에서 벤치 로테이션 출전 시간이 보장됩니다.
+ */
+export function createCoachChanceEvent(career: CareerState): CareerEvent {
+  return {
+    id: `EVT_MID_HS_COACH_CHANCE_${career.seasonYear}`,
+    title: '코치의 기회',
+    subtitle: '정규시즌 반환점 · 로테이션 진입 찬스',
+    description: `점수 차가 벌어진 4쿼터, 벤치 끝에서 묵묵히 몸을 풀던 당신을 ${career.team.shortName} 코치가 불러 세웠습니다. "다음 경기부터 몇 분 줘 볼 테니 보여줘 봐." 처음으로 찾아온 진짜 기회입니다.`,
+    category: 'MID_SEASON_CROSSROADS',
+    choices: [
+      {
+        label: '기회를 잡는다 · 주어진 몇 분에 모든 걸 쏟는다',
+        description: '수비와 허슬부터 확실히 보여주며 코치의 믿음을 얻습니다.',
+        riskTier: 'SAFE',
+        effectSummary: '이번 시즌 벤치 로테이션 진입 확정 · 감독 신뢰도 +5 · DEF +1',
+        statChanges: { def: 1 },
+        trustDelta: 5,
+        draftStockDelta: 2,
+        grantRotationThisSeason: true,
+      },
+      {
+        label: '아직은 이르다 · 개인 훈련으로 기본기를 다진다',
+        description: '출전 대신 남는 시간을 슈팅·볼 핸들링 연습에 쏟습니다.',
+        riskTier: 'SAFE',
+        effectSummary: 'OUT +1, PLY +1 · 출전 시간 변화 없음',
+        statChanges: { out: 1, ply: 1 },
+        trustDelta: 1,
+      },
+    ],
+  };
+}
+
+/**
  * 시즌 중반(50% 진행 시점) '커리어 분기점(Mid-Season Crossroads)' 이벤트 생성
  * - 트레이드 데드라인 루머는 최소 3시즌 쿨다운 + 현 소속팀 2시즌 이상 재적 조건 적용 (역할 약속 위반 시에만 예외)
  * - 매 시즌 반복 대신 올스타 브레이크 점검, 라커룸 리더십, 전술 해법 등 다양한 서사를 제공
@@ -374,6 +409,16 @@ export function rollMidSeasonCrossroadsEvent(
         },
       ],
     };
+  }
+
+  // 시나리오 1-B: 고교 가비지 타임 선수에게 찾아오는 '코치의 기회' (잡으면 이번 시즌 로테이션 진입)
+  if (
+    career.league === 'HIGH_SCHOOL' &&
+    career.role.includes('가비지') &&
+    career.coachChanceRotationYear !== career.seasonYear &&
+    rng() < ROLE_MPG_CONFIG.coachChance.triggerProb
+  ) {
+    return createCoachChanceEvent(career);
   }
 
   // 시나리오 2: 주전 부상으로 찾아온 3주간의 임시 선발 쇼케이스 기회 (벤치/식스맨/유망주 역할일 때)

@@ -168,7 +168,14 @@ for (let run = 0; run < CAREERS; run++) {
         continue;
       }
       if (st.view === 'DRAFT_LIVE') {
-        st.finalizeDraftSigning(c.draftResult?.pickNumber ? 'NBA_STANDARD' : 'GLEAGUE');
+        {
+          // 실제 드래프트 화면과 같은 선택지: 1라운드는 보장 계약, 2라운드·미지명은 투웨이(있으면) 또는 G리그
+          const dr = c.draftResult;
+          const twoWayTeam = dr?.draftedTeam || dr?.twoWayOfferTeam;
+          st.finalizeDraftSigning(
+            dr?.draftType === 'KBL' ? 'KBL' : dr?.round === 1 ? 'NBA_STANDARD' : twoWayTeam ? 'TWO_WAY' : 'GLEAGUE'
+          );
+        }
         continue;
       }
       if (c.pendingEvent) {
