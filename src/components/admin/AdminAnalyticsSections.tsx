@@ -122,7 +122,7 @@ export function DistributionBarList({
 }
 
 /** 비율 + 발생/모수 (모수 0이면 '-') */
-function RateText({ cell, emphasize = false }: { cell: RateCell; emphasize?: boolean }) {
+export function RateText({ cell, emphasize = false }: { cell: RateCell; emphasize?: boolean }) {
   if (cell.n === 0 || cell.percent === null) {
     return <span className="text-[var(--t-g400)]">-</span>;
   }

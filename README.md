@@ -37,7 +37,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 2. `supabase/migrations/`의 SQL을 순서대로 실행해 테이블을 만듭니다.
    - `20261124_create_feedbacks.sql`: 버그 제보·피드백 (`feedbacks`)
    - `20261124_create_analytics_events.sql`: 익명 플레이 통계 (`analytics_events`)
-   - `20261125_admin_analytics_report.sql`: `/admin/analytics` 대시보드용 서버 집계 함수 (테이블은 변경하지 않음, service_role만 실행 가능)
+   - `20261125_admin_analytics_report.sql`: `/admin/analytics` 대시보드용 서버 집계 함수 (테이블은 변경하지 않음, service_role만 실행 가능). 2026-11-25 2차: 버전별 비교·난이도 설문·생성→드래프트 퍼널 추가 (다시 실행하면 교체됨)
    - `20261125_analytics_funnel_events.sql`: 1.0.1 퍼널 이벤트(`creation_started`, `draft_completed`) 허용. 1.0.1 배포 전에 실행
    - `20261125_analytics_retention.sql`: 일별 요약 테이블과 `analytics_rollup_and_prune(보존일수)` 함수. 만들기만 하고, 원본 삭제는 함수를 직접 실행할 때만 일어남
    - `20261125_analytics_survey_event.sql`: 1.1.2 난이도 설문 이벤트(`survey_response`) 허용. 1.1.2 배포 전에 실행

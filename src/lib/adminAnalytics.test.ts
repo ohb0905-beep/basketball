@@ -10,6 +10,10 @@ import {
 import {
   AnalyticsEventRow,
   buildAdminAnalyticsReport,
+  buildCreationFunnel,
+  buildSurveyReport,
+  buildVersionCompare,
+  compareGameVersionsDesc,
   buildShareableAnalyticsSummary,
   getAnalyticsRangeStartIso,
   INSIGHT_MIN_SAMPLE,
@@ -457,6 +461,7 @@ test(
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN CREATE ROLE service_role; END IF;
       END $$;
       \\i ${path.join(migrationsDir, '20261124_create_analytics_events.sql')}
+      \\i ${path.join(migrationsDir, '20261125_analytics_survey_event.sql')}
       \\i ${path.join(migrationsDir, '20261125_admin_analytics_report.sql')}
       TRUNCATE public.analytics_events;
     `);
@@ -567,5 +572,205 @@ test(
              has_function_privilege('service_role', 'public.admin_analytics_report(timestamptz,text,text)', 'EXECUTE')::text;
     `);
     assert.equal(privileges, 'false,false,true');
+  }
+);
+
+// ============================================================================
+// 2차 추가: 생성→드래프트 퍼널, 난이도 설문, 버전별 비교
+// ============================================================================
+
+test('version sorting puts newest first and preview after its release', () => {
+  const versions = ['1.0.0', '1.10.0', '1.1.2-preview', '1.9.0', '1.1.2', 'unknown'];
+  assert.deepEqual([...versions].sort(compareGameVersionsDesc), [
+    '1.10.0',
+    '1.9.0',
+    '1.1.2',
+    '1.1.2-preview',
+    '1.0.0',
+    'unknown',
+  ]);
+});
+
+test('extras builders tolerate missing aggregate keys (old function)', () => {
+  const report = buildAdminAnalyticsReport({ schemaVersion: 1, kpi: {} }, [], {
+    range: '7d',
+    version: 'all',
+    league: 'all',
+    nowMs: NOW_MS,
+  });
+  assert.equal(report.extrasAvailable, false);
+  assert.equal(report.survey.total, 0);
+  assert.equal(report.survey.responseRate, null);
+  assert.equal(report.survey.questions.length, 5);
+  assert.deepEqual(report.versionCompare, []);
+  assert.equal(report.creationFunnel.runSteps[0].count, 0);
+  assert.equal(report.creationFunnel.runSteps[1].percentOfPrev, null);
+  assert.equal(hasNaNDeep(report), false);
+});
+
+test('extras builders compute rates and labels', () => {
+  const funnel = buildCreationFunnel({
+    startedSessions: 10,
+    createdSessions: 8,
+    runs: 20,
+    reachedDraft: 10,
+    drafted: 5,
+    reachedNba: 4,
+    ended: 2,
+    reset: 3,
+    draftOutcomes: [
+      { key: 'NBA_UNDRAFTED', count: 2, ovrAvg: 65, pickAvg: null, twoWay: 1 },
+      { key: 'NBA_R1', count: 3, ovrAvg: 76.25, pickAvg: 12, twoWay: 0 },
+    ],
+  });
+  assert.equal(funnel.sessionSteps[1].percentOfPrev, 80);
+  assert.equal(funnel.runSteps[2].percentOfPrev, 50);
+  assert.equal(funnel.runSteps[2].percentOfStart, 25);
+  assert.deepEqual(funnel.resetRuns, { count: 3, n: 20, percent: 15 });
+  assert.deepEqual(
+    funnel.draftOutcomes.map((o) => o.label),
+    ['NBA 1라운드 지명', 'NBA 미지명']
+  );
+
+  const survey = buildSurveyReport({
+    total: 4,
+    submitted: 3,
+    skipped: 1,
+    withComment: 1,
+    questions: [
+      { key: 'nbaEntry', n: 3, avg: 4.333, dist: [0, 0, 1, 0, 2], expN: 1, expAvg: 3, noExpN: 2, noExpAvg: 5 },
+    ],
+  });
+  assert.equal(survey.responseRate, 75);
+  const nba = survey.questions.find((q) => q.key === 'nbaEntry')!;
+  assert.equal(nba.avg, 4.33);
+  assert.deepEqual(nba.dist, [0, 0, 1, 0, 2]);
+  assert.equal(nba.noExpAvg, 5);
+  assert.equal(survey.questions.find((q) => q.key === 'hsPacing')?.experiencedLabel, null);
+
+  const versions = buildVersionCompare([
+    { version: '1.0.0', runs: 10, reachedNba: 5, ended: 4, reset: 2, nbaChampN: 20, nbaChamps: 1 },
+    { version: '1.1.0-preview', runs: 0 },
+    { version: '1.1.0', runs: 4, reachedNba: 1 },
+  ]);
+  assert.deepEqual(
+    versions.map((v) => v.label),
+    ['v1.1.0', 'v1.1.0 미리보기', 'v1.0.0']
+  );
+  assert.equal(versions[2].nbaReach.percent, 50);
+  assert.equal(versions[2].nbaChampionship.percent, 5);
+  assert.equal(versions[1].nbaReach.percent, null);
+  assert.equal(versions[1].isPreview, true);
+});
+
+test(
+  'admin_analytics_report SQL builds funnel, survey and version comparison',
+  { skip: PSQL_COMMAND ? false : 'ANALYTICS_SQL_TEST_PSQL not set' },
+  () => {
+    const migrationsDir = path.resolve(__dirname, '../../supabase/migrations');
+    runPsql(`
+      SET client_min_messages = warning;
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN CREATE ROLE service_role; END IF;
+      END $$;
+      \\i ${path.join(migrationsDir, '20261124_create_analytics_events.sql')}
+      \\i ${path.join(migrationsDir, '20261125_analytics_survey_event.sql')}
+      \\i ${path.join(migrationsDir, '20261125_admin_analytics_report.sql')}
+      TRUNCATE public.analytics_events;
+    `);
+
+    const at = '2026-11-24T03:00:00Z';
+    const ins = (
+      eventName: string,
+      session: string,
+      run: string | null,
+      payload: Record<string, unknown>,
+      version: string,
+      anon: string
+    ) =>
+      `INSERT INTO public.analytics_events (event_name, anonymous_id, session_id, career_run_id, game_version, device_type, payload, created_at)
+       VALUES ('${eventName}', '${anon}', '${session}', ${run ? `'${run}'` : 'NULL'}, '${version}', 'desktop', '${JSON.stringify(payload)}'::jsonb, '${at}');`;
+
+    runPsql(
+      [
+        // 구버전 커리어 (생성 화면 진입 기록 없음 → 퍼널 모수 제외)
+        ins('career_created', 's-old', 'run-old', { position: 'PG' }, '1.0.0', 'a-old'),
+        ins('season_completed', 's-old', 'run-old', { league: 'NBA', wonChampionship: true, wonMvp: false, madePlayoffs: true }, '1.0.0', 'a-old'),
+        // 세션 1: 생성 화면 진입 → 커리어 2개 (하나는 NBA 지명 후 NBA 도달·은퇴, 하나는 미지명 후 KBL 지명)
+        ins('creation_started', 's1', null, { hasExistingSave: false, hofCount: 0 }, '1.1.0', 'a1'),
+        ins('career_created', 's1', 'run-1', { position: 'C' }, '1.1.0', 'a1'),
+        ins('draft_completed', 's1', 'run-1', { draftType: 'NBA', drafted: true, round: 1, pickNumber: 10, overall: 78, hasTwoWayOffer: false }, '1.1.0', 'a1'),
+        ins('league_changed', 's1', 'run-1', { fromLeague: 'NCAA', toLeague: 'NBA' }, '1.1.0', 'a1'),
+        ins('season_completed', 's1', 'run-1', { league: 'NBA', wonChampionship: false, wonMvp: true, madePlayoffs: false }, '1.1.0', 'a1'),
+        ins('career_ended', 's1', 'run-1', { totalSeasons: 12, hallOfFame: true }, '1.1.0', 'a1'),
+        ins('career_created', 's1', 'run-2', { position: 'PG' }, '1.1.0', 'a1'),
+        ins('draft_completed', 's1', 'run-2', { draftType: 'NBA', drafted: false, round: null, pickNumber: null, overall: 66, hasTwoWayOffer: true }, '1.1.0', 'a1'),
+        ins('draft_completed', 's1', 'run-2', { draftType: 'KBL', drafted: true, round: 1, pickNumber: 3, overall: 66, hasTwoWayOffer: false }, '1.1.0', 'a1'),
+        ins('career_reset', 's1', 'run-2', { abandonedLeague: 'KBL' }, '1.1.0', 'a1'),
+        // 세션 2: 생성 화면만 보고 나감
+        ins('creation_started', 's2', null, { hasExistingSave: true, hofCount: 1 }, '1.1.0', 'a2'),
+        // 설문: 제출 2건, 건너뛰기 1건
+        ins('survey_response', 's1', null, { surveyId: 'difficulty_2026_11', status: 'submitted', hasComment: true, militaryExemptionRating: 4, nbaEntryRating: 5, nbaPlayoffsRating: 3, kblOverseasRating: 2, hsPacingRating: 3, militaryExempt: true, reachedNba: false, nbaPlayoffSeasons: 0, kblSeasons: 3, overseasSeasons: 0 }, '1.1.2', 'a1'),
+        ins('survey_response', 's3', null, { surveyId: 'difficulty_2026_11', status: 'submitted', hasComment: false, militaryExemptionRating: 2, nbaEntryRating: 3, nbaPlayoffsRating: 4, kblOverseasRating: 3, hsPacingRating: 1, militaryExempt: false, reachedNba: true, nbaPlayoffSeasons: 2, kblSeasons: 0, overseasSeasons: 0 }, '1.1.2', 'a3'),
+        ins('survey_response', 's4', null, { surveyId: 'difficulty_2026_11', status: 'skipped', hasComment: false, militaryExemptionRating: null, nbaEntryRating: null, nbaPlayoffsRating: null, kblOverseasRating: null, hsPacingRating: null, militaryExempt: false, reachedNba: false, nbaPlayoffSeasons: 0, kblSeasons: 0, overseasSeasons: 0 }, '1.1.2', 'a4'),
+      ].join('\n')
+    );
+
+    const raw = JSON.parse(runPsql(`SELECT public.admin_analytics_report(NULL, NULL, NULL);`));
+    assert.equal(raw.schemaVersion, 2);
+    const report = buildAdminAnalyticsReport(raw, [], {
+      range: 'all',
+      version: 'all',
+      league: 'all',
+      nowMs: NOW_MS,
+    });
+    assert.equal(report.extrasAvailable, true);
+    assert.equal(hasNaNDeep(report), false);
+
+    // 퍼널
+    const sessionCounts = report.creationFunnel.sessionSteps.map((s) => s.count);
+    assert.deepEqual(sessionCounts, [2, 1]);
+    const runCounts = Object.fromEntries(report.creationFunnel.runSteps.map((s) => [s.key, s.count]));
+    assert.deepEqual(runCounts, { runs: 2, reachedDraft: 2, drafted: 2, reachedNba: 1, ended: 1 });
+    assert.deepEqual(report.creationFunnel.resetRuns, { count: 1, n: 2, percent: 50 });
+    const outcomes = Object.fromEntries(report.creationFunnel.draftOutcomes.map((o) => [o.key, o]));
+    assert.equal(outcomes.NBA_R1.count, 1);
+    assert.equal(outcomes.NBA_UNDRAFTED.twoWay, 1);
+    assert.equal(outcomes.KBL_R1.pickAvg, 3);
+
+    // 설문
+    assert.equal(report.survey.total, 3);
+    assert.equal(report.survey.submitted, 2);
+    assert.equal(report.survey.withComment, 1);
+    const q = Object.fromEntries(report.survey.questions.map((x) => [x.key, x]));
+    assert.equal(q.nbaEntry.n, 2);
+    assert.equal(q.nbaEntry.avg, 4);
+    assert.deepEqual(q.nbaEntry.dist, [0, 0, 1, 0, 1]);
+    assert.equal(q.nbaEntry.expAvg, 3); // NBA에 간 사람
+    assert.equal(q.nbaEntry.noExpAvg, 5);
+    assert.equal(q.kblOverseas.expN, 1);
+    assert.equal(q.hsPacing.expN, 0);
+
+    // 버전 비교: 버전 필터를 걸어도 모든 버전이 나옴
+    const filtered = buildAdminAnalyticsReport(
+      JSON.parse(runPsql(`SELECT public.admin_analytics_report(NULL, '1.1.0', NULL);`)),
+      [],
+      { range: 'all', version: '1.1.0', league: 'all', nowMs: NOW_MS }
+    );
+    assert.deepEqual(
+      filtered.versionCompare.map((v) => v.version),
+      ['1.1.2', '1.1.0', '1.0.0']
+    );
+    assert.equal(filtered.survey.total, 0); // 설문은 버전 필터 적용
+    const v110 = filtered.versionCompare.find((v) => v.version === '1.1.0')!;
+    assert.equal(v110.runs, 2);
+    assert.deepEqual(v110.nbaReach, { count: 1, n: 2, percent: 50 });
+    assert.deepEqual(v110.nbaMvp, { count: 1, n: 1, percent: 100 });
+    assert.deepEqual(v110.hallOfFame, { count: 1, n: 1, percent: 100 });
+    assert.equal(v110.careerSeasonsAvg, 12);
+    const v100 = filtered.versionCompare.find((v) => v.version === '1.0.0')!;
+    assert.deepEqual(v100.nbaChampionship, { count: 1, n: 1, percent: 100 });
   }
 );

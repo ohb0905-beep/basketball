@@ -37,6 +37,11 @@ import {
   SkeletonRows,
   formatPercentText,
 } from './AdminAnalyticsSections';
+import {
+  CreationFunnelCard,
+  SurveyResultsCard,
+  VersionCompareTable,
+} from './AdminAnalyticsExtraSections';
 
 const SETUP_SQL_PATH = 'supabase/migrations/20261125_admin_analytics_report.sql';
 
@@ -326,6 +331,7 @@ export function AdminAnalyticsDashboard() {
       ? null
       : LEAGUE_SHORT_LABELS[leagueFilter as keyof typeof LEAGUE_SHORT_LABELS] ?? leagueFilter;
   const leagueScopeNote = leagueLabel ? `리그 필터: ${leagueLabel}` : '전체 리그';
+  const versionScopeNote = versionFilter === 'all' ? '전체 버전' : `v${versionFilter}`;
 
   const kpiCards = [
     { key: 'uniquePlayers', label: '고유 플레이어', value: kpi?.uniquePlayers, unit: '명', subtext: '익명 ID 중복 제거', tone: 'text-[var(--t-g900)]' },
@@ -607,6 +613,50 @@ export function AdminAnalyticsDashboard() {
         </section>
 
         {report && !aggregateMissing && <InsightsCard insights={report.insights} />}
+
+        {report && !aggregateMissing && !report.extrasAvailable && (
+          <section
+            data-testid="analytics-extras-setup"
+            className="rounded-[20px] border border-[var(--t-gold)] bg-[var(--t-gold-soft)] p-4 text-[13px] text-[var(--t-g800)] leading-relaxed"
+          >
+            버전별 비교, 난이도 설문, 생성→드래프트 퍼널을 보려면 Supabase SQL 편집기에서
+            <code className="mx-1 px-1 rounded bg-[var(--t-card)]">supabase/migrations/20261125_admin_analytics_report.sql</code>
+            을 다시 실행해 주세요 (기존 데이터는 바뀌지 않습니다).
+          </section>
+        )}
+
+        {report && report.extrasAvailable && (
+          <>
+            {/* 🆚 버전별 비교 */}
+            <section aria-label="버전별 비교" data-testid="analytics-version-compare" className={CARD_CLASS}>
+              <SectionHeader
+                title="🆚 버전별 비교"
+                description="기간 필터만 적용 (버전·리그 필터 무시). 커리어 지표는 커리어를 만든 버전, 시즌·은퇴 지표는 그 이벤트가 기록된 버전 기준입니다. 업데이트 전에 연 탭은 예전 버전으로 계속 기록됩니다."
+                aside="옆으로 밀어서 보기"
+              />
+              <VersionCompareTable rows={report.versionCompare} />
+            </section>
+
+            <section aria-label="설문과 생성 퍼널" className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div data-testid="analytics-survey" className={CARD_CLASS}>
+                <SectionHeader
+                  title="🗳️ 난이도 설문 결과"
+                  description="은퇴 화면 1인 1회 설문 (1 쉬움 ~ 5 어려움). 버전·기간 필터 적용"
+                  aside={versionScopeNote}
+                />
+                <SurveyResultsCard survey={report.survey} />
+              </div>
+              <div data-testid="analytics-creation-funnel" className={CARD_CLASS}>
+                <SectionHeader
+                  title="🧭 생성 → 드래프트 퍼널"
+                  description="1.0.1부터 수집된 생성 화면 진입 기준. 버전·기간 필터 적용"
+                  aside={versionScopeNote}
+                />
+                <CreationFunnelCard funnel={report.creationFunnel} />
+              </div>
+            </section>
+          </>
+        )}
 
         {/* 🏆 리그별 수상 테이블 */}
         <section aria-label="리그별 MVP FMVP 우승" data-testid="analytics-league-awards" className={CARD_CLASS}>

@@ -545,6 +545,85 @@ export interface AdminAnalyticsReport {
   };
   insights: string[];
   recentLogs: RecentMilestoneLog[];
+  /** 2차 추가: 집계 함수가 schemaVersion 2 이상일 때만 채워집니다 (아니면 false) */
+  extrasAvailable: boolean;
+  creationFunnel: CreationFunnelReport;
+  survey: SurveyReport;
+  versionCompare: VersionCompareRow[];
+}
+
+export interface FunnelStep {
+  key: string;
+  label: string;
+  count: number;
+  /** 첫 단계 대비 비율 */
+  percentOfStart: number | null;
+  /** 바로 앞 단계 대비 비율 */
+  percentOfPrev: number | null;
+}
+
+export interface DraftOutcomeRow {
+  key: string;
+  label: string;
+  count: number;
+  ovrAvg: number | null;
+  pickAvg: number | null;
+  twoWay: number;
+}
+
+export interface CreationFunnelReport {
+  /** 생성 화면 진입 세션 → 커리어를 만든 세션 */
+  sessionSteps: FunnelStep[];
+  /** 추적 세션에서 만든 커리어 → 드래프트 → 지명 → NBA → 은퇴 */
+  runSteps: FunnelStep[];
+  resetRuns: RateCell;
+  draftOutcomes: DraftOutcomeRow[];
+}
+
+export interface SurveyQuestionResult {
+  key: string;
+  title: string;
+  /** 1점, 5점 쪽 끝 라벨 */
+  lowLabel: string;
+  highLabel: string;
+  n: number;
+  avg: number | null;
+  /** 1~5점 응답 수 */
+  dist: number[];
+  experiencedLabel: string | null;
+  expN: number;
+  expAvg: number | null;
+  noExpN: number;
+  noExpAvg: number | null;
+}
+
+export interface SurveyReport {
+  total: number;
+  submitted: number;
+  skipped: number;
+  withComment: number;
+  responseRate: number | null;
+  questions: SurveyQuestionResult[];
+}
+
+export interface VersionCompareRow {
+  version: string;
+  label: string;
+  isPreview: boolean;
+  players: number;
+  sessions: number;
+  runs: number;
+  seasons: number;
+  nbaReach: RateCell;
+  completion: RateCell;
+  resetRate: RateCell;
+  nbaSeasons: number;
+  nbaChampionship: RateCell;
+  nbaMvp: RateCell;
+  nbaPlayoffs: RateCell;
+  endings: number;
+  hallOfFame: RateCell;
+  careerSeasonsAvg: number | null;
 }
 
 // ============================================================================
@@ -901,6 +980,215 @@ export function buildRecentLogs(rows: AnalyticsEventRow[]): RecentMilestoneLog[]
   });
 }
 
+// ============================================================================
+// 2차 추가: 생성→드래프트 퍼널, 난이도 설문, 버전별 비교
+// ============================================================================
+
+function funnelSteps(steps: Array<{ key: string; label: string; count: number }>): FunnelStep[] {
+  const start = steps[0]?.count ?? 0;
+  return steps.map((step, i) => {
+    const prev = i === 0 ? step.count : steps[i - 1].count;
+    return {
+      ...step,
+      percentOfStart: start > 0 ? safePercent(step.count, start) : null,
+      percentOfPrev: prev > 0 ? safePercent(step.count, prev) : null,
+    };
+  });
+}
+
+const DRAFT_OUTCOME_LABELS: Record<string, string> = {
+  NBA_R1: 'NBA 1라운드 지명',
+  NBA_R2: 'NBA 2라운드 지명',
+  NBA_DRAFTED: 'NBA 지명',
+  NBA_UNDRAFTED: 'NBA 미지명',
+  KBL_R1: 'KBL 1라운드 지명',
+  KBL_R2: 'KBL 2라운드 지명',
+  KBL_DRAFTED: 'KBL 지명',
+  KBL_UNDRAFTED: 'KBL 미지명',
+};
+
+const DRAFT_OUTCOME_ORDER = Object.keys(DRAFT_OUTCOME_LABELS);
+
+export function buildCreationFunnel(rawFunnel: unknown): CreationFunnelReport {
+  const f = asRecord(rawFunnel);
+  const runs = toCount(f.runs);
+  const outcomes: DraftOutcomeRow[] = asArray(f.draftOutcomes).map((raw) => {
+    const r = asRecord(raw);
+    const key = asString(r.key) ?? 'unknown';
+    return {
+      key,
+      label: DRAFT_OUTCOME_LABELS[key] ?? key,
+      count: toCount(r.count),
+      ovrAvg: toAvg(r.ovrAvg),
+      pickAvg: toAvg(r.pickAvg),
+      twoWay: toCount(r.twoWay),
+    };
+  });
+  const orderOf = (key: string) => {
+    const idx = DRAFT_OUTCOME_ORDER.indexOf(key);
+    return idx === -1 ? DRAFT_OUTCOME_ORDER.length : idx;
+  };
+  outcomes.sort((a, b) => orderOf(a.key) - orderOf(b.key));
+
+  return {
+    sessionSteps: funnelSteps([
+      { key: 'started', label: '생성 화면 진입', count: toCount(f.startedSessions) },
+      { key: 'created', label: '커리어 생성까지', count: toCount(f.createdSessions) },
+    ]),
+    runSteps: funnelSteps([
+      { key: 'runs', label: '생성된 커리어', count: runs },
+      { key: 'reachedDraft', label: '드래프트 도달', count: toCount(f.reachedDraft) },
+      { key: 'drafted', label: '지명 (NBA·KBL)', count: toCount(f.drafted) },
+      { key: 'reachedNba', label: 'NBA 도달', count: toCount(f.reachedNba) },
+      { key: 'ended', label: '은퇴까지 완주', count: toCount(f.ended) },
+    ]),
+    resetRuns: rateCell(toCount(f.reset), runs),
+    draftOutcomes: outcomes,
+  };
+}
+
+/** 설문 질문 라벨 (게임 안 설문 문구와 같게 유지: src/lib/survey.ts SURVEY_QUESTIONS) */
+const SURVEY_QUESTION_META: Record<
+  string,
+  { title: string; low: string; high: string; experienced: string | null }
+> = {
+  militaryExemption: {
+    title: '병역특례 받기',
+    low: '너무 쉬움',
+    high: '너무 어려움',
+    experienced: '병역특례 받은 사람',
+  },
+  nbaEntry: {
+    title: 'NBA 진출',
+    low: '너무 쉬움',
+    high: '너무 어려움',
+    experienced: 'NBA에 간 사람',
+  },
+  nbaPlayoffs: {
+    title: 'NBA 플레이오프',
+    low: '너무 쉬움',
+    high: '너무 어려움',
+    experienced: 'NBA 플레이오프에 나간 사람',
+  },
+  kblOverseas: {
+    title: 'KBL·해외 리그',
+    low: '너무 쉬움',
+    high: '너무 어려움',
+    experienced: 'KBL·해외에서 뛴 사람',
+  },
+  hsPacing: {
+    title: '고교 시절 진행 속도',
+    low: '너무 지루함',
+    high: '너무 빠름',
+    experienced: null,
+  },
+};
+
+export function buildSurveyReport(rawSurvey: unknown): SurveyReport {
+  const s = asRecord(rawSurvey);
+  const total = toCount(s.total);
+  const submitted = toCount(s.submitted);
+  const byKey = new Map<string, Record<string, unknown>>();
+  for (const raw of asArray(s.questions)) {
+    const r = asRecord(raw);
+    const key = asString(r.key);
+    if (key) byKey.set(key, r);
+  }
+
+  const questions: SurveyQuestionResult[] = Object.entries(SURVEY_QUESTION_META).map(
+    ([key, meta]) => {
+      const r = byKey.get(key) ?? {};
+      const rawDist = asArray(r.dist);
+      const dist = [0, 1, 2, 3, 4].map((i) => toCount(rawDist[i]));
+      return {
+        key,
+        title: meta.title,
+        lowLabel: meta.low,
+        highLabel: meta.high,
+        n: toCount(r.n),
+        avg: toAvg2(r.avg),
+        dist,
+        experiencedLabel: meta.experienced,
+        expN: toCount(r.expN),
+        expAvg: toAvg2(r.expAvg),
+        noExpN: toCount(r.noExpN),
+        noExpAvg: toAvg2(r.noExpAvg),
+      };
+    }
+  );
+
+  return {
+    total,
+    submitted,
+    skipped: toCount(s.skipped),
+    withComment: toCount(s.withComment),
+    responseRate: total > 0 ? safePercent(submitted, total) : null,
+    questions,
+  };
+}
+
+function toAvg2(value: unknown): number | null {
+  const n = typeof value === 'string' ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+  return Math.round(n * 100) / 100;
+}
+
+const PREVIEW_SUFFIX = '-preview';
+
+/** 버전 문자열을 최신순으로 정렬 (1.10.0 > 1.9.0, 미리보기는 같은 번호의 정식 버전 뒤) */
+export function compareGameVersionsDesc(a: string, b: string): number {
+  const parse = (v: string) => {
+    const preview = v.endsWith(PREVIEW_SUFFIX);
+    const base = preview ? v.slice(0, -PREVIEW_SUFFIX.length) : v;
+    const parts = base.split('.').map((x) => (/^\d+$/.test(x) ? Number(x) : -1));
+    return { parts, preview, raw: v };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  const len = Math.max(pa.parts.length, pb.parts.length);
+  for (let i = 0; i < len; i += 1) {
+    const diff = (pb.parts[i] ?? 0) - (pa.parts[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  if (pa.preview !== pb.preview) return pa.preview ? 1 : -1;
+  return pa.raw < pb.raw ? 1 : pa.raw > pb.raw ? -1 : 0;
+}
+
+
+export function buildVersionCompare(rawRows: unknown): VersionCompareRow[] {
+  const rows: VersionCompareRow[] = asArray(rawRows).map((raw) => {
+    const r = asRecord(raw);
+    const version = asString(r.version) ?? 'unknown';
+    const isPreview = version.endsWith(PREVIEW_SUFFIX);
+    const runs = toCount(r.runs);
+    return {
+      version,
+      label:
+        version === 'unknown'
+          ? '버전 미상'
+          : isPreview
+            ? `v${version.slice(0, -PREVIEW_SUFFIX.length)} 미리보기`
+            : `v${version}`,
+      isPreview,
+      players: toCount(r.players),
+      sessions: toCount(r.sessions),
+      runs,
+      seasons: toCount(r.seasons),
+      nbaReach: rateCell(toCount(r.reachedNba), runs),
+      completion: rateCell(toCount(r.ended), runs),
+      resetRate: rateCell(toCount(r.reset), runs),
+      nbaSeasons: toCount(r.nbaSeasons),
+      nbaChampionship: rateCell(toCount(r.nbaChamps), toCount(r.nbaChampN)),
+      nbaMvp: rateCell(toCount(r.nbaMvps), toCount(r.nbaMvpN)),
+      nbaPlayoffs: rateCell(toCount(r.nbaPlayoffs), toCount(r.nbaPlayoffN)),
+      endings: toCount(r.endings),
+      hallOfFame: rateCell(toCount(r.hof), toCount(r.hofN)),
+      careerSeasonsAvg: toAvg(r.careerSeasonsAvg),
+    };
+  });
+  return rows.sort((a, b) => compareGameVersionsDesc(a.version, b.version));
+}
+
 export interface BuildAdminAnalyticsReportOptions {
   range: AnalyticsDateRange;
   version: string;
@@ -978,7 +1266,8 @@ export function buildAdminAnalyticsReport(
 
   const availableVersions = asArray(raw.availableVersions)
     .map((v) => asString(v))
-    .filter((v): v is string => v !== null);
+    .filter((v): v is string => v !== null)
+    .sort(compareGameVersionsDesc);
 
   const partial = {
     kpi,
@@ -1050,6 +1339,10 @@ export function buildAdminAnalyticsReport(
     },
     insights: buildBalanceInsights(partial),
     recentLogs: buildRecentLogs(recentRows),
+    extrasAvailable: toCount(raw.schemaVersion) >= 2,
+    creationFunnel: buildCreationFunnel(raw.creationFunnel),
+    survey: buildSurveyReport(raw.survey),
+    versionCompare: buildVersionCompare(raw.versionCompare),
     ...partial,
   };
 }
