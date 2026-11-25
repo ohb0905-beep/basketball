@@ -294,3 +294,22 @@ test('1.2.0-8 미국 고교 출발은 잠재력·성장 상한이 한국 고교�
     Math.random = originalRandom;
   }
 });
+
+test('1.2.0-9 미국 고교 최약팀은 시즌 변동 후에도 항상 한국 고교 최강팀보다 강하다', async () => {
+  const { HIGH_SCHOOL_TEAMS, createInitialTeamRatingsMap, evolveLeagueTeamRatings } = await import('../data/teams');
+  const { LEAGUE_CONFIG } = await import('../data/leagues');
+  assert.equal(LEAGUE_CONFIG.US_HIGH_SCHOOL.growthCap, 70);
+  const usMin = () => Math.min(...US_HIGH_SCHOOL_TEAMS.map((t) => map[t.id]));
+  const krMax = () => Math.max(...HIGH_SCHOOL_TEAMS.map((t) => map[t.id]));
+  let map = createInitialTeamRatingsMap();
+  assert.ok(usMin() > krMax(), `시작 시점 미국 최약 ${usMin()} / 한국 최강 ${krMax()}`);
+  let seed = 7;
+  const rng = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  for (let season = 0; season < 40; season++) {
+    map = evolveLeagueTeamRatings(map, rng);
+    assert.ok(usMin() > krMax(), `${season + 1}시즌 후 미국 최약 ${usMin()} / 한국 최강 ${krMax()}`);
+  }
+});
