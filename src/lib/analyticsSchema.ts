@@ -91,6 +91,8 @@ export interface SessionStartPayload {
   currentSeason: number | null;
   seasonYear: number | null;
   hofCount: number;
+  /** 1.1.4: 홈 화면 앱으로 실행했는지 (standalone) 브라우저인지 */
+  displayMode?: 'standalone' | 'browser';
 }
 
 export interface CareerCreatedPayload {

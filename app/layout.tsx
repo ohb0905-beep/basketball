@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { PwaRegistrar } from '../src/components/pwa/PwaRegistrar';
 
 export const metadata: Metadata = {
   title: '로드 투 MVP',
@@ -10,6 +11,12 @@ export const metadata: Metadata = {
     description:
       '고교 신입생으로 시작해 대학, KBL, 해외 리그, G리그, NCAA를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 커리어 시뮬레이션',
     type: 'website',
+  },
+  applicationName: '로드 투 MVP',
+  appleWebApp: {
+    capable: true,
+    title: '로드투MVP',
+    statusBarStyle: 'black-translucent',
   },
   twitter: {
     card: 'summary_large_image',
@@ -67,6 +74,7 @@ export default function RootLayout({
         className="bg-[var(--t-bg)] text-[var(--t-g900)] antialiased selection:bg-[var(--t-accent-soft)] selection:text-[var(--t-accent-ink)]"
       >
         {children}
+        <PwaRegistrar />
       </body>
     </html>
   );
