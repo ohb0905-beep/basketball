@@ -17,6 +17,13 @@ const nextConfig: NextConfig = {
         port: '',
         pathname: '/**', // This allows any path under the hostname
       },
+      // 1.3.0 커리어 카드: ESPN 공식 로고를 같은 서버 주소(/_next/image)로 받아 캡처가 막히지 않게 합니다.
+      {
+        protocol: 'https',
+        hostname: 'a.espncdn.com',
+        port: '',
+        pathname: '/i/teamlogos/**',
+      },
     ],
   },
   output: 'standalone',
