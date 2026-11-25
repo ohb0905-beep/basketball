@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "clean": "next clean",
-    "test": "bun test src/engine/engine.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src",
     "balance": "bun scripts/balance-sim.ts",
     "balance:check": "bun scripts/balance-sim.ts 200 20261121 --check"
   },
