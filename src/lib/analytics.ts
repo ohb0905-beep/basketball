@@ -660,13 +660,7 @@ export function emitCareerStateTransitionEvents(
         league: latestLog?.league ?? nextCareer.league,
         position: nextCareer.primaryPos,
         seasonNumber: latestLog?.seasonNumber ?? nextCareer.seasonsPlayed,
-        seasonYear: latestLog?.year ?? nextCareer.seasonYear,
         age: latestLog?.age ?? nextCareer.age,
-        teamName:
-          latestLog?.teamShortName ||
-          latestLog?.teamName ||
-          nextCareer.team.shortName ||
-          nextCareer.team.name,
 
         wonChampionship,
         wonMvp,
@@ -678,10 +672,6 @@ export function emitCareerStateTransitionEvents(
         playoffResult,
         teamWins: latestLog?.wins ?? 0,
         teamLosses: latestLog?.losses ?? 0,
-        teamRank:
-          typeof latestLog?.teamRank === 'number' && Number.isFinite(latestLog.teamRank)
-            ? latestLog.teamRank
-            : null,
 
         overall: nextCareer.ovr,
         seasonOvr: latestLog?.ovr ?? nextCareer.ovr,
@@ -694,10 +684,6 @@ export function emitCareerStateTransitionEvents(
         ppg: round1(latestLog?.ppg ?? 0),
         rpg: round1(latestLog?.rpg ?? 0),
         apg: round1(latestLog?.apg ?? 0),
-        spg: round1(latestLog?.spg ?? 0),
-        bpg: round1(latestLog?.bpg ?? 0),
-        fgPct: round1(latestLog?.fgPct ?? 0),
-        threePtPct: round1(latestLog?.tpPct ?? 0),
 
         trainingFocus: prevCareer.trainingFocus ?? nextCareer.trainingFocus,
         injuredGames,

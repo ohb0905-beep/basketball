@@ -34,6 +34,16 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    version: '1.1.3',
+    date: '2026-11-25',
+    title: '통계 전송을 가볍게 다듬은 정비 패치',
+    summary:
+      '시즌이 끝날 때 보내는 익명 통계에서 쓰지 않던 항목을 덜어냈습니다. 게임 플레이는 바뀌지 않습니다.',
+    highlights: [
+      '시즌 통계에서 분석에 쓰지 않던 세부 기록(팀 이름, 연도, 세부 슈팅 기록 등)을 더 이상 보내지 않습니다. 서버가 더 오래 안정적으로 기록을 모을 수 있습니다.',
+    ],
+  },
+  {
     version: '1.1.2',
     date: '2026-11-25',
     title: '난이도 설문을 시작합니다',

@@ -375,7 +375,10 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   assert.equal(captured[1].payload.seasonNumber, 1);
   assert.equal(captured[1].payload.position, 'SF');
   assert.equal(captured[1].payload.ppg, 18.2);
-  assert.equal(captured[1].payload.threePtPct, 37.5);
+  // 1.1.3: 분석에 쓰지 않던 필드는 보내지 않음 (용량 절감)
+  for (const dropped of ['seasonYear', 'teamName', 'teamRank', 'spg', 'bpg', 'fgPct', 'threePtPct']) {
+    assert.equal(dropped in captured[1].payload, false, dropped);
+  }
   assert.equal(captured[1].payload.wonChampionship, true);
   assert.equal(captured[1].payload.wonMvp, true);
   assert.equal('wonFmvp' in captured[1].payload, false);
@@ -389,7 +392,6 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   assert.equal(captured[1].payload.playoffResult, 'champion');
   assert.equal(captured[1].payload.teamWins, 21);
   assert.equal(captured[1].payload.teamLosses, 3);
-  assert.equal(captured[1].payload.teamRank, 1);
   assert.equal(captured[1].payload.overallDelta, 6);
   assert.equal(captured[1].payload.role, 'starter');
   assert.equal(captured[1].payload.isStarter, true);
@@ -624,9 +626,7 @@ test('client tracker deduplicates StrictMode double-mount and silently survives 
       league: 'KBL',
       position: 'SF',
       seasonNumber: 4,
-      seasonYear: 2029,
       age: 20,
-      teamName: 'SK',
       wonChampionship: false,
       wonMvp: false,
       wonFinalsMvp: false,
@@ -636,7 +636,6 @@ test('client tracker deduplicates StrictMode double-mount and silently survives 
       playoffResult: 'semifinals',
       teamWins: 34,
       teamLosses: 20,
-      teamRank: 3,
       overall: 76,
       seasonOvr: 75,
       overallDelta: 3,
@@ -647,10 +646,6 @@ test('client tracker deduplicates StrictMode double-mount and silently survives 
       ppg: 17.5,
       rpg: 4.8,
       apg: 5.2,
-      spg: 1.4,
-      bpg: 0.6,
-      fgPct: 48.3,
-      threePtPct: 37.9,
       trainingFocus: 'OUTSIDE_SHOOTING',
       injuredGames: 0,
       hadInjury: false,
