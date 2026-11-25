@@ -302,9 +302,11 @@ export function createAgentRetirementAdviceEvent(
  * 고교 가비지 타임 선수용 '코치의 기회' 인카운터
  * - 기회를 잡으면 이번 시즌 남은 경기에서 벤치 로테이션 출전 시간이 보장됩니다.
  */
+export const COACH_CHANCE_EVENT_ID_PREFIX = 'EVT_MID_HS_COACH_CHANCE_';
+
 export function createCoachChanceEvent(career: CareerState): CareerEvent {
   return {
-    id: `EVT_MID_HS_COACH_CHANCE_${career.seasonYear}`,
+    id: `${COACH_CHANCE_EVENT_ID_PREFIX}${career.seasonYear}`,
     title: '코치의 기회',
     subtitle: '정규시즌 반환점 · 로테이션 진입 찬스',
     description: `점수 차가 벌어진 4쿼터, 벤치 끝에서 묵묵히 몸을 풀던 당신을 ${career.team.shortName} 코치가 불러 세웠습니다. "다음 경기부터 몇 분 줘 볼 테니 보여줘 봐." 처음으로 찾아온 진짜 기회입니다.`,
