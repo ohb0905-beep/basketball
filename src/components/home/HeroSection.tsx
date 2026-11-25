@@ -5,6 +5,7 @@ import { ChevronRight } from 'lucide-react';
 import { LEAGUE_CONFIG } from '../../data/leagues';
 import { useCareerStore } from '../../store/useCareerStore';
 import { BestFiveCourt } from './BestFiveCourt';
+import { InstallGuideBanner } from '../pwa/InstallGuideBanner';
 
 interface HeroSectionProps {
   onRequestResetModal?: () => void;
@@ -17,6 +18,9 @@ export function HeroSection({ onRequestResetModal }: HeroSectionProps = {}) {
 
   return (
     <div className="max-w-[560px] mx-auto px-4 pt-2 pb-12 space-y-3">
+      {/* 1.1.4 홈 화면 추가 안내 (휴대폰 브라우저에서만) */}
+      <InstallGuideBanner />
+
       {/* 메인 히어로 카드 */}
       <section className="t-card space-y-6">
         <div className="space-y-2">

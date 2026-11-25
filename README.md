@@ -68,6 +68,13 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 - 노트는 `/patch-notes`에 표시되고, 푸터의 패치노트 링크에 새 버전을 아직 안 본 플레이어에게 NEW 배지가 한 번 뜹니다.
 - Vercel 미리보기(Preview) 배포에서 들어온 분석 이벤트는 `game_version`에 `-preview`가 붙어(예: `1.1.0-preview`) 정식 통계와 섞이지 않습니다. 관리자 대시보드에서 버전으로 골라 볼 수 있습니다.
 
+## 앱 설치 (PWA, 1.1.4)
+
+- `app/manifest.ts`: 앱 이름·색·아이콘 정보. `app/icon.png`(탭 아이콘), `app/apple-icon.png`(아이폰 홈 화면)는 Next.js 규칙상 루트 `app/`에 둡니다.
+- `public/icons/`: 설치용 아이콘 (192, 512, 안드로이드용 여백 버전). `node scripts/make-app-icons.js <폴더>`로 다시 만들 수 있습니다.
+- `public/sw.js`: 오프라인 캐시. 화면은 네트워크 우선, 빌드 파일·아이콘·로고·글꼴은 저장본 우선, `/api`·`/admin`은 캐시하지 않습니다. 캐시 이름에 `GAME_VERSION`이 들어가 새 버전 배포 시 예전 캐시가 지워집니다. 개발 서버(`bun run dev`)에서는 등록하지 않습니다.
+- 홈 화면 추가 안내는 휴대폰 브라우저 첫 화면에만 나오고, 닫으면 다시 안 보입니다. `session_start` 통계의 `displayMode`로 앱 실행 비율을 볼 수 있습니다.
+
 ## 명령어
 
 | 명령 | 설명 |

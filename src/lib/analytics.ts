@@ -1,6 +1,7 @@
 'use client';
 
 import { GAME_VERSION } from '../config/appMeta';
+import { detectDisplayMode } from './pwa';
 import type {
   CareerState,
   HallOfFameEntry,
@@ -952,6 +953,7 @@ export function attachCareerAnalyticsTracker(
         hofCount: Array.isArray(initialState.hofList)
           ? initialState.hofList.length
           : 0,
+        displayMode: detectDisplayMode(),
       },
       {
         careerRunId: initialCareerRunId,
