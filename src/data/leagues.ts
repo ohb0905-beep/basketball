@@ -22,7 +22,7 @@ export const LEAGUES: Record<LeagueId, LeagueConfig> = {
     gamesPerSeason: 30,
     games: 30,
     ldr: 45,
-    growthCap: 63, // 1.2.0: 한국 고교(60)보다 높은 성장 상한
+    growthCap: 61, // 1.2.0: 한국 고교(60)보다 높은 성장 상한
     prestige: 0.35,
     country: '미국',
     badgeColor: '#1D4ED8',

@@ -206,7 +206,7 @@ export function determineTeamRolePromise(
 }
 
 /**
- * 고교 3년 누적 기록, 수상, OVR, 잠재력을 종합 평가하여 유망주 스카우팅 등급(1성~5성) 산출
+ * 고교 누적 기록(한국 3년, 미국 4년), 수상, OVR, 잠재력을 종합 평가하여 유망주 스카우팅 등급(1성~5성) 산출
  */
 export function evaluateHighSchoolProspect(
   career: CareerState
@@ -1125,7 +1125,7 @@ function buildOffseasonOptions(
   // 1.2.0: KBL 드래프트는 대한민국 국적만 신청할 수 있습니다. (외국인은 FA 제안으로만 KBL에 입단)
   const isKorean = isKoreanNational(career);
 
-  // [Case 1] 고교 농구 재학 및 졸업 (만 16세 고1 입학 -> 3시즌 후 만 19세 고교 졸업 시 진로 선택)
+  // [Case 1] 고교 농구 재학 및 졸업 (한국: 만 16세 입학 3시즌 / 미국: 만 15세 입학 4시즌 -> 만 19세 졸업 시 진로 선택)
   // 한국 고교와 미국 고교(1.2.0) 모두 여기서 처리합니다.
   if (isHighSchoolLeague(career.league)) {
     const isUsHighSchool = career.league === 'US_HIGH_SCHOOL';

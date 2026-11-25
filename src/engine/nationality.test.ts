@@ -50,6 +50,8 @@ test('1.2.0-1 국적과 미국 고교를 골라 시작하고, 한국 고교는 �
   assert.equal(usCareer.team.id, 'USHS_MONTVERDE');
   assert.equal(usCareer.nationality, 'FRA');
   assert.equal(usCareer.militaryExempt, true, '외국 국적은 병역 대상이 아닙니다');
+  assert.equal(usCareer.age, 15, '미국 고교는 만 15세 9학년으로 입학합니다');
+  assert.equal(usCareer.contractYearsLeft, 4, '미국 고교는 4년제입니다');
 
   const blocked = await createCareer({ highSchoolTeamId: 'HS_SAMIL', nationality: 'JPN' });
   assert.equal(blocked.league, 'US_HIGH_SCHOOL', '외국 국적은 한국 고교에 입학할 수 없어 미국 고교로 시작합니다');
@@ -59,6 +61,8 @@ test('1.2.0-1 국적과 미국 고교를 골라 시작하고, 한국 고교는 �
   assert.equal(krCareer.league, 'HIGH_SCHOOL');
   assert.equal(krCareer.nationality, 'KOR', '국적을 주지 않으면 대한민국');
   assert.equal(krCareer.militaryExempt, false);
+  assert.equal(krCareer.age, 16);
+  assert.equal(krCareer.contractYearsLeft, 3, '한국 고교는 3년제 그대로입니다');
 });
 
 test('1.2.0-2 외국 국적은 병역·국가대표 이벤트가 나오지 않고, 대한민국 국적은 그대로 나온다', async () => {
@@ -228,6 +232,8 @@ test('1.2.0-6 미국 고교 시즌은 미국 학교끼리만 치르고, 커리�
     assert.ok(career.seasonLogs.length >= 3, '여러 시즌을 진행해야 합니다');
     assert.equal(career.seasonLogs[0].league, 'US_HIGH_SCHOOL');
     const hsLogs = career.seasonLogs.filter((l) => l.league === 'US_HIGH_SCHOOL');
+    assert.equal(hsLogs.length, 4, '미국 고교에서 4시즌을 뛰고 졸업합니다');
+    assert.equal(hsLogs[hsLogs.length - 1].age, 18, '마지막 고교 시즌은 만 18세');
     for (const log of hsLogs) {
       assert.ok(usIds.has(log.teamId), `미국 고교 시즌 소속팀이 미국 학교가 아닙니다: ${log.teamId}`);
     }

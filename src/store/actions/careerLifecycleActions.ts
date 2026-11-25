@@ -92,6 +92,10 @@ export function createCareerLifecycleActions(
         (isKorean ? HIGH_SCHOOL_TEAMS[0] : US_HIGH_SCHOOL_TEAMS[0]);
       const startingLeague: 'HIGH_SCHOOL' | 'US_HIGH_SCHOOL' =
         hsTeam.league === 'US_HIGH_SCHOOL' ? 'US_HIGH_SCHOOL' : 'HIGH_SCHOOL';
+      // 미국 고교는 4년제(만 15세 입학), 한국 고교는 3년제(만 16세 입학). 둘 다 만 19세에 졸업합니다.
+      const isUsHighSchoolStart = startingLeague === 'US_HIGH_SCHOOL';
+      const startAge = isUsHighSchoolStart ? US_HIGH_SCHOOL_DEVELOPMENT_CONFIG.startAge : 16;
+      const schoolYears = isUsHighSchoolStart ? US_HIGH_SCHOOL_DEVELOPMENT_CONFIG.schoolYears : 3;
 
       const trimmedNum = jerseyNumber.trim();
       const assignedJersey =
@@ -155,7 +159,7 @@ export function createCareerLifecycleActions(
         growthDna,
         playstyle,
         traits: [innateTrait],
-        age: 16,
+        age: startAge,
         seasonYear: 2026,
         seasonsPlayed: 0,
         ovr: initialOvr,
@@ -168,7 +172,7 @@ export function createCareerLifecycleActions(
         league: startingLeague,
         team: hsTeam,
         contractType: 'AMATEUR',
-        contractYearsLeft: 3,
+        contractYearsLeft: schoolYears,
         annualSalary: 0,
         careerEarnings: 0, // 프로 통산 누적 연봉 (아마추어 장학금과 엄격히 분리)
         cashBalance: ECONOMY_CONFIG.amateurInitialScholarshipUsd, // 고교 유망주 훈련 장학금($20K) 가용 자산
@@ -223,7 +227,7 @@ export function createCareerLifecycleActions(
           {
             id: `MS_DEBUT_${Date.now()}`,
             year: 2026,
-            age: 16,
+            age: startAge,
             title: `${hsTeam.name} 농구부 입부 (초기 OVR ${initialOvr} · ${dnaInfo.label})`,
             description: `등번호 #${assignedJersey} · ${dnaInfo.label} · ${styleInfo.label} · ${traitInfo.name}`,
             type: 'DEBUT',

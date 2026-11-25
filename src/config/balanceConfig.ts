@@ -435,7 +435,10 @@ export const US_HIGH_SCHOOL_DEVELOPMENT_CONFIG = {
   /** 잠재력 상한 (한국 고교 출발은 96) */
   potentialMax: 98,
   /** 미국 고교 재학 중 시즌 성장량 배율 */
-  growthMultiplier: 1.08,
+  growthMultiplier: 1.03,
+  /** 1.2.0: 미국 고교는 현실대로 4년제 (만 15세 9학년 입학 → 만 19세 졸업). 한국 고교는 만 16세 입학 3년제 */
+  startAge: 15,
+  schoolYears: 4,
 };
 
 export const LIVE_GAME_CONFIG = {
