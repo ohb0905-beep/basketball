@@ -370,40 +370,54 @@ export async function insertAnalyticsEventToSupabase(
   }
 }
 
-export const MAX_ANALYTICS_ADMIN_SCAN_ROWS = 5_000;
-const ANALYTICS_ADMIN_PAGE_SIZE = 1_000;
+export const ADMIN_ANALYTICS_RPC_NAME = 'admin_analytics_report';
+export const ADMIN_ANALYTICS_RECENT_LIMIT = 30;
+const ADMIN_ANALYTICS_RPC_TIMEOUT_MS = 20_000;
 
-export interface QueryAnalyticsEventsResult {
-  rows: Array<{
-    id: string;
-    event_name: string;
-    anonymous_id: string;
-    session_id: string;
-    career_run_id: string | null;
-    game_version: string | null;
-    device_type: string | null;
-    payload: Record<string, unknown> | null;
-    created_at: string;
-  }>;
-  totalMatchingRows: number;
-  scanLimit: number;
-  availableVersions: string[];
+export interface AdminAnalyticsRecentRow {
+  id: string;
+  event_name: string;
+  game_version: string | null;
+  device_type: string | null;
+  payload: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface FetchAdminAnalyticsResult {
+  /** admin_analytics_report 함수가 반환한 집계 JSON (미설치/미생성 시 null) */
+  aggregate: unknown;
+  recentRows: AdminAnalyticsRecentRow[];
+  /** Supabase에 집계 함수가 아직 설치되지 않음 (SQL 실행 필요) */
+  setupRequired: boolean;
+  /** analytics_events 테이블 자체가 아직 없음 */
   tableNotReady: boolean;
 }
 
+async function readPostgrestErrorCode(res: Response): Promise<string | null> {
+  try {
+    const body = (await res.json()) as { code?: unknown };
+    return typeof body?.code === 'string' ? body.code : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * 관리자 전용 analytics_events 기간/버전 필터 조회
- * - PostgREST 기본 1,000행 상한을 고려해 최대 5,000행까지 페이지네이션으로 안전하게 스캔합니다.
- * - analytics_events 테이블이 아직 생성되지 않은 경우(HTTP 404) 크래시 없이 빈 리포트 + tableNotReady를 반환합니다.
+ * 관리자 전용 플레이 통계 조회
+ * - 집계는 Postgres 함수(admin_analytics_report)에서 끝내고 작은 JSON만 받아옵니다.
+ *   (원본 행을 내려받지 않으므로 행 수가 늘어도 잘리지 않습니다.)
+ * - 최근 마일스톤 로그 30건만 별도로 조회합니다 (session_start 제외).
+ * - 함수 미설치(PGRST202) 또는 테이블 미생성 시 크래시 없이 안내 플래그를 반환합니다.
  */
-export async function queryAnalyticsEventsFromSupabase(
+export async function fetchAdminAnalyticsFromSupabase(
   params: {
     sinceIso: string | null;
     version: string;
+    league: string;
   },
   env: NodeJS.ProcessEnv = process.env
 ): Promise<
-  | { ok: true; data: QueryAnalyticsEventsResult }
+  | { ok: true; data: FetchAdminAnalyticsResult }
   | { ok: false; status: number; error: string }
 > {
   const resolved = resolveSupabaseAdminConfig(env);
@@ -411,10 +425,9 @@ export async function queryAnalyticsEventsFromSupabase(
     return { ok: false, status: 503, error: resolved.error };
   }
 
-  let endpoint = '';
+  let origin = '';
   try {
-    const parsedOrigin = new URL(resolved.config.restBaseUrl).origin;
-    endpoint = `${parsedOrigin}/rest/v1/analytics_events`;
+    origin = new URL(resolved.config.restBaseUrl).origin;
   } catch {
     return {
       ok: false,
@@ -424,147 +437,90 @@ export async function queryAnalyticsEventsFromSupabase(
   }
 
   const { serviceRoleKey } = resolved.config;
-  const collected: QueryAnalyticsEventsResult['rows'] = [];
-  let totalMatchingRows = 0;
+  const versionFilter = params.version && params.version !== 'all' ? params.version : null;
+  const leagueFilter = params.league && params.league !== 'all' ? params.league : null;
 
-  const maxPages = Math.ceil(
-    MAX_ANALYTICS_ADMIN_SCAN_ROWS / ANALYTICS_ADMIN_PAGE_SIZE
+  const rpcUrl = `${origin}/rest/v1/rpc/${ADMIN_ANALYTICS_RPC_NAME}`;
+  const recentUrl = new URL(`${origin}/rest/v1/analytics_events`);
+  recentUrl.searchParams.set(
+    'select',
+    'id,event_name,game_version,device_type,payload,created_at'
   );
+  recentUrl.searchParams.set('event_name', 'neq.session_start');
+  recentUrl.searchParams.set('order', 'created_at.desc');
+  recentUrl.searchParams.set('limit', String(ADMIN_ANALYTICS_RECENT_LIMIT));
+  if (params.sinceIso) {
+    recentUrl.searchParams.set('created_at', `gte.${params.sinceIso}`);
+  }
+  if (versionFilter) {
+    recentUrl.searchParams.set('game_version', `eq.${versionFilter}`);
+  }
 
   try {
-    for (let page = 0; page < maxPages; page += 1) {
-      const offset = page * ANALYTICS_ADMIN_PAGE_SIZE;
-      const queryUrl = new URL(endpoint);
-      queryUrl.searchParams.set(
-        'select',
-        'id,event_name,anonymous_id,session_id,career_run_id,game_version,device_type,payload,created_at'
-      );
-      queryUrl.searchParams.set('order', 'created_at.desc');
-      queryUrl.searchParams.set('limit', String(ANALYTICS_ADMIN_PAGE_SIZE));
-      queryUrl.searchParams.set('offset', String(offset));
-
-      if (params.sinceIso) {
-        queryUrl.searchParams.set('created_at', `gte.${params.sinceIso}`);
-      }
-      if (params.version && params.version !== 'all') {
-        queryUrl.searchParams.set('game_version', `eq.${params.version}`);
-      }
-
-      const res = await fetch(queryUrl.toString(), {
+    const [rpcRes, recentRes] = await Promise.all([
+      fetch(rpcUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(serviceRoleKey),
+        body: JSON.stringify({
+          p_since: params.sinceIso,
+          p_version: versionFilter,
+          p_league: leagueFilter,
+        }),
+        signal: AbortSignal.timeout(ADMIN_ANALYTICS_RPC_TIMEOUT_MS),
+        cache: 'no-store',
+      }),
+      fetch(recentUrl.toString(), {
         method: 'GET',
-        headers: buildSupabaseHeaders(
-          serviceRoleKey,
-          page === 0 ? { Prefer: 'count=exact' } : {}
-        ),
+        headers: buildSupabaseHeaders(serviceRoleKey),
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
         cache: 'no-store',
-      });
+      }),
+    ]);
 
-      if (res.status === 404) {
-        return {
-          ok: true,
-          data: {
-            rows: [],
-            totalMatchingRows: 0,
-            scanLimit: MAX_ANALYTICS_ADMIN_SCAN_ROWS,
-            availableVersions: [],
-            tableNotReady: true,
-          },
-        };
-      }
+    let tableNotReady = recentRes.status === 404;
+    let recentRows: AdminAnalyticsRecentRow[] = [];
+    if (recentRes.ok) {
+      const parsed = (await recentRes.json()) as AdminAnalyticsRecentRow[];
+      recentRows = Array.isArray(parsed) ? parsed : [];
+    } else if (!tableNotReady) {
+      console.error(
+        `[admin/analytics] recent events query failed with HTTP ${recentRes.status}`
+      );
+    }
 
-      if (!res.ok) {
+    let aggregate: unknown = null;
+    let setupRequired = false;
+    if (rpcRes.ok) {
+      aggregate = await rpcRes.json();
+    } else {
+      const code = await readPostgrestErrorCode(rpcRes);
+      if (code === 'PGRST202' || (rpcRes.status === 404 && code !== '42P01')) {
+        // 함수 미설치: 집계 없이 최근 로그만 보여 주고 설치 안내를 표시합니다.
+        setupRequired = true;
+      } else if (code === '42P01') {
+        tableNotReady = true;
+      } else {
         console.error(
-          `[admin/analytics] Supabase query failed with HTTP ${res.status}`
+          `[admin/analytics] aggregate RPC failed with HTTP ${rpcRes.status}${code ? ` (${code})` : ''}`
         );
         return {
           ok: false,
           status: 502,
-          error: '플레이 통계 데이터를 불러오는 중 서버 오류가 발생했습니다.',
+          error: '플레이 통계 집계 중 서버 오류가 발생했습니다.',
         };
       }
-
-      const pageRows = (await res.json()) as QueryAnalyticsEventsResult['rows'];
-      const safePageRows = Array.isArray(pageRows) ? pageRows : [];
-      collected.push(...safePageRows);
-
-      if (page === 0) {
-        totalMatchingRows = parseContentRangeTotal(
-          res.headers.get('content-range'),
-          safePageRows.length
-        );
-      }
-
-      if (
-        safePageRows.length < ANALYTICS_ADMIN_PAGE_SIZE ||
-        collected.length >= MAX_ANALYTICS_ADMIN_SCAN_ROWS
-      ) {
-        break;
-      }
-    }
-
-    const versionSet = new Set<string>();
-    for (const row of collected) {
-      if (typeof row.game_version === 'string' && row.game_version.trim()) {
-        versionSet.add(row.game_version.trim());
-      }
-    }
-
-    // 특정 버전 필터가 걸려 있을 때도 드롭다운에 전체 수집 버전을 유지하기 위해 경량 버전 목록 조회
-    if (params.version && params.version !== 'all') {
-      try {
-        const verUrl = new URL(endpoint);
-        verUrl.searchParams.set('select', 'game_version');
-        verUrl.searchParams.set('order', 'created_at.desc');
-        verUrl.searchParams.set('limit', '1000');
-        if (params.sinceIso) {
-          verUrl.searchParams.set('created_at', `gte.${params.sinceIso}`);
-        }
-        const verRes = await fetch(verUrl.toString(), {
-          method: 'GET',
-          headers: buildSupabaseHeaders(serviceRoleKey),
-          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-          cache: 'no-store',
-        });
-        if (verRes.ok) {
-          const verRows = (await verRes.json()) as Array<{
-            game_version?: string | null;
-          }>;
-          if (Array.isArray(verRows)) {
-            for (const item of verRows) {
-              if (
-                typeof item.game_version === 'string' &&
-                item.game_version.trim()
-              ) {
-                versionSet.add(item.game_version.trim());
-              }
-            }
-          }
-        }
-      } catch {
-        // 선택적 버전 목록 조회 실패는 대시보드 핵심 응답을 막지 않음
-      }
-      versionSet.add(params.version);
     }
 
     return {
       ok: true,
-      data: {
-        rows: collected.slice(0, MAX_ANALYTICS_ADMIN_SCAN_ROWS),
-        totalMatchingRows: Math.max(totalMatchingRows, collected.length),
-        scanLimit: MAX_ANALYTICS_ADMIN_SCAN_ROWS,
-        availableVersions: Array.from(versionSet).sort((a, b) =>
-          b.localeCompare(a, undefined, { numeric: true })
-        ),
-        tableNotReady: false,
-      },
+      data: { aggregate, recentRows, setupRequired, tableNotReady },
     };
   } catch (err) {
     const isTimeout =
       err instanceof Error &&
       (err.name === 'TimeoutError' || err.name === 'AbortError');
     console.error(
-      `[admin/analytics] Supabase query request failed (${isTimeout ? 'timeout' : 'network'})`
+      `[admin/analytics] Supabase request failed (${isTimeout ? 'timeout' : 'network'})`
     );
     return {
       ok: false,
@@ -575,5 +531,3 @@ export async function queryAnalyticsEventsFromSupabase(
     };
   }
 }
-
-
