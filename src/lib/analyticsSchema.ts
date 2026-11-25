@@ -152,7 +152,19 @@ export interface SeasonCompletedPayload {
   hadInjury: boolean;
   contractType: ContractType;
   salary: number;
+
+  // 1.1.1: 1.1.0 신규 기능 추적 (없으면 생략 가능 → 이전 버전 행과 호환)
+  /** 고교 '코치의 기회': 이번 시즌 제시됐는지, 잡았는지 */
+  coachChance?: CoachChanceOutcome;
+  /** NCAA 신입 적응 목표 달성 수 (NCAA 첫 시즌만, 0~2) */
+  freshmanGoalsAchieved?: number | null;
+  /** 이번 시즌을 '우승 도전팀 이적'으로 합류한 팀에서 뛰었는지 */
+  contenderPathSeason?: boolean;
+  /** 이번 시즌 종료 후 오프시즌에 '우승 도전팀 이적 요청' 카드가 제시됐는지 */
+  contenderPathOffered?: boolean;
 }
+
+export type CoachChanceOutcome = 'none' | 'offered' | 'taken';
 
 export interface LeagueChangedPayload {
   fromLeague: LeagueId;

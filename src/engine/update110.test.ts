@@ -6,7 +6,11 @@ import {
   NBA_ENTRY_CONFIG,
   ROLE_MPG_CONFIG,
 } from '../config/balanceConfig';
-import { createCoachChanceEvent, rollMidSeasonCrossroadsEvent } from '../data/events';
+import {
+  COACH_CHANCE_EVENT_ID_PREFIX,
+  createCoachChanceEvent,
+  rollMidSeasonCrossroadsEvent,
+} from '../data/events';
 import { getTeamsByLeague, NBA_TEAMS } from '../data/teams';
 import {
   determineTeamRolePromise,
@@ -299,4 +303,50 @@ test('1.1.0-7 미리보기 배포 이벤트는 game_version에 -preview가 붙�
   assert.equal(tagPreviewGameVersion(null, 'preview'), 'unknown-preview');
   assert.equal(tagPreviewGameVersion('1.1.0', 'production'), '1.1.0');
   assert.equal(tagPreviewGameVersion('1.1.0', undefined), '1.1.0');
+});
+
+test('1.1.1 시즌 완료 통계에 코치의 기회 · 신입 적응 · 우승 도전 이적 추적 필드가 담긴다', async () => {
+  const { buildUpdate110SeasonFields } = await import('../lib/analytics');
+  const team = NBA_TEAMS[0];
+  const prev = {
+    seasonYear: 2030,
+    team,
+    coachChanceOfferedYear: 2030,
+    coachChanceRotationYear: null,
+    contenderPathTeamId: team.id,
+    offseasonOptions: [],
+  } as unknown as CareerState;
+  const next = {
+    ...prev,
+    seasonYear: 2031,
+    offseasonOptions: [{ id: 'OPT_CONTENDER_PATH_X', contenderPath: true }],
+  } as unknown as CareerState;
+
+  const offered = buildUpdate110SeasonFields(prev, next, log({ year: 2030 }));
+  assert.equal(offered.coachChance, 'offered');
+  assert.equal(offered.freshmanGoalsAchieved, null);
+  assert.equal(offered.contenderPathSeason, true);
+  assert.equal(offered.contenderPathOffered, true);
+
+  const taken = buildUpdate110SeasonFields(
+    { ...prev, coachChanceRotationYear: 2030, contenderPathTeamId: 'OTHER' } as CareerState,
+    { ...next, offseasonOptions: [] } as unknown as CareerState,
+    log({
+      year: 2030,
+      freshmanAdaptation: { goals: [], achievedCount: 2, draftStockBonus: 8 },
+    })
+  );
+  assert.equal(taken.coachChance, 'taken');
+  assert.equal(taken.freshmanGoalsAchieved, 2);
+  assert.equal(taken.contenderPathSeason, false);
+  assert.equal(taken.contenderPathOffered, false);
+
+  const lastYear = buildUpdate110SeasonFields(prev, next, log({ year: 2031 }));
+  assert.equal(lastYear.coachChance, 'none');
+});
+
+test('1.1.1 코치의 기회 이벤트는 추적용 접두사로 식별된다', () => {
+  const hsTeam = getTeamsByLeague('HIGH_SCHOOL')[0];
+  const evt = createCoachChanceEvent({ seasonYear: 2027, team: hsTeam } as unknown as CareerState);
+  assert.ok(evt.id.startsWith(COACH_CHANCE_EVENT_ID_PREFIX));
 });

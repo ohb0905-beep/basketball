@@ -15,6 +15,7 @@ import {
   isPersonalCareAllowedInLeague,
 } from '../config/balanceConfig';
 import {
+  COACH_CHANCE_EVENT_ID_PREFIX,
   createSangmuEnlistmentEvent,
   getMilitaryEnlistAgeForLeague,
   rollMidSeasonCrossroadsEvent,
@@ -1896,10 +1897,14 @@ export const useCareerStore = create<CareerStoreState>()(
         }
         const midEvt = rollMidSeasonCrossroadsEvent(career);
         const isTradeRumor = midEvt.id.startsWith('EVT_MID_TRADE_DEADLINE_');
+        const isCoachChance = midEvt.id.startsWith(COACH_CHANCE_EVENT_ID_PREFIX);
         set({
           career: {
             ...career,
             midSeasonEventTriggeredThisYear: true,
+            coachChanceOfferedYear: isCoachChance
+              ? career.seasonYear
+              : career.coachChanceOfferedYear ?? null,
             lastTradeRumorYear: isTradeRumor
               ? career.seasonYear
               : career.lastTradeRumorYear ?? null,

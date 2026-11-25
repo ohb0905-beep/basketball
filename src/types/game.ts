@@ -1105,6 +1105,8 @@ export interface CareerState {
   midSeasonEventTriggeredThisYear?: boolean;
   /** 고교 '코치의 기회' 인카운터를 잡은 시즌 (해당 시즌 로테이션 진입 보장) */
   coachChanceRotationYear?: number | null;
+  /** 고교 '코치의 기회' 인카운터가 제시된 시즌 (분석용) */
+  coachChanceOfferedYear?: number | null;
   /** '우승 도전팀 이적 요청'으로 합류한 팀 (2옵션 역할 적용) */
   contenderPathTeamId?: string | null;
   lastTradeRumorYear?: number | null;

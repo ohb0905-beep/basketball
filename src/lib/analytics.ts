@@ -13,11 +13,13 @@ import type {
   AnalyticsEventName,
   AnalyticsEventPayloadMap,
   AnalyticsEventRequestBody,
+  CoachChanceOutcome,
   LeagueChangeReason,
   LeagueHonorSummary,
   NormalizedPlayerRole,
   NormalizedPlayoffResult,
   SeasonAwardCode,
+  SeasonCompletedPayload,
 } from './analyticsSchema';
 
 const ANALYTICS_ENDPOINT = '/api/analytics/event';
@@ -158,6 +160,41 @@ export function extractSeasonAwards(
   else if (log.allLeagueTeam === 2) awards.push('ALL_LEAGUE_2ND');
   else if (log.allLeagueTeam === 3) awards.push('ALL_LEAGUE_3RD');
   return awards;
+}
+
+/**
+ * 1.1.0 신규 기능(코치의 기회 · NCAA 신입 적응 · 우승 도전팀 이적) 추적 필드
+ * - prevCareer: 시즌 정산 직전 상태 (방금 끝난 시즌의 팀/연도)
+ * - nextCareer: 정산 직후 상태 (다음 오프시즌 선택지 포함)
+ */
+export function buildUpdate110SeasonFields(
+  prevCareer: CareerState,
+  nextCareer: CareerState,
+  latestLog: SeasonBoxScore | null
+): Pick<
+  SeasonCompletedPayload,
+  'coachChance' | 'freshmanGoalsAchieved' | 'contenderPathSeason' | 'contenderPathOffered'
+> {
+  const seasonYear = latestLog?.year ?? prevCareer.seasonYear;
+  let coachChance: CoachChanceOutcome = 'none';
+  if (prevCareer.coachChanceRotationYear === seasonYear) {
+    coachChance = 'taken';
+  } else if (prevCareer.coachChanceOfferedYear === seasonYear) {
+    coachChance = 'offered';
+  }
+
+  const freshman = latestLog?.freshmanAdaptation;
+  return {
+    coachChance,
+    freshmanGoalsAchieved: freshman ? freshman.achievedCount : null,
+    contenderPathSeason: Boolean(
+      prevCareer.contenderPathTeamId &&
+        prevCareer.contenderPathTeamId === prevCareer.team.id
+    ),
+    contenderPathOffered: (nextCareer.offseasonOptions ?? []).some((option) =>
+      Boolean(option.contenderPath)
+    ),
+  };
 }
 
 /**
@@ -667,6 +704,8 @@ export function emitCareerStateTransitionEvents(
         hadInjury,
         contractType: latestLog?.contractType ?? nextCareer.contractType,
         salary: Math.round(latestLog?.salaryEarned ?? nextCareer.annualSalary ?? 0),
+
+        ...buildUpdate110SeasonFields(prevCareer, nextCareer, latestLog),
       },
       {
         careerRunId,
