@@ -10,6 +10,9 @@
 -- - FMVP: wonFmvp가 없으면 wonFinalsMvp를 사용합니다.
 -- - 시즌 포지션: payload.position이 없으면 같은 career_run_id의 career_created 포지션을 사용합니다.
 -- - 비율의 모수(*N)는 해당 필드가 실제로 들어 있는 행 수만 셉니다.
+--
+-- schemaVersion 2 (2026-11-25): creationFunnel(생성→드래프트 퍼널), survey(난이도 설문),
+-- versionCompare(버전별 비교, 버전 필터 무시) 키를 추가했습니다. 기존 키는 그대로입니다.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.admin_analytics_report(
@@ -104,9 +107,107 @@ endings AS (
     CASE WHEN jsonb_typeof(p->'hallOfFame') = 'boolean' THEN (p->>'hallOfFame')::boolean END AS hof
   FROM base
   WHERE event_name = 'career_ended'
+),
+-- ---------------------------------------------------------------------------
+-- 2차 추가 (schemaVersion 2): 생성→드래프트 퍼널, 난이도 설문, 버전별 비교
+-- ---------------------------------------------------------------------------
+cstart AS (
+  -- 생성 화면 진입은 세션당 1회만 기록되므로 세션 단위로 셉니다 (1.0.1부터 수집)
+  SELECT DISTINCT session_id FROM base WHERE event_name = 'creation_started'
+),
+funnel_runs AS (
+  -- 생성 화면 진입이 기록된 세션에서 만든 커리어만 (구버전 커리어 제외 → 같은 모수 유지)
+  SELECT DISTINCT b.career_run_id
+  FROM base b
+  JOIN cstart cs ON cs.session_id = b.session_id
+  WHERE b.event_name = 'career_created' AND b.career_run_id IS NOT NULL
+),
+run_progress AS (
+  -- 커리어의 이후 이벤트는 기간·버전 필터와 무관하게 전체에서 찾습니다
+  SELECT
+    fr.career_run_id,
+    bool_or(e.event_name = 'draft_completed') AS reached_draft,
+    bool_or(e.event_name = 'draft_completed' AND e.payload->>'drafted' = 'true') AS drafted,
+    bool_or(e.event_name = 'draft_completed' AND e.payload->>'drafted' = 'true'
+            AND e.payload->>'draftType' = 'NBA') AS nba_drafted,
+    bool_or(
+      (e.event_name = 'season_completed' AND e.payload->>'league' = 'NBA')
+      OR (e.event_name = 'league_changed' AND e.payload->>'toLeague' = 'NBA')
+    ) AS reached_nba,
+    bool_or(e.event_name = 'career_ended') AS ended,
+    bool_or(e.event_name = 'career_reset') AS reset
+  FROM funnel_runs fr
+  LEFT JOIN public.analytics_events e ON e.career_run_id = fr.career_run_id
+  GROUP BY fr.career_run_id
+),
+drafts AS (
+  SELECT
+    CASE WHEN jsonb_typeof(p->'draftType') = 'string' THEN p->>'draftType' END AS draft_type,
+    CASE WHEN jsonb_typeof(p->'drafted') = 'boolean' THEN (p->>'drafted')::boolean END AS drafted,
+    CASE WHEN jsonb_typeof(p->'round') = 'number' THEN (p->>'round')::int END AS round,
+    CASE WHEN jsonb_typeof(p->'pickNumber') = 'number' THEN (p->>'pickNumber')::numeric END AS pick,
+    CASE WHEN jsonb_typeof(p->'overall') = 'number' THEN (p->>'overall')::numeric END AS ovr,
+    CASE WHEN jsonb_typeof(p->'hasTwoWayOffer') = 'boolean' THEN (p->>'hasTwoWayOffer')::boolean END AS two_way
+  FROM base
+  WHERE event_name = 'draft_completed'
+),
+surveys AS (
+  SELECT
+    p->>'status' AS status,
+    (p->>'hasComment') = 'true' AS has_comment,
+    p
+  FROM base
+  WHERE event_name = 'survey_response'
+),
+survey_answers AS (
+  -- 질문별 점수(1~5)와 그 질문을 실제로 겪었는지 (hsPacing은 모두 겪으므로 NULL)
+  SELECT q.ord, q.key,
+         CASE WHEN jsonb_typeof(q.raw) = 'number' THEN (q.raw #>> '{}')::int END AS rating,
+         q.experienced
+  FROM surveys s,
+  LATERAL (VALUES
+    (1, 'militaryExemption', s.p->'militaryExemptionRating',
+        CASE WHEN jsonb_typeof(s.p->'militaryExempt') = 'boolean' THEN (s.p->>'militaryExempt')::boolean END),
+    (2, 'nbaEntry', s.p->'nbaEntryRating',
+        CASE WHEN jsonb_typeof(s.p->'reachedNba') = 'boolean' THEN (s.p->>'reachedNba')::boolean END),
+    (3, 'nbaPlayoffs', s.p->'nbaPlayoffsRating',
+        CASE WHEN jsonb_typeof(s.p->'nbaPlayoffSeasons') = 'number' THEN (s.p->>'nbaPlayoffSeasons')::numeric > 0 END),
+    (4, 'kblOverseas', s.p->'kblOverseasRating',
+        CASE WHEN jsonb_typeof(s.p->'kblSeasons') = 'number' AND jsonb_typeof(s.p->'overseasSeasons') = 'number'
+             THEN (s.p->>'kblSeasons')::numeric + (s.p->>'overseasSeasons')::numeric > 0 END),
+    (5, 'hsPacing', s.p->'hsPacingRating', NULL::boolean)
+  ) AS q(ord, key, raw, experienced)
+  WHERE s.status = 'submitted'
+),
+vbase AS (
+  -- 버전 비교는 기간 필터만 적용하고 버전 필터는 무시합니다
+  SELECT e.event_name, e.anonymous_id, e.session_id, e.career_run_id,
+         COALESCE(e.game_version, 'unknown') AS v, e.payload AS p
+  FROM public.analytics_events e
+  WHERE (p_since IS NULL OR e.created_at >= p_since)
+),
+vruns AS (
+  SELECT DISTINCT ON (career_run_id) career_run_id, v
+  FROM vbase
+  WHERE event_name = 'career_created' AND career_run_id IS NOT NULL
+  ORDER BY career_run_id, v
+),
+vrun_progress AS (
+  SELECT
+    vr.v,
+    vr.career_run_id,
+    bool_or(
+      (e.event_name = 'season_completed' AND e.payload->>'league' = 'NBA')
+      OR (e.event_name = 'league_changed' AND e.payload->>'toLeague' = 'NBA')
+    ) AS reached_nba,
+    bool_or(e.event_name = 'career_ended') AS ended,
+    bool_or(e.event_name = 'career_reset') AS reset
+  FROM vruns vr
+  LEFT JOIN public.analytics_events e ON e.career_run_id = vr.career_run_id
+  GROUP BY vr.v, vr.career_run_id
 )
 SELECT jsonb_build_object(
-  'schemaVersion', 1,
+  'schemaVersion', 2,
   'kpi', (
     SELECT jsonb_build_object(
       'totalEvents', count(*),
@@ -294,7 +395,113 @@ SELECT jsonb_build_object(
       FROM (SELECT (p->>'draftRound')::int AS k, count(*) AS n FROM base
             WHERE event_name = 'league_changed' AND jsonb_typeof(p->'draftRound') = 'number' GROUP BY 1) t
     ), '[]'::jsonb)
-  )
+  ),
+  'creationFunnel', jsonb_build_object(
+    'startedSessions', (SELECT count(*) FROM cstart),
+    'createdSessions', (
+      SELECT count(DISTINCT b.session_id)
+      FROM base b JOIN cstart cs ON cs.session_id = b.session_id
+      WHERE b.event_name = 'career_created'
+    ),
+    'runs', (SELECT count(*) FROM run_progress),
+    'reachedDraft', (SELECT count(*) FROM run_progress WHERE reached_draft),
+    'drafted', (SELECT count(*) FROM run_progress WHERE drafted),
+    'nbaDrafted', (SELECT count(*) FROM run_progress WHERE nba_drafted),
+    'reachedNba', (SELECT count(*) FROM run_progress WHERE reached_nba),
+    'ended', (SELECT count(*) FROM run_progress WHERE ended),
+    'reset', (SELECT count(*) FROM run_progress WHERE reset),
+    'draftOutcomes', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'key', k, 'count', n, 'ovrAvg', ovr, 'pickAvg', pick, 'twoWay', two_way
+      ) ORDER BY k)
+      FROM (
+        SELECT COALESCE(draft_type, 'unknown') || '_' ||
+                 CASE WHEN drafted IS NOT TRUE THEN 'UNDRAFTED'
+                      WHEN round IS NULL THEN 'DRAFTED'
+                      ELSE 'R' || round END AS k,
+               count(*) AS n,
+               round(avg(ovr), 1) AS ovr,
+               round(avg(pick), 1) AS pick,
+               count(*) FILTER (WHERE two_way) AS two_way
+        FROM drafts GROUP BY 1
+      ) t
+    ), '[]'::jsonb)
+  ),
+  'survey', jsonb_build_object(
+    'total', (SELECT count(*) FROM surveys),
+    'submitted', (SELECT count(*) FROM surveys WHERE status = 'submitted'),
+    'skipped', (SELECT count(*) FROM surveys WHERE status = 'skipped'),
+    'withComment', (SELECT count(*) FROM surveys WHERE has_comment),
+    'questions', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'key', key, 'n', n, 'avg', avg_all,
+        'dist', dist,
+        'expN', exp_n, 'expAvg', exp_avg,
+        'noExpN', noexp_n, 'noExpAvg', noexp_avg
+      ) ORDER BY ord)
+      FROM (
+        SELECT ord, key,
+               count(rating) AS n,
+               round(avg(rating), 2) AS avg_all,
+               jsonb_build_array(
+                 count(*) FILTER (WHERE rating = 1), count(*) FILTER (WHERE rating = 2),
+                 count(*) FILTER (WHERE rating = 3), count(*) FILTER (WHERE rating = 4),
+                 count(*) FILTER (WHERE rating = 5)
+               ) AS dist,
+               count(rating) FILTER (WHERE experienced) AS exp_n,
+               round(avg(rating) FILTER (WHERE experienced), 2) AS exp_avg,
+               count(rating) FILTER (WHERE experienced IS FALSE) AS noexp_n,
+               round(avg(rating) FILTER (WHERE experienced IS FALSE), 2) AS noexp_avg
+        FROM survey_answers
+        GROUP BY ord, key
+      ) t
+    ), '[]'::jsonb)
+  ),
+  'versionCompare', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'version', ev.v,
+      'players', ev.players, 'sessions', ev.sessions,
+      'runs', COALESCE(rp.runs, 0), 'reachedNba', COALESCE(rp.nba, 0),
+      'ended', COALESCE(rp.ended, 0), 'reset', COALESCE(rp.reset, 0),
+      'seasons', COALESCE(sv.seasons, 0),
+      'nbaSeasons', COALESCE(sv.nba_seasons, 0),
+      'nbaChampN', COALESCE(sv.nba_champ_n, 0), 'nbaChamps', COALESCE(sv.nba_champs, 0),
+      'nbaMvpN', COALESCE(sv.nba_mvp_n, 0), 'nbaMvps', COALESCE(sv.nba_mvps, 0),
+      'nbaPlayoffN', COALESCE(sv.nba_po_n, 0), 'nbaPlayoffs', COALESCE(sv.nba_po, 0),
+      'endings', COALESCE(en.endings, 0), 'hofN', COALESCE(en.hof_n, 0), 'hof', COALESCE(en.hof, 0),
+      'careerSeasonsAvg', en.seasons_avg
+    ))
+    FROM (
+      SELECT v, count(DISTINCT anonymous_id) AS players,
+             count(*) FILTER (WHERE event_name = 'session_start') AS sessions
+      FROM vbase GROUP BY v
+    ) ev
+    LEFT JOIN (
+      SELECT v, count(*) AS runs,
+             count(*) FILTER (WHERE reached_nba) AS nba,
+             count(*) FILTER (WHERE ended) AS ended,
+             count(*) FILTER (WHERE reset) AS reset
+      FROM vrun_progress GROUP BY v
+    ) rp ON rp.v = ev.v
+    LEFT JOIN (
+      SELECT v, count(*) AS seasons,
+             count(*) FILTER (WHERE p->>'league' = 'NBA') AS nba_seasons,
+             count(*) FILTER (WHERE p->>'league' = 'NBA' AND jsonb_typeof(p->'wonChampionship') = 'boolean') AS nba_champ_n,
+             count(*) FILTER (WHERE p->>'league' = 'NBA' AND p->>'wonChampionship' = 'true') AS nba_champs,
+             count(*) FILTER (WHERE p->>'league' = 'NBA' AND jsonb_typeof(p->'wonMvp') = 'boolean') AS nba_mvp_n,
+             count(*) FILTER (WHERE p->>'league' = 'NBA' AND p->>'wonMvp' = 'true') AS nba_mvps,
+             count(*) FILTER (WHERE p->>'league' = 'NBA' AND jsonb_typeof(p->'madePlayoffs') = 'boolean') AS nba_po_n,
+             count(*) FILTER (WHERE p->>'league' = 'NBA' AND p->>'madePlayoffs' = 'true') AS nba_po
+      FROM vbase WHERE event_name = 'season_completed' GROUP BY v
+    ) sv ON sv.v = ev.v
+    LEFT JOIN (
+      SELECT v, count(*) AS endings,
+             count(*) FILTER (WHERE jsonb_typeof(p->'hallOfFame') = 'boolean') AS hof_n,
+             count(*) FILTER (WHERE p->>'hallOfFame' = 'true') AS hof,
+             round(avg(CASE WHEN jsonb_typeof(p->'totalSeasons') = 'number' THEN (p->>'totalSeasons')::numeric END), 1) AS seasons_avg
+      FROM vbase WHERE event_name = 'career_ended' GROUP BY v
+    ) en ON en.v = ev.v
+  ), '[]'::jsonb)
 );
 $$;
 
