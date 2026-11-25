@@ -121,6 +121,7 @@ export function PlayerCreator() {
 
   const handleSchoolCountryChange = (country: SchoolCountry) => {
     if (country === schoolCountry) return;
+    if (country === 'KR' && !isKorean) return;
     setSchoolCountry(country);
     setSchoolQuery('');
     setHighSchoolTeamId(getSchoolsByCountry(country)[0].id);
@@ -289,7 +290,16 @@ export function PlayerCreator() {
                 id="nationality-select"
                 data-testid="nationality-select"
                 value={nationality}
-                onChange={(e) => setNationality(e.target.value as NationalityCode)}
+                onChange={(e) => {
+                  const next = e.target.value as NationalityCode;
+                  setNationality(next);
+                  // 한국 고교는 대한민국 국적만 입학할 수 있습니다.
+                  if (next !== 'KOR' && schoolCountry === 'KR') {
+                    setSchoolCountry('US');
+                    setSchoolQuery('');
+                    setHighSchoolTeamId(getSchoolsByCountry('US')[0].id);
+                  }
+                }}
                 className="w-full h-[54px] px-4 rounded-2xl bg-[var(--t-g100)] text-[17px] font-bold text-[var(--t-g900)] focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)] cursor-pointer"
               >
                 {NATIONALITIES.map((n) => (
@@ -304,7 +314,7 @@ export function PlayerCreator() {
               >
                 {isKorean
                   ? '병역(상무), 국가대표 소집, KBL 드래프트가 모두 적용됩니다.'
-                  : `${nationalityInfo.name} 국적은 병역과 국가대표 소집이 없고, KBL은 드래프트 없이 외국인 선수 계약으로만 입단할 수 있습니다.`}
+                  : `${nationalityInfo.name} 국적은 미국 고교에서 시작합니다. 병역과 국가대표 소집이 없고, KBL은 드래프트 없이 외국인 선수 계약으로만 입단할 수 있습니다.`}
               </p>
             </div>
           </div>
@@ -475,18 +485,22 @@ export function PlayerCreator() {
           >
             {SCHOOL_COUNTRY_TABS.map((tab) => {
               const active = schoolCountry === tab.id;
+              const locked = tab.id === 'KR' && !isKorean;
               return (
                 <button
                   key={tab.id}
                   type="button"
                   role="tab"
                   aria-selected={active}
+                  disabled={locked}
                   data-testid={`school-country-${tab.id}`}
                   onClick={() => handleSchoolCountryChange(tab.id)}
-                  className={`min-h-[44px] rounded-xl text-[14px] font-bold cursor-pointer t-tap ${
+                  className={`min-h-[44px] rounded-xl text-[14px] font-bold t-tap ${
                     active
                       ? 'bg-[var(--t-card)] text-[var(--t-g900)] shadow-sm'
-                      : 'text-[var(--t-g500)]'
+                      : locked
+                      ? 'text-[var(--t-g400)] opacity-60 cursor-not-allowed'
+                      : 'text-[var(--t-g500)] cursor-pointer'
                   }`}
                 >
                   <span aria-hidden="true">{tab.flag}</span> {tab.label}
@@ -496,13 +510,12 @@ export function PlayerCreator() {
           </div>
 
           <p className="text-[12px] text-[var(--t-g500)] leading-relaxed">
+            {!isKorean && '한국 고교는 대한민국 국적만 입학할 수 있습니다. '}
             {schoolCountry === 'US'
               ? `졸업하면 NCAA 장학금 제안을 받을 수 있습니다.${
                   isKorean ? ' 한국 대학(U-리그)과 KBL 얼리 드래프트도 선택할 수 있습니다.' : ''
                 }`
-              : `졸업하면 한국 대학(U-리그)으로 진학하거나, 실력이 뛰어나면 NCAA와 프로 직행 제안을 받을 수 있습니다.${
-                  isKorean ? ' KBL 얼리 드래프트에도 도전할 수 있습니다.' : ''
-                }`}
+              : '졸업하면 한국 대학(U-리그)으로 진학하거나, 실력이 뛰어나면 NCAA와 프로 직행 제안을 받을 수 있습니다. KBL 얼리 드래프트에도 도전할 수 있습니다.'}
           </p>
 
           <div className="relative">

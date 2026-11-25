@@ -44,12 +44,16 @@ function hasKblDraft(options: OffseasonOption[]): boolean {
   return options.some((o) => o.actionType === 'ENTER_KBL_DRAFT');
 }
 
-test('1.2.0-1 국적과 미국 고교를 골라 커리어를 시작한다', async () => {
+test('1.2.0-1 국적과 미국 고교를 골라 시작하고, 한국 고교는 대한민국 국적만 입학한다', async () => {
   const usCareer = await createCareer({ highSchoolTeamId: 'USHS_MONTVERDE', nationality: 'FRA' });
   assert.equal(usCareer.league, 'US_HIGH_SCHOOL');
   assert.equal(usCareer.team.id, 'USHS_MONTVERDE');
   assert.equal(usCareer.nationality, 'FRA');
   assert.equal(usCareer.militaryExempt, true, '외국 국적은 병역 대상이 아닙니다');
+
+  const blocked = await createCareer({ highSchoolTeamId: 'HS_SAMIL', nationality: 'JPN' });
+  assert.equal(blocked.league, 'US_HIGH_SCHOOL', '외국 국적은 한국 고교에 입학할 수 없어 미국 고교로 시작합니다');
+  assert.ok(US_HIGH_SCHOOL_TEAMS.some((t) => t.id === blocked.team.id));
 
   const krCareer = await createCareer({ highSchoolTeamId: 'HS_SAMIL' });
   assert.equal(krCareer.league, 'HIGH_SCHOOL');
@@ -96,10 +100,6 @@ test('1.2.0-3 KBL 드래프트는 대한민국 국적만 신청할 수 있다', 
   const foreignGrad: CareerState = { ...krGrad, nationality: 'SRB' };
   const foreignOptions = generateOffseasonOptions(foreignGrad, () => 0.5);
   assert.ok(!hasKblDraft(foreignOptions), '외국 국적은 KBL 드래프트 불가');
-  assert.ok(
-    foreignOptions.some((o) => o.targetLeague === 'U_LEAGUE'),
-    '한국 고교를 다닌 외국 국적은 U-리그 진학 가능'
-  );
 
   const foreignCollege: CareerState = {
     ...foreignGrad,

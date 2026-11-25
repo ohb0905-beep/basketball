@@ -77,18 +77,21 @@ export function createCareerLifecycleActions(
       highSchoolTeamId,
       nationality: requestedNationality,
     }) => {
-      // 1.2.0: 한국 고교와 미국 고교 중 고른 학교의 리그로 출발합니다.
-      const hsTeam: TeamInfo =
-        [...HIGH_SCHOOL_TEAMS, ...US_HIGH_SCHOOL_TEAMS].find(
-          (t) => t.id === highSchoolTeamId
-        ) || HIGH_SCHOOL_TEAMS[0];
-      const startingLeague: 'HIGH_SCHOOL' | 'US_HIGH_SCHOOL' =
-        hsTeam.league === 'US_HIGH_SCHOOL' ? 'US_HIGH_SCHOOL' : 'HIGH_SCHOOL';
       const nationality: NationalityCode = isNationalityCode(requestedNationality)
         ? requestedNationality
         : DEFAULT_NATIONALITY;
       // 병역 의무는 대한민국 국적에만 있습니다. 다른 국적은 처음부터 병역 대상이 아닙니다.
       const isKorean = nationality === 'KOR';
+      // 1.2.0: 한국 고교와 미국 고교 중 고른 학교의 리그로 출발합니다.
+      // 한국 고교는 대한민국 국적만 입학할 수 있어, 외국 국적이 한국 고교를 고르면 미국 고교로 바꿉니다.
+      const selectableSchools = isKorean
+        ? [...HIGH_SCHOOL_TEAMS, ...US_HIGH_SCHOOL_TEAMS]
+        : US_HIGH_SCHOOL_TEAMS;
+      const hsTeam: TeamInfo =
+        selectableSchools.find((t) => t.id === highSchoolTeamId) ||
+        (isKorean ? HIGH_SCHOOL_TEAMS[0] : US_HIGH_SCHOOL_TEAMS[0]);
+      const startingLeague: 'HIGH_SCHOOL' | 'US_HIGH_SCHOOL' =
+        hsTeam.league === 'US_HIGH_SCHOOL' ? 'US_HIGH_SCHOOL' : 'HIGH_SCHOOL';
 
       const trimmedNum = jerseyNumber.trim();
       const assignedJersey =

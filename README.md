@@ -70,7 +70,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 
 ## 국적과 미국 고교 (1.2.0)
 
-- 국적 목록과 대한민국 국적 판별(`isKoreanNational`)은 `src/data/nationalities.ts`에 있습니다. 병역(상무), 국가대표 소집, 태극마크 아크, KBL 드래프트는 대한민국 국적에만 적용됩니다.
+- 국적 목록과 대한민국 국적 판별(`isKoreanNational`)은 `src/data/nationalities.ts`에 있습니다. 병역(상무), 국가대표 소집, 태극마크 아크, KBL 드래프트는 대한민국 국적에만 적용됩니다. 한국 고교도 대한민국 국적만 입학할 수 있습니다(외국 국적은 미국 고교로 시작).
 - 미국 고교는 별도 리그 `US_HIGH_SCHOOL`이고 팀은 `US_HIGH_SCHOOL_TEAMS`(24개교)입니다. 고교 리그를 판별할 때는 `'HIGH_SCHOOL'`을 직접 비교하지 말고 `isHighSchoolLeague()`(`src/data/leagues.ts`)를 씁니다.
 - 미국 고교 육성 보정(잠재력, 성장 속도)은 `balanceConfig.ts`의 `US_HIGH_SCHOOL_DEVELOPMENT_CONFIG`, 성장 상한은 `leagues.ts`의 `growthCap`입니다.
 - 미국 고교 팀 전력 변동은 별도 난수를 씁니다(`evolveLeagueTeamRatings`). 공용 난수를 쓰면 시드 고정 밸런스 검사의 한국 경로 결과가 바뀝니다.

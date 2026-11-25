@@ -67,17 +67,23 @@ export function PlayerHeader({ career }: { career: CareerState }) {
               )}
             </div>
 
-            <div className="flex items-baseline gap-1.5 mt-0.5 min-w-0">
-              <h1 className="text-[20px] font-bold tracking-[-0.03em] text-[var(--t-g900)] truncate">
-                #{career.jerseyNumber} {career.name}
-              </h1>
-              <span className="text-[12px] font-semibold text-[var(--t-g500)] shrink-0 tabular-nums">
-                {career.primaryPos}
-                {career.secondaryPos ? `/${career.secondaryPos}` : ''} · {career.heightCm}cm · {career.age}세
-              </span>
-            </div>
+            {/* 1.2.0: 이름이 한 줄을 온전히 쓰도록 포지션·키·나이는 아랫줄로 옮기고, 긴 이름은 글자를 줄여 두 줄까지 보여 줍니다. */}
+            <h1
+              data-testid="header-player-name"
+              title={`#${career.jerseyNumber} ${career.name}`}
+              className={`mt-0.5 font-bold tracking-[-0.03em] text-[var(--t-g900)] ${
+                career.name.length > 8
+                  ? 'text-[17px] leading-snug line-clamp-2 [overflow-wrap:anywhere]'
+                  : 'text-[20px] truncate'
+              }`}
+            >
+              {`#${career.jerseyNumber}\u00a0${career.name}`}
+            </h1>
 
-            <p className="text-[12px] text-[var(--t-g500)] truncate mt-0.5">
+            <p
+              data-testid="header-player-profile"
+              className="text-[12px] font-semibold text-[var(--t-g600)] truncate mt-0.5 tabular-nums"
+            >
               <span
                 data-testid="header-nationality"
                 role="img"
@@ -86,19 +92,25 @@ export function PlayerHeader({ career }: { career: CareerState }) {
               >
                 {nationalityInfo.flag}
               </span>{' '}
-              {playstyleLabel}
-              {traitLabels.length > 0 ? ` · ${traitLabels.join(' · ')}` : ''}
+              {career.primaryPos}
+              {career.secondaryPos ? `/${career.secondaryPos}` : ''} · {career.heightCm}cm · {career.age}세
+            </p>
+
+            <p className="text-[12px] text-[var(--t-g500)] truncate mt-0.5">
+              {/* 병역 상태는 잘리지 않도록 줄 맨 앞에 둡니다 (대한민국 국적만) */}
               {isKorean && (
                 <>
-                  {' · '}
                   <span
                     data-testid="header-military-status"
                     className={`font-semibold ${militaryToneClass}`}
                   >
                     {militaryStatus.label}
                   </span>
+                  {' · '}
                 </>
               )}
+              {playstyleLabel}
+              {traitLabels.length > 0 ? ` · ${traitLabels.join(' · ')}` : ''}
             </p>
           </div>
         </div>
