@@ -4,7 +4,7 @@
  * - 카드 이미지 캡처가 막히지 않도록 외부 로고는 같은 서버 주소로 바꿉니다.
  */
 import { ALL_INTERNATIONAL_TEAMS, ALL_TEAMS } from '../data/teams';
-import type { CareerRetrospective, TeamInfo } from '../types/game';
+import type { CareerRetrospective, LeagueId, TeamInfo } from '../types/game';
 
 /** 카드 맨 아래에 적는 게임 주소 (홍보 문구 없이 주소만) */
 export const CAREER_CARD_SITE_LABEL = 'roadtomvp.vercel.app';
@@ -44,6 +44,14 @@ export interface CareerCardData {
   careerHighPts: number | null;
   peakSeasonLabel: string | null;
 }
+
+/** 팀이 많아 줄여야 할 때 빼는 아마추어 리그 (고교·대학) */
+const AMATEUR_LEAGUES: ReadonlySet<LeagueId> = new Set<LeagueId>([
+  'HIGH_SCHOOL',
+  'US_HIGH_SCHOOL',
+  'U_LEAGUE',
+  'NCAA',
+]);
 
 const TEAM_INDEX: Map<string, TeamInfo> = new Map(
   [...ALL_TEAMS, ...ALL_INTERNATIONAL_TEAMS].map((t) => [t.id, t])
@@ -110,7 +118,11 @@ export function buildCareerCardData(
         ])
       : null;
 
-  const { shown, hidden } = compressStints(retro.stints);
+  // 팀이 많으면 고교·대학은 빼고 프로 팀만 보여 줍니다. 프로 팀이 없으면 그대로 둡니다.
+  const proStints = retro.stints.filter((s) => !AMATEUR_LEAGUES.has(s.league));
+  const stintPool =
+    retro.stints.length > 4 && proStints.length > 0 ? proStints : retro.stints;
+  const { shown, hidden } = compressStints(stintPool);
   const stints: CareerCardStint[] = shown.map((stint) => {
     const known = TEAM_INDEX.get(stint.teamId);
     return {
@@ -138,7 +150,8 @@ export function buildCareerCardData(
 
   const peak = retro.peakSeason;
   const peakSeasonLabel = peak
-    ? `${peak.year} ${peak.teamShortName} · ${peak.ppg.toFixed(1)}점`
+    ? `${peak.year} ${peak.teamShortName} · ${peak.ppg.toFixed(1)}득점 · ` +
+      `${peak.rpg.toFixed(1)}리바운드 · ${peak.apg.toFixed(1)}어시스트`
     : null;
 
   return {

@@ -7,7 +7,7 @@ import {
   toSameOriginLogoUrl,
 } from './careerCard';
 import { buildFallbackRetrospectiveFromHof } from '../engine/retrospectiveEngine';
-import { KBL_TEAMS, NBA_TEAMS } from '../data/teams';
+import { HIGH_SCHOOL_TEAMS, KBL_TEAMS, NBA_TEAMS, U_LEAGUE_TEAMS } from '../data/teams';
 import type { CareerRetrospective, HallOfFameEntry, TeamInfo } from '../types/game';
 
 function makeHofEntry(
@@ -145,4 +145,59 @@ test('buildCareerCardData: 커리어 하이 0은 null, fallback 팀 하나는 �
   assert.equal(data.stints.length, 1);
   assert.equal(data.hiddenStintCount, 0);
   assert.equal(data.stints[0].logoTeam.id, KBL_TEAMS[0].id);
+});
+
+function retroWithStints(teams: TeamInfo[]): CareerRetrospective {
+  const retro = retroOf(makeHofEntry(teams[teams.length - 1], {}));
+  const base = retro.stints[0];
+  retro.stints = teams.map((t, i) => ({
+    ...base,
+    id: `s${i}`,
+    teamId: t.id,
+    teamName: t.name,
+    teamShortName: t.shortName,
+    league: t.league,
+  }));
+  return retro;
+}
+
+test('buildCareerCardData: 팀이 많으면 고교·대학을 빼고 프로 팀만 보여 준다', () => {
+  const amateur = [HIGH_SCHOOL_TEAMS[0], U_LEAGUE_TEAMS[0]];
+  const pro = [KBL_TEAMS[0], KBL_TEAMS[1], NBA_TEAMS[0], NBA_TEAMS[1]];
+  const data = buildCareerCardData(retroWithStints([...amateur, ...pro]), '');
+  assert.deepEqual(
+    data.stints.map((s) => s.teamId),
+    pro.map((t) => t.id)
+  );
+  assert.equal(data.hiddenStintCount, 0);
+});
+
+test('buildCareerCardData: 프로 팀만으로도 많으면 프로 팀 안에서 줄인다', () => {
+  const pro = [KBL_TEAMS[0], KBL_TEAMS[1], KBL_TEAMS[2], NBA_TEAMS[0], NBA_TEAMS[1], NBA_TEAMS[2]];
+  const data = buildCareerCardData(retroWithStints([HIGH_SCHOOL_TEAMS[0], ...pro]), '');
+  assert.deepEqual(
+    data.stints.map((s) => s.teamId),
+    [pro[0].id, pro[1].id, pro[2].id, pro[5].id]
+  );
+  assert.equal(data.hiddenStintCount, 2);
+});
+
+test('buildCareerCardData: 4팀 이하면 고교·대학도 그대로 보여 준다', () => {
+  const teams = [HIGH_SCHOOL_TEAMS[0], U_LEAGUE_TEAMS[0], KBL_TEAMS[0]];
+  const data = buildCareerCardData(retroWithStints(teams), '');
+  assert.equal(data.stints.length, 3);
+});
+
+test('buildCareerCardData: 전성기 문구에 득점·리바운드·어시스트를 모두 넣는다', () => {
+  const retro = retroOf(makeHofEntry(KBL_TEAMS[0], {}));
+  retro.peakSeason = {
+    ...(retro.seasons[0] ?? ({} as CareerRetrospective['seasons'][number])),
+    year: 2038,
+    teamShortName: 'SK',
+    ppg: 31.24,
+    rpg: 8.06,
+    apg: 7.4,
+  } as CareerRetrospective['seasons'][number];
+  const data = buildCareerCardData(retro, '');
+  assert.equal(data.peakSeasonLabel, '2038 SK · 31.2득점 · 8.1리바운드 · 7.4어시스트');
 });

@@ -203,15 +203,23 @@ export const CareerShareCard = forwardRef<HTMLDivElement, CareerShareCardProps>(
           })}
         </div>
 
-        {/* 커리어 하이·피크 시즌 */}
-        {(data.careerHighPts !== null || data.peakSeasonLabel) && (
+        {/* 커리어 하이·전성기 */}
+        {data.careerHighPts !== null && (
           <div style={{ marginTop: 44, fontSize: 30, fontWeight: 600, color: CARD_COLORS.sub }}>
-            {[
-              data.careerHighPts !== null ? `커리어 하이 ${data.careerHighPts}점` : null,
-              data.peakSeasonLabel ? `피크 ${data.peakSeasonLabel}` : null,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
+            커리어 하이 {data.careerHighPts}점
+          </div>
+        )}
+        {data.peakSeasonLabel && (
+          <div
+            style={{
+              marginTop: data.careerHighPts !== null ? 12 : 44,
+              fontSize: 30,
+              fontWeight: 600,
+              color: CARD_COLORS.sub,
+              ...ellipsis,
+            }}
+          >
+            전성기 {data.peakSeasonLabel}
           </div>
         )}
 
