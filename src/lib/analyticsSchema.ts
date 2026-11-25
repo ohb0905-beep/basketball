@@ -603,3 +603,21 @@ export function createAnalyticsRateLimiter() {
     },
   };
 }
+
+/** Vercel 미리보기(Preview) 배포에서 들어온 이벤트에 붙이는 버전 접미사 */
+export const PREVIEW_GAME_VERSION_SUFFIX = '-preview';
+
+/**
+ * 미리보기 배포(VERCEL_ENV=preview)에서 수집된 이벤트는 game_version에 '-preview'를 붙여
+ * 정식 배포 통계와 섞이지 않게 합니다. (예: 1.1.0 → 1.1.0-preview)
+ */
+export function tagPreviewGameVersion(
+  gameVersion: string | null,
+  vercelEnv: string | undefined
+): string | null {
+  if (vercelEnv !== 'preview') return gameVersion;
+  const base = gameVersion ?? 'unknown';
+  return base.endsWith(PREVIEW_GAME_VERSION_SUFFIX)
+    ? base
+    : `${base}${PREVIEW_GAME_VERSION_SUFFIX}`;
+}

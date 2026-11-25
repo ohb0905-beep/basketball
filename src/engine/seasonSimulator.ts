@@ -6,6 +6,9 @@ import {
   LEAGUE_BALANCE_META,
   LeagueAwardQuotaConfig,
   REGULAR_SEASON_WIN_CONFIG,
+  CONTENDER_PATH_CONFIG,
+  KBL_ROOKIE_CONFIG,
+  NBA_ENTRY_CONFIG,
   ROLE_MPG_CONFIG,
   canUseProTradeSystem,
   clampNum,
@@ -946,6 +949,10 @@ export function calculateRoleAndMpg(
     seasonLogs?: SeasonBoxScore[];
     totals?: CareerState['totals'];
     activePersonalCare?: PersonalCareId[];
+    seasonYear?: number;
+    coachChanceRotationYear?: number | null;
+    contenderPathTeamId?: string | null;
+    seasonsOnCurrentTeam?: number;
   },
   rng: () => number = Math.random
 ): RoleAndMpgResult {
@@ -994,13 +1001,37 @@ export function calculateRoleAndMpg(
   let pedigreeBonus = 0;
   if (isFirstRoundPedigree && pick !== null) {
     if (career.league === 'KBL') {
-      pedigreeBonus = pick <= 3 ? 14.5 : pick <= 6 ? 11.5 : 9.0;
+      const kblPedigree = KBL_ROOKIE_CONFIG.pedigreeBonus;
+      pedigreeBonus =
+        pick <= 3 ? kblPedigree.top3 : pick <= 6 ? kblPedigree.top6 : kblPedigree.firstRound;
     } else if (career.league === 'NBA') {
-      pedigreeBonus = pick <= 5 ? 15.0 : pick <= 14 ? 12.0 : 9.0;
+      const nbaPedigree = NBA_ENTRY_CONFIG.pedigreeBonus;
+      pedigreeBonus =
+        pick <= 5 ? nbaPedigree.top5 : pick <= 14 ? nbaPedigree.lottery : nbaPedigree.firstRound;
     }
   } else if (pedigreeSeasonsLeft > 0 && round === 2) {
-    pedigreeBonus = 3.5;
+    pedigreeBonus = career.league === 'NBA' ? NBA_ENTRY_CONFIG.pedigreeBonus.secondRound : 3.5;
   }
+
+  // NBA 적응 곡선: 루키·2·3년차는 단계적으로 페널티를 받아 로테이션에서 시작해 에이스로 올라갑니다.
+  const priorNbaSeasons =
+    career.league === 'NBA'
+      ? (career.seasonLogs || []).filter((l) => l.league === 'NBA').length
+      : 0;
+  // KBL 신인 적응: 프로 경력이 없는 신인만 (해외·NBA 복귀 베테랑 경로는 제외)
+  const priorLogs = career.seasonLogs || [];
+  const kblRookieSeasonIndex =
+    career.league === 'KBL' &&
+    !career.team.isMilitaryTeam &&
+    !priorLogs.some((l) => l.league !== 'KBL' && PRO_LEAGUE_SET.has(l.league))
+      ? priorLogs.filter((l) => l.league === 'KBL').length
+      : -1;
+  const nbaAdaptationPenalty =
+    career.league === 'NBA'
+      ? NBA_ENTRY_CONFIG.adaptationPenaltyBySeason[priorNbaSeasons] ?? 0
+      : kblRookieSeasonIndex >= 0
+      ? KBL_ROOKIE_CONFIG.adaptationPenaltyBySeason[kblRookieSeasonIndex] ?? 0
+      : 0;
 
   const efficiencyMomentum = calculateRecentEfficiencyMomentum(
     career.seasonLogs,
@@ -1020,7 +1051,11 @@ export function calculateRoleAndMpg(
           : 0) +
       promiseBoost +
       pedigreeBonus +
-      efficiencyMomentum
+      efficiencyMomentum *
+        (career.league === 'NBA' && priorNbaSeasons === 0
+          ? NBA_ENTRY_CONFIG.rookieMomentumCarryover
+          : 1) -
+      nbaAdaptationPenalty
     ).toFixed(2)
   );
 
@@ -1068,6 +1103,16 @@ export function calculateRoleAndMpg(
     );
     healthyGp = Math.max(1, Math.round(leagueConfig.games * healthyRatio));
 
+    // 우승 도전팀 이적 직후 2옵션 기간: 주전 스타터 출전 시간 상한
+    if (
+      career.contenderPathTeamId &&
+      career.contenderPathTeamId === career.team.id &&
+      (career.seasonsOnCurrentTeam ?? 0) < CONTENDER_PATH_CONFIG.secondOptionSeasons &&
+      mpg > CONTENDER_PATH_CONFIG.secondOptionMaxMpg
+    ) {
+      mpg = Number((CONTENDER_PATH_CONFIG.secondOptionMaxMpg - rng() * 1.5).toFixed(1));
+    }
+
     // 1라운드 드래프트 위상(Pedigree) 보호: 별도 if-override 대신 연속 곡선 위에 하한선(floor)으로 매끄럽게 적용
     if (isFirstRoundPedigree) {
       const isTopLottery =
@@ -1088,6 +1133,16 @@ export function calculateRoleAndMpg(
       } else {
         role = '프랜차이즈 1옵션 에이스';
       }
+    } else if (
+      mpg < 10.0 &&
+      career.coachChanceRotationYear != null &&
+      career.coachChanceRotationYear === career.seasonYear
+    ) {
+      // 고교 '코치의 기회'를 잡은 시즌: 벤치 로테이션 하한 보장
+      const chanceCfg = ROLE_MPG_CONFIG.coachChance;
+      mpg = Number((chanceCfg.minMpg + rng() * chanceCfg.mpgJitter).toFixed(1));
+      healthyGp = Math.max(healthyGp, Math.round(leagueConfig.games * chanceCfg.minGpRatio));
+      role = '벤치 로테이션';
     } else if (mpg < 10.0) {
       role = '가비지 타임 (벤치 끝자리)';
     } else if (mpg < 17.5) {

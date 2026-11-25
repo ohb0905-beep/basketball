@@ -164,7 +164,14 @@ for (let run = 0; run < CAREERS; run++) {
         continue;
       }
       if (st.view === 'DRAFT_LIVE') {
-        st.finalizeDraftSigning(c.draftResult?.pickNumber ? 'NBA_STANDARD' : 'GLEAGUE');
+        {
+          // 실제 드래프트 화면과 같은 선택지: 1라운드는 보장 계약, 2라운드·미지명은 투웨이(있으면) 또는 G리그
+          const dr = c.draftResult;
+          const twoWayTeam = dr?.draftedTeam || dr?.twoWayOfferTeam;
+          st.finalizeDraftSigning(
+            dr?.draftType === 'KBL' ? 'KBL' : dr?.round === 1 ? 'NBA_STANDARD' : twoWayTeam ? 'TWO_WAY' : 'GLEAGUE'
+          );
+        }
         continue;
       }
       if (c.pendingEvent) {
@@ -603,7 +610,12 @@ for (const lg of ['KBL', 'EUROLEAGUE', 'NBA'] as const) {
         militaryExempt: true,
         militaryServiceSeasonsLeft: 0,
         previousTeamBeforeMilitary: null,
-        seasonLogs: [],
+        // 5시즌차 기성 선수: 1.1.0 루키 적응 곡선이 적용되지 않도록 같은 리그 이전 시즌 3개 (출전 0분 → 효율 모멘텀 0)
+        seasonLogs: [2024, 2025, 2026].map((year) => ({
+          year, league: lg, teamId: midTeam.id, teamName: midTeam.name, teamShortName: midTeam.shortName,
+          role: '주전 스타터', mpg: 0, gp: 0, ppg: 0, rpg: 0, apg: 0, spg: 0, bpg: 0, fgPct: 45, tpPct: 35,
+          wins: 0, losses: 0, wonChampionship: false, wonMvp: false, wonFinalsMvp: false, allStarSelected: false,
+        })),
         milestones: [],
         badges: [],
         rivals: [],
@@ -813,10 +825,8 @@ if (verbose) {
 const BALANCE_TARGETS: [string, number, number, number][] = [
   ['오류 0', metrics.errors, 0, 0],
   ['미완결 플레이오프 대진 0', metrics.unfinishedPlayoffBrackets, 0, 0],
-  ['NBA 진출률(%)', metrics.nbaReachPct, 30, 55],
-  ['NBA 진출자 평균 활동 시즌', metrics.nbaAvgSeasons, 7.0, 14.0],
-  ['NBA 진출자 중 올스타 경험(%)', metrics.nbaAllStarPctOfNba, 20, 65],
-  ['NBA MVP 경험(%)', metrics.nbaMvpPct, 1, 12],
+  // NBA 진출·NBA 커리어 지표는 1.1.0부터 실제 유저 집단을 근사한 scripts/nba-path-sim.ts --check 에서 검사합니다.
+  // (이 스크립트의 '첫 선택지' 자동 플레이는 NBA 드래프트에 거의 도전하지 않아 NBA 지표 대표성이 없습니다.)
   ['최고 OVR 중앙값', metrics.peakOvrP50, 80, 87],
   ['평균 전성기 나이', metrics.avgPeakAge, 28.5, 31.5],
   ['평균 은퇴 나이', metrics.avgRetireAge, 33.5, 37.0],

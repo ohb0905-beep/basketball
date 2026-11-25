@@ -1,6 +1,8 @@
 import {
   DRAFT_SCOUTING_CONFIG,
   ECONOMY_CONFIG,
+  CONTENDER_PATH_CONFIG,
+  NBA_ENTRY_CONFIG,
   canUseProTradeSystem,
   clampNum,
 } from '../config/balanceConfig';
@@ -168,6 +170,19 @@ export function determineTeamRolePromise(
     (career.age >= 35 && gap < -1)
   ) {
     promisedRole = gap >= 1 ? 'STARTER_GUARANTEE' : 'VETERAN_MENTOR';
+  } else if (
+    targetTeam.league === 'NBA' &&
+    !(career.seasonLogs || []).some((l) => l.league === 'NBA')
+  ) {
+    // NBA 신규 입성: 증명 전에는 에이스 약속을 아끼고 로테이션·식스맨 역할부터 제시
+    promisedRole =
+      gap >= NBA_ENTRY_CONFIG.newcomerAcePromiseGap
+        ? 'ACE_FIRST_OPTION'
+        : gap >= NBA_ENTRY_CONFIG.newcomerStarterPromiseGap
+        ? 'STARTER_GUARANTEE'
+        : career.age <= 22 && dir === 'REBUILDING'
+        ? 'PROSPECT_DEVELOPMENT'
+        : 'SIXTH_MAN_CORE';
   } else if (gap >= 4 || (dir === 'REBUILDING' && gap >= 0)) {
     promisedRole = 'ACE_FIRST_OPTION';
   } else if (
@@ -489,7 +504,11 @@ export function evaluateTeamScouting(
       : 51;
   const directionOffset =
     teamDirection === 'CONTENDER' ? 6 : teamDirection === 'PLAYOFF_HUNT' ? 3 : -1;
-  const threshold = baseLeagueBar + directionOffset;
+  const outsideNbaBarBonus =
+    targetTeam.league === 'NBA' && career.league !== 'NBA'
+      ? NBA_ENTRY_CONFIG.outsideOfferBarBonus
+      : 0;
+  const threshold = baseLeagueBar + directionOffset + outsideNbaBarBonus;
 
   const passesOfferThreshold = realGameCompetence && scoutingScore >= threshold;
   const isResigning =
@@ -605,8 +624,8 @@ export function calculateProjectedNbaPick(
     combineBonus +
     lowPerfPenalty -
     mismatch.scoutingPenalty;
-  const rawPick = Math.round(75 - nbaReadyScore);
-  const projectedPick = Math.max(1, Math.min(75, rawPick));
+  const rawPick = Math.round(NBA_ENTRY_CONFIG.draftPickAnchor - nbaReadyScore);
+  const projectedPick = Math.max(1, Math.min(90, rawPick));
   const maxDraftPick = DRAFT_SCOUTING_CONFIG.nbaDraftTotalPicks;
   const undraftedRisk = projectedPick > maxDraftPick;
 
@@ -750,9 +769,14 @@ export function executeDraftResolution(
   const topScouting = evaluatedNba[0];
 
   const maxDraftPick = DRAFT_SCOUTING_CONFIG.nbaDraftTotalPicks;
-  if (finalPickCalc > maxDraftPick) {
+  const nbaLdr = LEAGUE_CONFIG.NBA.ldr;
+  const belowDraftOvrFloor = career.ovr < nbaLdr - NBA_ENTRY_CONFIG.draftMinOvrBelowLdr;
+  if (finalPickCalc > maxDraftPick || belowDraftOvrFloor) {
     const qualifiesForUndraftedTwoWay =
-      topScouting.eval.realGameCompetence && topScouting.eval.scoutingScore >= 62;
+      career.ovr >= nbaLdr - NBA_ENTRY_CONFIG.undraftedTwoWayMinOvrBelowLdr &&
+      finalPickCalc <= NBA_ENTRY_CONFIG.undraftedTwoWayMaxPick &&
+      topScouting.eval.realGameCompetence &&
+      topScouting.eval.scoutingScore >= NBA_ENTRY_CONFIG.undraftedTwoWayMinScore;
 
     return {
       draftType: 'NBA',
@@ -876,6 +900,104 @@ export function calculateOffseasonTradeAcceptProb(
     scoutingInterestBonus +
     contenderDifficulty;
   return Number(clampNum(prob, 0.18, 0.94).toFixed(3));
+}
+
+function isMissedPlayoffResult(result: string | undefined, wonChampionship: boolean): boolean {
+  if (wonChampionship) return false;
+  const text = (result || '').trim();
+  return !text || text === 'PO 탈락' || (text.includes('플레이인') && text.includes('탈락'));
+}
+
+/**
+ * '우승 도전팀 이적 요청' 카드 자격: 같은 NBA 팀에서 에이스로 뛰며 플레이오프에 연속 실패
+ */
+export function isContenderPathEligible(
+  career: Pick<CareerState, 'league' | 'team' | 'contractType' | 'age' | 'seasonLogs' | 'role'>
+): boolean {
+  const cfg = CONTENDER_PATH_CONFIG;
+  if (career.league !== 'NBA' || career.contractType === 'TWO_WAY') return false;
+  if (career.age > cfg.maxAge) return false;
+  if (career.team.direction === 'CONTENDER') return false;
+  const recent = career.seasonLogs.slice(-cfg.missedPlayoffSeasons);
+  if (recent.length < cfg.missedPlayoffSeasons) return false;
+  const allMissedHere = recent.every(
+    (l) =>
+      l.league === 'NBA' &&
+      l.teamId === career.team.id &&
+      isMissedPlayoffResult(l.playoffResult, l.wonChampionship)
+  );
+  if (!allMissedHere) return false;
+  const lastRole = recent[recent.length - 1].role || career.role;
+  return lastRole.includes('에이스') || lastRole.includes('1옵션');
+}
+
+function buildContenderPathOptions(
+  career: CareerState,
+  nbaTeams: TeamInfo[],
+  rng: () => number
+): OffseasonOption[] {
+  const cfg = CONTENDER_PATH_CONFIG;
+  const contenders = nbaTeams
+    .filter((t) => t.id !== career.team.id && t.direction === 'CONTENDER')
+    .sort((a, b) => b.rating - a.rating)
+    .slice(0, cfg.maxOffers);
+  const isFreeAgent = career.contractYearsLeft <= 0;
+  const tradeAlreadyRejected = Boolean(career.tradeRequestedThisYear);
+
+  // 전력이 약한 우승 도전팀부터 수락이 쉬움 (가장 강한 팀이 가장 까다로움)
+  const strengthRankAsc = [...contenders].sort((a, b) => a.rating - b.rating);
+  return contenders.map((team) => {
+    const scout = evaluateTeamScouting(career, team, rng);
+    const strengthIdx = strengthRankAsc.findIndex((t) => t.id === team.id);
+    const acceptProb = clampNum(
+      calculateOffseasonTradeAcceptProb(career, team, scout.scoutingScore) +
+        cfg.acceptProbBonus -
+        strengthIdx * cfg.acceptProbStepByRank,
+      cfg.minAcceptProb,
+      cfg.maxAcceptProb
+    );
+    const acceptPct = Math.round(acceptProb * 100);
+    const contractType: ContractType = isFreeAgent
+      ? career.ovr >= 85
+        ? 'NBA_MAX'
+        : 'NBA_STANDARD'
+      : career.contractType;
+    const contractYears = isFreeAgent ? cfg.faContractYears : career.contractYearsLeft;
+    const annualSalary = isFreeAgent
+      ? calculateTeamContractOfferSalary({
+          contractType,
+          ovr: career.ovr,
+          team,
+          promisedRole: 'STARTER_GUARANTEE',
+          scoutingScore: scout.scoutingScore,
+          primaryPos: career.primaryPos,
+          secondaryPos: career.secondaryPos,
+          rng,
+        })
+      : career.annualSalary;
+    return {
+      id: `OPT_CONTENDER_PATH_${team.id}`,
+      title: `${team.name} 우승 도전 이적 요청`,
+      subtitle: `2옵션 주전으로 우승 반지에 도전합니다 · 출전 시간과 MVP 기회는 줄어듭니다 · 수락 예상 ${acceptPct}%`,
+      badgeText: '우승 도전',
+      targetLeague: 'NBA',
+      targetTeam: team,
+      contractType,
+      contractYears,
+      annualSalary,
+      scoutingScore: scout.scoutingScore,
+      promisedRole: 'STARTER_GUARANTEE',
+      promisedRoleLabel: '2옵션 주전 (우승 도전)',
+      actionType: 'REQUEST_TRADE',
+      isExistingContract: !isFreeAgent,
+      tradeAcceptChancePct: acceptPct,
+      contenderPath: true,
+      locked: tradeAlreadyRejected,
+      lockReason: tradeAlreadyRejected
+        ? '이번 오프시즌 이적 요청이 이미 반려되었습니다.'
+        : undefined,
+    };
+  });
 }
 
 /**
@@ -1801,7 +1923,11 @@ export function generateOffseasonOptions(
           team: t,
           eval: evaluateTeamScouting(career, t, rng),
         }))
-        .filter((x) => x.eval.passesOfferThreshold && per36Pts >= 17.5)
+        .filter(
+          (x) =>
+            x.eval.passesOfferThreshold &&
+            per36Pts >= NBA_ENTRY_CONFIG.gleagueCallUpPer36Pts
+        )
         .sort((a, b) => b.eval.scoutingScore - a.eval.scoutingScore);
 
       if (nbaCallUpCandidates.length > 0) {
@@ -1847,6 +1973,20 @@ export function generateOffseasonOptions(
       }
       pushTopLeagueOffer(euroleagueTeams, 'OPT_GL_TO_EUROLEAGUE', 2);
     }
+  }
+
+  // 4-B) 플레이오프 연속 실패 NBA 에이스: '우승 도전팀 이적 요청' 카드 (기존 트레이드 후보와 중복 제거)
+  if (!isOutOfLeague && isContenderPathEligible(career)) {
+    const contenderOptions = buildContenderPathOptions(career, nbaTeams, rng);
+    const contenderIds = new Set(contenderOptions.map((o) => o.targetTeam?.id));
+    for (let i = options.length - 1; i >= 0; i--) {
+      const o = options[i];
+      if (o.actionType === 'REQUEST_TRADE' && contenderIds.has(o.targetTeam?.id)) {
+        options.splice(i, 1);
+      }
+    }
+    options.push(...contenderOptions);
+    teamOffersCount += contenderOptions.length;
   }
 
   // 5) 상위 리그에서 오퍼를 받지 못했거나 노쇠화/벤치 상태인 선수에게 하위 리그 스텝다운 오퍼 탐색

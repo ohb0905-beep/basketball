@@ -61,6 +61,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 - 버전을 올릴 때 `src/data/patchNotes.ts` 맨 앞에 노트를 추가합니다. 최신 노트 버전이 `GAME_VERSION`과 다르면 테스트가 실패합니다.
 - 패치노트 작성 원칙: 새 기능은 플레이어가 체감하는 말로 3~5줄, 밸런스는 무엇이 어느 방향으로 왜 바뀌었는지만 (정확한 수치는 적지 않음), 버그 수정은 한 줄씩, 기존 세이브에 영향이 있으면 `saveImpact`에 따로 적습니다.
 - 노트는 `/patch-notes`에 표시되고, 푸터의 패치노트 링크에 새 버전을 아직 안 본 플레이어에게 NEW 배지가 한 번 뜹니다.
+- Vercel 미리보기(Preview) 배포에서 들어온 분석 이벤트는 `game_version`에 `-preview`가 붙어(예: `1.1.0-preview`) 정식 통계와 섞이지 않습니다. 관리자 대시보드에서 버전으로 골라 볼 수 있습니다.
 
 ## 명령어
 
@@ -72,7 +73,8 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 | `bun run lint` | ESLint |
 | `bun run test` | 전체 테스트 (`bun test src`) |
 | `bun run balance` | 밸런스 시뮬레이션. 인자: `[커리어 수=200] [시드=20261121]` |
-| `bun run balance:check` | 시드를 고정한 밸런스 회귀 검사. 목표 범위를 벗어나면 실패 |
+| `bun run balance:check` | 시드를 고정한 밸런스 회귀 검사. 목표 범위를 벗어나면 실패. 일반 지표(`balance-sim`)와 NBA 경로 지표(`nba-path-sim`)를 차례로 검사 |
+| `bun scripts/nba-path-sim.ts [커리어 수] [시드] --policy=mixed` | NBA 진입 경로·루키 역할·우승 경험 분석. `mixed`는 캐주얼/적극 플레이어를 섞어 실제 유저 집단을 근사합니다 (끝까지 플레이한 커리어 기준이라 실제 전체 커리어 지표보다 높게 나옴) |
 | `bun run balance:career` | 커리어 성장·은퇴 분포 분석. 인자: `[커리어 수=1000] [시드=20261122]`. 결과는 `balance-results/`에 저장(커밋 제외) |
 
 ## CI

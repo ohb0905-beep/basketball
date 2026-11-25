@@ -1,6 +1,6 @@
 {
   "name": "road-to-mvp",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test src",
     "balance": "bun scripts/balance-sim.ts",
-    "balance:check": "bun scripts/balance-sim.ts 200 20261121 --check",
+    "balance:check": "bun scripts/balance-sim.ts 200 20261121 --check && bun scripts/nba-path-sim.ts 300 20261125 --policy=mixed --check",
     "balance:career": "bun scripts/career-growth-sim.ts"
   },
   "dependencies": {
