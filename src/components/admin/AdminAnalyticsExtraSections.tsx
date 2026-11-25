@@ -5,6 +5,7 @@ import type {
   CreationFunnelReport,
   FunnelStep,
   SurveyQuestionResult,
+  StorageReport,
   SurveyReport,
   VersionCompareRow,
 } from '../../lib/adminAnalytics';
@@ -279,5 +280,99 @@ export function VersionCompareTable({ rows }: { rows: VersionCompareRow[] }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ============================================================================
+// 💾 DB 용량 · 매일 정리 상태
+// ============================================================================
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0MB';
+  const mb = bytes / (1024 * 1024);
+  return mb >= 100 ? `${Math.round(mb)}MB` : `${mb.toFixed(1)}MB`;
+}
+
+function formatKstDateTime(iso: string): string {
+  const d = new Date(Date.parse(iso) + 9 * 60 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+const LEVEL_STYLE: Record<StorageReport['level'], { box: string; bar: string; label: string }> = {
+  ok: { box: 'border-[var(--t-g200)] bg-[var(--t-card)]', bar: 'bg-[var(--t-ok)]', label: '여유 있음' },
+  warn: { box: 'border-[var(--t-gold)] bg-[var(--t-gold-soft)]', bar: 'bg-[var(--t-gold)]', label: '300MB 넘음' },
+  danger: { box: 'border-[var(--t-up)] bg-[var(--t-up-soft)]', bar: 'bg-[var(--t-up)]', label: '400MB 넘음, 한도 임박' },
+};
+
+export function StorageStatusCard({ storage }: { storage: StorageReport }) {
+  if (!storage.available) {
+    return (
+      <section
+        data-testid="analytics-storage-setup"
+        className="rounded-[20px] border border-[var(--t-gold)] bg-[var(--t-gold-soft)] p-4 text-[13px] text-[var(--t-g800)] leading-relaxed"
+      >
+        DB 용량 경보와 원본 14일 보관을 켜려면 Supabase SQL 편집기에서
+        <code className="mx-1 px-1 rounded bg-[var(--t-card)]">supabase/migrations/20261126_analytics_capacity.sql</code>
+        과
+        <code className="mx-1 px-1 rounded bg-[var(--t-card)]">20261126_analytics_capacity_cron.sql</code>
+        을 차례로 실행해 주세요.
+      </section>
+    );
+  }
+
+  const style = LEVEL_STYLE[storage.level];
+  const m = storage.maintenance;
+  const width = Math.min(100, Math.max(storage.usedPercent ?? 0, storage.dbBytes > 0 ? 1 : 0));
+
+  return (
+    <section
+      aria-label="DB 용량"
+      data-testid="analytics-storage"
+      data-level={storage.level}
+      className={`rounded-[20px] border p-4 space-y-3 ${style.box}`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-[14px] font-bold text-[var(--t-g900)]">💾 DB 용량</h2>
+        <p className="text-[12px] font-semibold text-[var(--t-g700)] tabular-nums">
+          {formatBytes(storage.dbBytes)} / {formatBytes(storage.limitBytes)} ({formatPercentText(storage.usedPercent)}) · {style.label}
+        </p>
+      </div>
+      <div className="h-2 w-full rounded-full bg-[var(--t-g100)] overflow-hidden">
+        <div className={`h-full rounded-full ${style.bar}`} style={{ width: `${width}%` }} />
+      </div>
+      <dl className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[12px] text-[var(--t-g700)]">
+        <div className="min-w-0">
+          <dt className="text-[var(--t-g500)]">원본 통계</dt>
+          <dd className="font-semibold tabular-nums">
+            {formatBytes(storage.eventsBytes)} · {storage.eventsRetained.toLocaleString()}행
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[var(--t-g500)]">최근 24시간 증가</dt>
+          <dd className="font-semibold tabular-nums">
+            {storage.eventsLast24h.toLocaleString()}행
+            {storage.dailyGrowthBytes !== null && ` (약 ${formatBytes(storage.dailyGrowthBytes)})`}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[var(--t-g500)]">매일 정리 (04:00 KST)</dt>
+          <dd className={`font-semibold tabular-nums ${m.stale ? 'text-[var(--t-up)]' : ''}`}>
+            {m.ranAt
+              ? `${formatKstDateTime(m.ranAt)} · ${(m.eventsDeleted ?? 0).toLocaleString()}행 정리`
+              : '아직 한 번도 안 돌았어요'}
+          </dd>
+        </div>
+      </dl>
+      {m.stale && (
+        <p data-testid="analytics-storage-stale" className="text-[12px] font-semibold text-[var(--t-up)] leading-relaxed">
+          {m.ranAt
+            ? `마지막 정리가 ${m.hoursAgo}시간 전이에요. Supabase의 Integrations → Cron에서 analytics-daily-maintenance 작업을 확인해 주세요.`
+            : '정리 예약(20261126_analytics_capacity_cron.sql)을 실행했는지 확인해 주세요. 실행했다면 다음 04:00 KST 이후에 기록이 생겨요.'}
+          {storage.daysUntilLimitIfNoCleanup !== null &&
+            ` 정리 없이 지금 속도면 약 ${storage.daysUntilLimitIfNoCleanup.toLocaleString()}일 뒤 한도에 닿아요.`}
+        </p>
+      )}
+    </section>
   );
 }

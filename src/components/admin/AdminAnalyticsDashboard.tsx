@@ -39,6 +39,7 @@ import {
 } from './AdminAnalyticsSections';
 import {
   CreationFunnelCard,
+  StorageStatusCard,
   SurveyResultsCard,
   VersionCompareTable,
 } from './AdminAnalyticsExtraSections';
@@ -332,6 +333,12 @@ export function AdminAnalyticsDashboard() {
       : LEAGUE_SHORT_LABELS[leagueFilter as keyof typeof LEAGUE_SHORT_LABELS] ?? leagueFilter;
   const leagueScopeNote = leagueLabel ? `리그 필터: ${leagueLabel}` : '전체 리그';
   const versionScopeNote = versionFilter === 'all' ? '전체 버전' : `v${versionFilter}`;
+  // 원본은 최근 14일만 남기므로, 기간이 그보다 길면 원본에서만 계산하는 섹션에 범위를 알려 줍니다.
+  const prunedBefore = report?.storage.rawLimited ? report.storage.prunedBefore : null;
+  const rawOnly = (description: string) =>
+    prunedBefore
+      ? `${description} · 원본이 남아 있는 ${formatAnalyticsDateKst(prunedBefore)} 이후만 집계`
+      : description;
 
   const kpiCards = [
     { key: 'uniquePlayers', label: '고유 플레이어', value: kpi?.uniquePlayers, unit: '명', subtext: '익명 ID 중복 제거', tone: 'text-[var(--t-g900)]' },
@@ -612,6 +619,10 @@ export function AdminAnalyticsDashboard() {
           ))}
         </section>
 
+        {report && !aggregateMissing && report.extrasAvailable && (
+          <StorageStatusCard storage={report.storage} />
+        )}
+
         {report && !aggregateMissing && <InsightsCard insights={report.insights} />}
 
         {report && !aggregateMissing && !report.extrasAvailable && (
@@ -691,7 +702,7 @@ export function AdminAnalyticsDashboard() {
           <div data-testid="analytics-funnel" className={CARD_CLASS}>
             <SectionHeader
               title="📈 커리어 성장 퍼널"
-              description="고유 커리어(career_run_id) 단위 리그 도달률과 최대 도달 시즌"
+              description={rawOnly("고유 커리어(career_run_id) 단위 리그 도달률과 최대 도달 시즌")}
               aside={
                 report && report.funnel.leagueReachDenominator > 0
                   ? `모수 ${report.funnel.leagueReachDenominator.toLocaleString()}커리어`
@@ -738,7 +749,7 @@ export function AdminAnalyticsDashboard() {
           <div data-testid="analytics-resets" className={CARD_CLASS}>
             <SectionHeader
               title="🚪 이탈(리셋) 병목"
-              description="career_reset 발생 구간. 초반 벽 포기와 목표 달성 후 재도전을 구분합니다."
+              description={rawOnly("career_reset 발생 구간. 초반 벽 포기와 목표 달성 후 재도전을 구분합니다.")}
               aside={
                 report
                   ? `${leagueScopeNote} · ${report.resets.total.toLocaleString()}건`
@@ -758,7 +769,7 @@ export function AdminAnalyticsDashboard() {
           <div data-testid="analytics-roles" className={CARD_CLASS}>
             <SectionHeader
               title="🪑 벤치 → 주전 역할 분포"
-              description="시즌 종료 시점 역할 (1차 고도화 이후 수집분)"
+              description={rawOnly("시즌 종료 시점 역할 (1차 고도화 이후 수집분)")}
               aside={report ? `${leagueScopeNote} · 표본 ${report.seasonMeta.roleSample.toLocaleString()}시즌` : undefined}
             />
             {showSkeleton ? (
@@ -775,7 +786,7 @@ export function AdminAnalyticsDashboard() {
           <div data-testid="analytics-playoffs" className={CARD_CLASS}>
             <SectionHeader
               title="🏟️ 플레이오프 최종 단계"
-              description="시즌별 최종 성적 (1차 고도화 이후 수집분)"
+              description={rawOnly("시즌별 최종 성적 (1차 고도화 이후 수집분)")}
               aside={report ? `${leagueScopeNote} · 표본 ${report.seasonMeta.playoffSample.toLocaleString()}시즌` : undefined}
             />
             {showSkeleton ? (
@@ -796,7 +807,7 @@ export function AdminAnalyticsDashboard() {
           <div data-testid="analytics-awards" className={CARD_CLASS}>
             <SectionHeader
               title="🎖️ 기타 수상 TOP"
-              description="awards 배열 기준. 비율은 수상 데이터가 있는 시즌 대비 수상 시즌 비율"
+              description={rawOnly("awards 배열 기준. 비율은 수상 데이터가 있는 시즌 대비 수상 시즌 비율")}
               aside={
                 report
                   ? `${leagueScopeNote} · 모수 ${report.awards.seasonsWithAwardData.toLocaleString()}시즌`
@@ -840,7 +851,7 @@ export function AdminAnalyticsDashboard() {
           <div data-testid="analytics-build-meta" className={`${CARD_CLASS} lg:col-span-2`}>
             <SectionHeader
               title="🧬 초기 빌드 · 육성 · 이동 메타"
-              description="career_created의 플레이스타일·성장 DNA·훈련 방향, league_changed의 이동 사유와 드래프트 라운드"
+              description={prunedBefore ? `career_created의 플레이스타일·성장 DNA·훈련 방향 (전체 기간), league_changed의 이동 사유와 드래프트 라운드 (원본이 남아 있는 ${formatAnalyticsDateKst(prunedBefore)} 이후)` : "career_created의 플레이스타일·성장 DNA·훈련 방향, league_changed의 이동 사유와 드래프트 라운드"}
             />
             {showSkeleton ? (
               <SkeletonRows count={4} />
