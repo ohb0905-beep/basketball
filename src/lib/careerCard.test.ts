@@ -106,37 +106,67 @@ test('resolveCardLogoSrc: espnLogos → logoUrl → null 순서', () => {
   assert.equal(resolveCardLogoSrc({ ...team, logoUrl: undefined }, {}), null);
 });
 
-test('buildCareerCardData: NBA 없는 커리어는 NBA 줄이 없고 0인 수상은 숨긴다', () => {
-  const data = buildCareerCardData(
-    retroOf(makeHofEntry(KBL_TEAMS[0], { championships: 2 })),
-    '🏅'
-  );
-  assert.equal(data.nbaLine, null);
-  assert.deepEqual(data.honors, [{ label: '우승', count: 2 }]);
+test('buildCareerCardData: 기본 정보를 채운다', () => {
+  const data = buildCareerCardData(retroOf(makeHofEntry(KBL_TEAMS[0], {})), '🏅');
   assert.equal(data.playerName, '홍길동');
   assert.equal(data.positionLabel, 'PG/SG');
   assert.equal(data.legacyEmoji, '🏅');
 });
 
-test('buildCareerCardData: NBA 커리어는 NBA 줄에 0이 아닌 항목만 넣는다', () => {
+function stintHonors(
+  team: TeamInfo,
+  leagueShortName: string,
+  h: { championships?: number; mvps?: number; finalsMvps?: number; allStars?: number }
+) {
+  return { team, leagueShortName, championships: 0, mvps: 0, finalsMvps: 0, allStars: 0, ...h };
+}
+
+function retroWithHonors(rows: ReturnType<typeof stintHonors>[]): CareerRetrospective {
+  const retro = retroOf(makeHofEntry(rows[0].team, {}));
+  const base = retro.stints[0];
+  retro.stints = rows.map((r, i) => ({
+    ...base,
+    id: `h${i}`,
+    teamId: r.team.id,
+    teamName: r.team.name,
+    teamShortName: r.team.shortName,
+    league: r.team.league,
+    leagueShortName: r.leagueShortName,
+    championships: r.championships,
+    mvps: r.mvps,
+    finalsMvps: r.finalsMvps,
+    allStars: r.allStars,
+  }));
+  return retro;
+}
+
+test('buildCareerCardData: 수상을 리그별 한 줄로, NBA 먼저, 아마추어는 마지막에 묶는다', () => {
   const data = buildCareerCardData(
-    retroOf(
-      makeHofEntry(NBA_TEAMS[0], {
-        nbaGp: 500,
-        nbaPoints: 9000,
-        nbaChampionships: 1,
-        nbaMvps: 1,
-        championships: 3,
-        mvps: 2,
-      })
-    ),
-    '🐐'
+    retroWithHonors([
+      stintHonors(HIGH_SCHOOL_TEAMS[0], '고교농구', { championships: 1, mvps: 1 }),
+      stintHonors(U_LEAGUE_TEAMS[0], 'U-리그', { championships: 2, mvps: 1 }),
+      stintHonors(KBL_TEAMS[0], 'KBL', { championships: 2, mvps: 1, allStars: 3 }),
+      stintHonors(NBA_TEAMS[0], 'NBA', { championships: 3, mvps: 2, finalsMvps: 2, allStars: 6 }),
+      stintHonors(NBA_TEAMS[1], 'NBA', { championships: 1, mvps: 1, allStars: 4 }),
+    ]),
+    ''
   );
-  assert.ok(data.nbaLine);
-  assert.ok(data.nbaLine.startsWith('NBA'));
-  assert.ok(data.nbaLine.includes('우승 1'));
-  assert.ok(data.nbaLine.includes('MVP 1'));
-  assert.ok(!data.nbaLine.includes(' 0'));
+  assert.deepEqual(data.honorLines, [
+    { label: 'NBA', text: '우승 4 · MVP 3 · 파이널 MVP 2 · 올스타 10' },
+    { label: 'KBL', text: '우승 2 · MVP 1 · 올스타 3' },
+    { label: '아마추어', text: '우승 3 · MVP 2' },
+  ]);
+});
+
+test('buildCareerCardData: 수상이 없는 리그는 줄을 만들지 않는다', () => {
+  const data = buildCareerCardData(
+    retroWithHonors([
+      stintHonors(NBA_TEAMS[0], 'NBA', {}),
+      stintHonors(KBL_TEAMS[0], 'KBL', { allStars: 1 }),
+    ]),
+    ''
+  );
+  assert.deepEqual(data.honorLines, [{ label: 'KBL', text: '올스타 1' }]);
 });
 
 test('buildCareerCardData: 커리어 하이 0은 null, fallback 팀 하나는 그대로', () => {
@@ -200,4 +230,23 @@ test('buildCareerCardData: 전성기 문구에 득점·리바운드·어시스�
   } as CareerRetrospective['seasons'][number];
   const data = buildCareerCardData(retro, '');
   assert.equal(data.peakSeasonLabel, '2038 SK · 31.2득점 · 8.1리바운드 · 7.4어시스트');
+});
+
+test('buildCareerCardData: 수상 줄이 4줄을 넘으면 4번째부터 기타 한 줄로 묶는다', () => {
+  const data = buildCareerCardData(
+    retroWithHonors([
+      stintHonors(NBA_TEAMS[0], 'NBA', { championships: 1 }),
+      stintHonors({ ...KBL_TEAMS[0], league: 'KBL' }, 'KBL', { championships: 1 }),
+      stintHonors({ ...KBL_TEAMS[1], league: 'EUROLEAGUE' }, '유로리그', { mvps: 1 }),
+      stintHonors({ ...KBL_TEAMS[2], league: 'NBL' }, 'NBL', { allStars: 2 }),
+      stintHonors({ ...KBL_TEAMS[3], league: 'B_LEAGUE' }, 'B리그', { championships: 1, allStars: 1 }),
+    ]),
+    ''
+  );
+  assert.deepEqual(data.honorLines, [
+    { label: 'NBA', text: '우승 1' },
+    { label: 'KBL', text: '우승 1' },
+    { label: '유로리그', text: 'MVP 1' },
+    { label: '기타', text: '우승 1 · 올스타 3' },
+  ]);
 });

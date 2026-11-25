@@ -67,7 +67,7 @@ export const CareerShareCard = forwardRef<HTMLDivElement, CareerShareCardProps>(
           background: CARD_COLORS.bg,
           color: CARD_COLORS.text,
           fontFamily: FONT_STACK,
-          padding: '84px 80px 64px',
+          padding: '64px 80px 56px',
           boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',
@@ -87,7 +87,7 @@ export const CareerShareCard = forwardRef<HTMLDivElement, CareerShareCardProps>(
         </div>
 
         {/* 이름·기본 정보 */}
-        <div style={{ marginTop: 48, display: 'flex', alignItems: 'baseline', gap: 24 }}>
+        <div style={{ marginTop: 36, display: 'flex', alignItems: 'baseline', gap: 24 }}>
           <span style={{ fontSize: 96, fontWeight: 800, letterSpacing: '-0.04em', ...ellipsis }}>
             {data.playerName}
           </span>
@@ -103,8 +103,8 @@ export const CareerShareCard = forwardRef<HTMLDivElement, CareerShareCardProps>(
         {/* 통산 평균 */}
         <div
           style={{
-            marginTop: 56,
-            padding: '44px 24px',
+            marginTop: 40,
+            padding: '36px 24px',
             borderRadius: 32,
             background: CARD_COLORS.panel,
             display: 'flex',
@@ -117,19 +117,32 @@ export const CareerShareCard = forwardRef<HTMLDivElement, CareerShareCardProps>(
         </div>
 
         {/* 수상 */}
-        {data.honors.length > 0 && (
-          <div style={{ marginTop: 40, fontSize: 36, fontWeight: 700, color: CARD_COLORS.gold }}>
-            🏆 {data.honors.map((h) => `${h.label} ${h.count}`).join(' · ')}
-          </div>
-        )}
-        {data.nbaLine && (
-          <div style={{ marginTop: 14, fontSize: 30, fontWeight: 600, color: CARD_COLORS.text }}>
-            {data.nbaLine}
+        {data.honorLines.length > 0 && (
+          <div style={{ marginTop: 36, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {data.honorLines.map((line) => (
+              <div key={line.label} style={{ display: 'flex', alignItems: 'baseline', gap: 20 }}>
+                <span
+                  style={{
+                    width: 180,
+                    flexShrink: 0,
+                    fontSize: 30,
+                    fontWeight: 800,
+                    color: line.label === '아마추어' ? CARD_COLORS.sub : CARD_COLORS.gold,
+                    ...ellipsis,
+                  }}
+                >
+                  {line.label === '아마추어' ? line.label : `🏆 ${line.label}`}
+                </span>
+                <span style={{ fontSize: 30, fontWeight: 700, color: CARD_COLORS.text, ...ellipsis }}>
+                  {line.text}
+                </span>
+              </div>
+            ))}
           </div>
         )}
 
         {/* 팀 이력 */}
-        <div style={{ marginTop: 48, display: 'flex', alignItems: 'flex-start', gap: 24 }}>
+        <div style={{ marginTop: 40, display: 'flex', alignItems: 'flex-start', gap: 24 }}>
           {data.stints.map((stint, idx) => {
             const src = logoSrcs[stint.teamId];
             return (
@@ -205,14 +218,14 @@ export const CareerShareCard = forwardRef<HTMLDivElement, CareerShareCardProps>(
 
         {/* 커리어 하이·전성기 */}
         {data.careerHighPts !== null && (
-          <div style={{ marginTop: 44, fontSize: 30, fontWeight: 600, color: CARD_COLORS.sub }}>
+          <div style={{ marginTop: 32, fontSize: 30, fontWeight: 600, color: CARD_COLORS.sub }}>
             커리어 하이 {data.careerHighPts}점
           </div>
         )}
         {data.peakSeasonLabel && (
           <div
             style={{
-              marginTop: data.careerHighPts !== null ? 12 : 44,
+              marginTop: data.careerHighPts !== null ? 10 : 32,
               fontSize: 30,
               fontWeight: 600,
               color: CARD_COLORS.sub,
@@ -227,7 +240,7 @@ export const CareerShareCard = forwardRef<HTMLDivElement, CareerShareCardProps>(
         <div
           style={{
             marginTop: 'auto',
-            paddingTop: 36,
+            paddingTop: 28,
             borderTop: `2px solid ${CARD_COLORS.line}`,
             textAlign: 'center',
             fontSize: 30,

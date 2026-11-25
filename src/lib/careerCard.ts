@@ -19,9 +19,10 @@ export interface CareerCardStint {
   logoTeam: TeamInfo;
 }
 
-export interface CareerCardHonor {
-  label: '우승' | 'MVP' | '파이널 MVP' | '올스타';
-  count: number;
+/** 리그별 수상 한 줄 (예: { label: 'NBA', text: '우승 4 · MVP 3 · 올스타 10' }) */
+export interface CareerCardHonorLine {
+  label: string;
+  text: string;
 }
 
 export interface CareerCardData {
@@ -37,8 +38,7 @@ export interface CareerCardData {
   legacyScore: number;
   averages: { ppg: number; rpg: number; apg: number };
   peakOvr: number;
-  honors: CareerCardHonor[];
-  nbaLine: string | null;
+  honorLines: CareerCardHonorLine[];
   stints: CareerCardStint[];
   hiddenStintCount: number;
   careerHighPts: number | null;
@@ -96,27 +96,74 @@ function joinParts(parts: Array<string | null>): string {
   return parts.filter(Boolean).join(' · ');
 }
 
+interface HonorTally {
+  championships: number;
+  mvps: number;
+  finalsMvps: number;
+  allStars: number;
+}
+
+function formatHonors(t: HonorTally): string {
+  return joinParts([
+    t.championships > 0 ? `우승 ${t.championships}` : null,
+    t.mvps > 0 ? `MVP ${t.mvps}` : null,
+    t.finalsMvps > 0 ? `파이널 MVP ${t.finalsMvps}` : null,
+    t.allStars > 0 ? `올스타 ${t.allStars}` : null,
+  ]);
+}
+
+/**
+ * 팀별 수상을 리그별로 묶어 한 줄씩 만듭니다.
+ * NBA를 맨 위에 두고, 나머지 프로 리그는 커리어 순서대로, 고교·대학은 '아마추어' 한 줄로 맨 아래에 둡니다.
+ */
+function buildHonorLines(stints: CareerRetrospective['stints']): CareerCardHonorLine[] {
+  const AMATEUR_KEY = '__AMATEUR__';
+  const order: string[] = [];
+  const tallies = new Map<string, { label: string; tally: HonorTally }>();
+  for (const stint of stints) {
+    const key = AMATEUR_LEAGUES.has(stint.league) ? AMATEUR_KEY : stint.league;
+    if (!tallies.has(key)) {
+      order.push(key);
+      tallies.set(key, {
+        label: key === AMATEUR_KEY ? '아마추어' : stint.leagueShortName,
+        tally: { championships: 0, mvps: 0, finalsMvps: 0, allStars: 0 },
+      });
+    }
+    const t = tallies.get(key)!.tally;
+    t.championships += stint.championships;
+    t.mvps += stint.mvps;
+    t.finalsMvps += stint.finalsMvps;
+    t.allStars += stint.allStars;
+  }
+  const rank = (key: string) => (key === 'NBA' ? 0 : key === AMATEUR_KEY ? 2 : 1);
+  const lines = order
+    .map((key, idx) => ({ key, idx }))
+    .sort((a, b) => rank(a.key) - rank(b.key) || a.idx - b.idx)
+    .map(({ key }) => tallies.get(key)!)
+    .filter(({ tally }) => formatHonors(tally).length > 0);
+
+  // 카드가 넘치지 않도록 최대 4줄. 넘치면 4번째 줄부터 '기타' 한 줄로 합칩니다.
+  if (lines.length > MAX_HONOR_LINES) {
+    const rest = lines.slice(MAX_HONOR_LINES - 1);
+    const merged: HonorTally = { championships: 0, mvps: 0, finalsMvps: 0, allStars: 0 };
+    for (const { tally } of rest) {
+      merged.championships += tally.championships;
+      merged.mvps += tally.mvps;
+      merged.finalsMvps += tally.finalsMvps;
+      merged.allStars += tally.allStars;
+    }
+    lines.splice(MAX_HONOR_LINES - 1, rest.length, { label: '기타', tally: merged });
+  }
+  return lines.map(({ label, tally }) => ({ label, text: formatHonors(tally) }));
+}
+
+const MAX_HONOR_LINES = 4;
+
 export function buildCareerCardData(
   retro: CareerRetrospective,
   legacyEmoji: string
 ): CareerCardData {
-  const { totals } = retro;
-
-  const honorSource: CareerCardHonor[] = [
-    { label: '우승', count: totals.championships },
-    { label: 'MVP', count: totals.mvps },
-    { label: '파이널 MVP', count: totals.finalsMvps },
-    { label: '올스타', count: totals.allStars },
-  ];
-
-  const nbaLine =
-    totals.nbaGp > 0
-      ? joinParts([
-          `NBA ${totals.nbaGp}경기`,
-          totals.nbaChampionships > 0 ? `우승 ${totals.nbaChampionships}` : null,
-          totals.nbaMvps > 0 ? `MVP ${totals.nbaMvps}` : null,
-        ])
-      : null;
+  const honorLines = buildHonorLines(retro.stints);
 
   // 팀이 많으면 고교·대학은 빼고 프로 팀만 보여 줍니다. 프로 팀이 없으면 그대로 둡니다.
   const proStints = retro.stints.filter((s) => !AMATEUR_LEAGUES.has(s.league));
@@ -176,8 +223,7 @@ export function buildCareerCardData(
       apg: retro.averages.apg,
     },
     peakOvr: retro.peakOvr,
-    honors: honorSource.filter((h) => h.count > 0),
-    nbaLine,
+    honorLines,
     stints,
     hiddenStintCount: hidden,
     careerHighPts: retro.careerHighs.points > 0 ? retro.careerHighs.points : null,
