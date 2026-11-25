@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test src",
     "balance": "bun scripts/balance-sim.ts",
-    "balance:check": "bun scripts/balance-sim.ts 200 20261121 --check"
+    "balance:check": "bun scripts/balance-sim.ts 200 20261121 --check",
+    "balance:career": "bun scripts/career-growth-sim.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.1",

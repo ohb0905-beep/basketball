@@ -2,7 +2,8 @@
  * 장기 커리어 성장·은퇴 분포 분석 시뮬레이터
  *
  * 실행:
- *   bun scripts/career-growth-sim.ts [커리어 수=1000] [시드=20261122]
+ *   bun run balance:career [커리어 수=1000] [시드=20261122]
+ *   (= bun scripts/career-growth-sim.ts ...)
  *
  * 실제 useCareerStore 커리어 루프를 고교 입학부터 은퇴/중단까지 자동 진행합니다.
  * 시즌 로그와 pendingSeasonSettlement을 함께 읽어 시즌 종료 후 OVR/잠재력을 기록합니다.
@@ -374,8 +375,8 @@ const csv = [
 ].join('\n');
 writeFileSync(`${outDir}/${stem}-seasons.csv`, csv);
 
-console.log(`\\n== 커리어 성장·은퇴 분석 | seed=${SEED} | careers=${CAREERS}`);
-console.log('\\n[전체 요약]');
+console.log(`\n== 커리어 성장·은퇴 분석 | seed=${SEED} | careers=${CAREERS}`);
+console.log('\n[전체 요약]');
 console.table({
   '완료 은퇴': summary.completedRetirements,
   '미완료': summary.incompleteCareers,
@@ -387,12 +388,12 @@ console.table({
   '최고 OVR 도달 평균 나이': summary.avgPeakAge,
   'NBA 진출률(%)': summary.nbaReachPct,
 });
-console.log('\\n[연령별 성장 곡선]');
+console.log('\n[연령별 성장 곡선]');
 console.table(ageCurve);
-console.log('\\n[초기 잠재력별 최종 성장]');
+console.log('\n[초기 잠재력별 최종 성장]');
 console.table(potentialGroups);
-console.log('\\n[포지션별 성장]');
+console.log('\n[포지션별 성장]');
 console.table(positionGroups);
-console.log('\\n[리그별 활동]');
+console.log('\n[리그별 활동]');
 console.table(leagueGroups);
-console.log(`\\n저장 완료: ${outDir}/${stem}.json 및 ${outDir}/${stem}-seasons.csv`);
+console.log(`\n저장 완료: ${outDir}/${stem}.json 및 ${outDir}/${stem}-seasons.csv`);

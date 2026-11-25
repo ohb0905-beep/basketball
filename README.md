@@ -60,6 +60,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 | `bun run test` | 전체 테스트 (`bun test src`) |
 | `bun run balance` | 밸런스 시뮬레이션. 인자: `[커리어 수=200] [시드=20261121]` |
 | `bun run balance:check` | 시드를 고정한 밸런스 회귀 검사. 목표 범위를 벗어나면 실패 |
+| `bun run balance:career` | 커리어 성장·은퇴 분포 분석. 인자: `[커리어 수=1000] [시드=20261122]`. 결과는 `balance-results/`에 저장(커밋 제외) |
 
 ## CI
 
@@ -80,6 +81,6 @@ src/data/         팀, 리그, 이벤트, 헤드라인 데이터
 src/config/       밸런스와 경제 설정값
 src/components/   UI 컴포넌트
 src/lib/          서버 유틸 (Supabase, 관리자 인증, 통계)
-scripts/          밸런스 시뮬레이터
+scripts/          밸런스·커리어 성장 시뮬레이터
 supabase/         DB 마이그레이션 SQL
 ```
