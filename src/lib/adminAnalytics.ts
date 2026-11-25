@@ -24,6 +24,8 @@ export const ANALYTICS_EVENT_LABELS: Record<AnalyticsEventName, string> = {
   league_changed: '리그 변경',
   career_ended: '커리어 은퇴',
   career_reset: '중도 초기화',
+  creation_started: '생성 화면 진입',
+  draft_completed: '드래프트',
 };
 
 export const ANALYTICS_DEVICE_LABELS: Record<AnalyticsDeviceType | 'unknown', string> = {
@@ -263,6 +265,14 @@ export function summarizeMilestonePayload(
       const season = asNumber(p.abandonedSeason);
       const ovr = asNumber(p.abandonedOverall);
       return `${lg} ${season !== null ? `${season}시즌` : ''} 중도 리셋${ovr !== null ? ` · OVR ${ovr}` : ''}`;
+    }
+    case 'creation_started':
+      return p.hasExistingSave ? '생성 화면 진입 (기존 세이브 있음)' : '생성 화면 진입';
+    case 'draft_completed': {
+      const type = asString(p.draftType) ?? '';
+      const pick = asNumber(p.pickNumber);
+      const ovr = asNumber(p.overall);
+      return `${type} 드래프트 · ${pick !== null ? `#${pick} 지명` : '미지명'}${ovr !== null ? ` · OVR ${ovr}` : ''}`;
     }
     default:
       return '플레이 이벤트 기록';

@@ -11,7 +11,7 @@ export default function PrivacyPolicyPage() {
   return (
     <LegalDocumentLayout
       title="개인정보처리방침"
-      updatedAt="2026.11.24"
+      updatedAt="2026.11.25"
       currentPath="/privacy"
     >
       <p>
@@ -86,8 +86,9 @@ export default function PrivacyPolicyPage() {
         </p>
         <ul className="list-disc pl-5 space-y-1 text-[var(--t-g700)]">
           <li>
-            수집 시점: 세션 시작, 새 커리어 생성, 시즌 완료, 리그 변경(승격·이적
-            등), 커리어 은퇴, 진행 중 커리어 초기화
+            수집 시점: 세션 시작, 커리어 생성 화면 진입, 새 커리어 생성, 시즌
+            완료, 드래프트 결과, 리그 변경(승격·이적 등), 커리어 은퇴, 진행 중
+            커리어 초기화
           </li>
           <li>
             수집 항목: 브라우저·세션·커리어 단위의 무작위 익명 식별자(UUID),

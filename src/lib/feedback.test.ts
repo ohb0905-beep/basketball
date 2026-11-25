@@ -16,8 +16,11 @@ import {
 } from './feedback';
 import type { CareerState } from '../types/game';
 
-test('1. 게임 버전 SemVer 1.0.0 및 제보 유형 매핑 검증', () => {
-  assert.equal(GAME_VERSION, '1.0.0');
+test('1. 게임 버전 SemVer(package.json과 일치) 및 제보 유형 매핑 검증', () => {
+  const packageJson = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')
+  ) as { version: string };
+  assert.equal(GAME_VERSION, packageJson.version);
   assert.match(GAME_VERSION, /^\d+\.\d+\.\d+$/);
   assert.deepEqual([...FEEDBACK_TYPE_VALUES], [
     'bug',
@@ -41,13 +44,13 @@ test('2. 커리어 미초기화(null) 및 진행 중 커리어의 안전한 게�
     now: new Date('2026-11-24T12:00:00.000Z'),
   });
   assert.equal(emptyCtx.submittedAt, '2026-11-24T12:00:00.000Z');
-  assert.equal(emptyCtx.gameVersion, '1.0.0');
+  assert.equal(emptyCtx.gameVersion, GAME_VERSION);
   assert.equal(emptyCtx.hasCareer, false);
   assert.equal(emptyCtx.player, null);
   assert.equal(emptyCtx.activeTab, null);
 
   const emptyRows = formatGameContextPreviewRows(emptyCtx);
-  assert.ok(emptyRows.some((r) => r.label === '게임 버전' && r.value === 'v1.0.0'));
+  assert.ok(emptyRows.some((r) => r.label === '게임 버전' && r.value === `v${GAME_VERSION}`));
   assert.ok(emptyRows.some((r) => r.label === '커리어 상태'));
 
   const mockCareer = {

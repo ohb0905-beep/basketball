@@ -6,7 +6,9 @@ import { GAME_NAME, GAME_VERSION } from '../../config/appMeta';
 export interface LegalDocumentLayoutProps {
   title: string;
   updatedAt: string;
-  currentPath: '/privacy' | '/terms';
+  /** 메타 줄의 날짜 앞 라벨 (기본값: 시행일) */
+  updatedAtLabel?: string;
+  currentPath: '/privacy' | '/terms' | '/patch-notes';
   children: React.ReactNode;
 }
 
@@ -15,6 +17,7 @@ const COPYRIGHT_YEAR = new Date().getFullYear();
 export function LegalDocumentLayout({
   title,
   updatedAt,
+  updatedAtLabel = '시행일',
   currentPath,
   children,
 }: LegalDocumentLayoutProps) {
@@ -24,16 +27,31 @@ export function LegalDocumentLayout({
         <div className="max-w-[680px] mx-auto px-4 h-[52px] flex items-center justify-between gap-3">
           <Link
             href="/"
+            aria-label={`${GAME_NAME}로 돌아가기`}
             className="min-h-[40px] inline-flex items-center gap-1.5 text-[14px] font-bold text-[var(--t-g900)] hover:text-[var(--t-accent-ink)] transition-colors whitespace-nowrap"
           >
             <ArrowLeft className="w-4 h-4 shrink-0" />
-            <span>{GAME_NAME}</span>
+            {/* 좁은 화면에서는 정책 링크 3개가 들어가도록 게임 이름을 숨깁니다 */}
+            <span className="hidden sm:inline">{GAME_NAME}</span>
           </Link>
 
           <nav
             aria-label="정책 문서 이동"
             className="flex items-center gap-3 text-[13px]"
           >
+            <Link
+              href="/patch-notes"
+              className={`min-h-[36px] inline-flex items-center whitespace-nowrap transition-colors ${
+                currentPath === '/patch-notes'
+                  ? 'font-bold text-[var(--t-g900)]'
+                  : 'font-medium text-[var(--t-g500)] hover:text-[var(--t-g800)]'
+              }`}
+            >
+              패치노트
+            </Link>
+            <span className="text-[var(--t-g400)] select-none" aria-hidden="true">
+              ·
+            </span>
             <Link
               href="/privacy"
               className={`min-h-[36px] inline-flex items-center whitespace-nowrap transition-colors ${
@@ -65,7 +83,7 @@ export function LegalDocumentLayout({
         <article className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[22px] p-6 sm:p-8 space-y-6">
           <header className="space-y-1.5 pb-5 border-b border-[var(--t-g100)]">
             <p className="text-[12px] font-medium text-[var(--t-g500)] tabular-nums">
-              {GAME_NAME}(Road to MVP) · v{GAME_VERSION} · 시행일 {updatedAt}
+              {GAME_NAME}(Road to MVP) · v{GAME_VERSION} · {updatedAtLabel} {updatedAt}
             </p>
             <h1 className="text-[22px] sm:text-[24px] font-bold tracking-[-0.03em] text-[var(--t-g900)] leading-snug">
               {title}

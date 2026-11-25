@@ -21,6 +21,9 @@ export const ANALYTICS_EVENT_NAMES = [
   'league_changed',
   'career_ended',
   'career_reset',
+  // 1.0.1 퍼널 이벤트
+  'creation_started',
+  'draft_completed',
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -100,7 +103,6 @@ export interface CareerCreatedPayload {
   innateTrait: PlayerTraitId | null;
   trainingFocus: TrainingFocus;
   initialOvr: number;
-  initialOverall: number;
 }
 
 export interface SeasonCompletedPayload {
@@ -115,8 +117,7 @@ export interface SeasonCompletedPayload {
   // 우승 및 주요 수상 내역
   wonChampionship: boolean;
   wonMvp: boolean;
-  wonFmvp: boolean;
-  wonFinalsMvp: boolean; // 기존 하위 호환 유지
+  wonFinalsMvp: boolean;
   allStarSelected: boolean;
   awards: SeasonAwardCode[];
 
@@ -177,11 +178,7 @@ export interface CareerEndedPayload {
   finalOverall: number;
   totalGames: number;
 
-  // 통산 영예 누적치 (기존 필드 하위 호환 + 표준 키 병행)
-  totalChampionships: number;
-  totalMvp: number;
-  totalFmvp: number;
-  totalAllStar: number;
+  // 통산 영예 누적치 (1.0.0 초기 키 이름 유지: 구버전 행과 같은 키로 집계)
   totalAllLeague: number;
   totalDpoy: number;
   totalSixthMan: number;
@@ -219,6 +216,27 @@ export interface CareerResetPayload {
   hadWonFmvp: boolean;
 }
 
+/** 커리어 생성 화면 진입 (세션당 1회) */
+export interface CreationStartedPayload {
+  hasExistingSave: boolean;
+  hofCount: number;
+}
+
+/** 드래프트 결과 확정 (지명 또는 미지명) */
+export interface DraftCompletedPayload {
+  draftType: 'NBA' | 'KBL';
+  fromLeague: LeagueId;
+  position: Position;
+  age: number;
+  overall: number;
+  /** null = 미지명 */
+  pickNumber: number | null;
+  round: 1 | 2 | null;
+  drafted: boolean;
+  hasTwoWayOffer: boolean;
+  scoutingGrade: number | null;
+}
+
 export interface AnalyticsEventPayloadMap {
   session_start: SessionStartPayload;
   career_created: CareerCreatedPayload;
@@ -226,6 +244,8 @@ export interface AnalyticsEventPayloadMap {
   league_changed: LeagueChangedPayload;
   career_ended: CareerEndedPayload;
   career_reset: CareerResetPayload;
+  creation_started: CreationStartedPayload;
+  draft_completed: DraftCompletedPayload;
 }
 
 export interface AnalyticsEventRequestBody<
@@ -499,6 +519,8 @@ const SESSION_EVENT_RULES: Record<AnalyticsEventName, RateRule> = {
   league_changed: { windowMs: 60 * 1000, maxCount: 30 },
   career_ended: { windowMs: 60 * 1000, maxCount: 10 },
   career_reset: { windowMs: 60 * 1000, maxCount: 10 },
+  creation_started: { windowMs: 10 * 60 * 1000, maxCount: 3 },
+  draft_completed: { windowMs: 60 * 1000, maxCount: 10 },
 };
 
 const IP_BURST_RULE: RateRule = {

@@ -56,24 +56,46 @@ function round1(value: number | null | undefined): number {
 }
 
 /**
+ * 시즌 시뮬레이터가 실제로 기록하는 역할 문자열 → 분석용 역할 코드 (정확히 일치할 때 우선 사용)
+ */
+const ENGINE_ROLE_CODES: Record<string, NormalizedPlayerRole> = {
+  '프랜차이즈 1옵션 에이스': 'franchise_ace',
+  '주전 스타터': 'starter',
+  '주전급 코어 유망주 (1라운드 픽)': 'starter',
+  '핵심 식스맨': 'sixth_man',
+  '핵심 유망주 로테이션 (1라운드 픽)': 'bench',
+  '벤치 로테이션': 'bench',
+  '투웨이 콜업 로테이션': 'two_way',
+  '가비지 타임 (벤치 끝자리)': 'garbage_time',
+};
+
+/**
  * 게임 엔진의 한국어 역할 문자열을 분석용 표준 역할 코드로 정규화합니다.
+ * - 알려진 엔진 문자열은 정확히 매핑하고, 그 밖의 문자열은 키워드로 추정합니다.
+ * - '벤치 에이스', '세컨드 유닛 에이스'처럼 벤치 역할을 꾸미는 '에이스'는 프랜차이즈 에이스로 보지 않습니다.
  */
 export function normalizePlayerRole(rawRole: string | null | undefined): NormalizedPlayerRole {
   const text = (rawRole || '').trim();
+  const exact = ENGINE_ROLE_CODES[text];
+  if (exact) return exact;
+
+  if (text.includes('가비지') || text.includes('끝자리')) {
+    return 'garbage_time';
+  }
+  if (text.includes('투웨이')) {
+    return 'two_way';
+  }
+  if (text.includes('식스맨') || text.includes('세컨드 유닛')) {
+    return 'sixth_man';
+  }
+  if (text.includes('벤치') || text.includes('후보')) {
+    return 'bench';
+  }
   if (text.includes('프랜차이즈') || text.includes('에이스') || text.includes('1옵션')) {
     return 'franchise_ace';
   }
   if (text.includes('주전') || text.includes('스타터')) {
     return 'starter';
-  }
-  if (text.includes('식스맨')) {
-    return 'sixth_man';
-  }
-  if (text.includes('투웨이')) {
-    return 'two_way';
-  }
-  if (text.includes('가비지') || text.includes('끝자리')) {
-    return 'garbage_time';
   }
   return 'bench';
 }
@@ -561,7 +583,6 @@ export function emitCareerStateTransitionEvents(
         innateTrait: nextCareer.traits?.[0] ?? null,
         trainingFocus: nextCareer.trainingFocus,
         initialOvr: nextCareer.ovr,
-        initialOverall: nextCareer.ovr,
       },
       {
         careerRunId,
@@ -612,7 +633,6 @@ export function emitCareerStateTransitionEvents(
 
         wonChampionship,
         wonMvp,
-        wonFmvp,
         wonFinalsMvp: wonFmvp,
         allStarSelected: Boolean(latestLog?.allStarSelected),
         awards: extractSeasonAwards(latestLog),
@@ -729,10 +749,6 @@ export function emitCareerStateTransitionEvents(
         finalOverall: nextCareer.ovr,
         totalGames: gp,
 
-        totalChampionships: nextCareer.totals.championships ?? 0,
-        totalMvp: nextCareer.totals.mvps ?? 0,
-        totalFmvp: nextCareer.totals.finalsMvps ?? 0,
-        totalAllStar: nextCareer.totals.allStars ?? 0,
         totalAllLeague: nextCareer.totals.allLeagueSelections ?? 0,
         totalDpoy: nextCareer.totals.dpoys ?? 0,
         totalSixthMan: nextCareer.totals.sixthManAwards ?? 0,
@@ -762,7 +778,57 @@ export function emitCareerStateTransitionEvents(
     );
   }
 
-  // 5. 진행 중 커리어 중도 초기화 (정상 은퇴 완료 후 홈 복귀는 제외)
+  // 5. 커리어 생성 화면 진입 (세션당 1회, 시작 화면 이탈 측정용)
+  if (prev.view !== 'CREATE' && next.view === 'CREATE') {
+    dispatcher.track(
+      'creation_started',
+      {
+        hasExistingSave: Boolean(nextCareer),
+        hofCount: Array.isArray(next.hofList) ? next.hofList.length : 0,
+      },
+      {
+        careerRunId: null,
+        dedupeKey: 'creation_started',
+        dedupeScope: 'session',
+      }
+    );
+  }
+
+  // 6. 드래프트 결과 확정
+  if (
+    nextCareer &&
+    nextCareer.draftResult &&
+    prevCareer?.id === nextCareer.id &&
+    prevCareer.draftResult !== nextCareer.draftResult &&
+    (prevCareer.draftResult === null ||
+      prevCareer.draftResult.draftType !== nextCareer.draftResult.draftType)
+  ) {
+    const careerRunId = dispatcher.resolveCareerRunId(nextCareer.id);
+    const draft = nextCareer.draftResult;
+    dispatcher.track(
+      'draft_completed',
+      {
+        draftType: draft.draftType,
+        fromLeague: prevCareer.league,
+        position: nextCareer.primaryPos,
+        age: nextCareer.age,
+        overall: nextCareer.ovr,
+        pickNumber: draft.pickNumber,
+        round: draft.round,
+        drafted: draft.pickNumber !== null,
+        hasTwoWayOffer: Boolean(draft.twoWayOfferTeam),
+        scoutingGrade:
+          typeof draft.scoutingGrade === 'number' ? round1(draft.scoutingGrade) : null,
+      },
+      {
+        careerRunId,
+        dedupeKey: `draft_completed:${careerRunId}:${nextCareer.seasonsPlayed}:${draft.draftType}`,
+        dedupeScope: 'persistent',
+      }
+    );
+  }
+
+  // 7. 진행 중 커리어 중도 초기화 (정상 은퇴 완료 후 홈 복귀는 제외)
   if (
     prevCareer &&
     !prevCareer.retirementReason &&
