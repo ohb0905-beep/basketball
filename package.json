@@ -8,12 +8,13 @@
     "start": "next start",
     "lint": "eslint .",
     "clean": "next clean",
-    "test": "bun test src/engine/engine.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src",
     "balance": "bun scripts/balance-sim.ts",
-    "balance:check": "bun scripts/balance-sim.ts 200 20261121 --check"
+    "balance:check": "bun scripts/balance-sim.ts 200 20261121 --check",
+    "balance:career": "bun scripts/career-growth-sim.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@hookform/resolvers": "^5.2.1",
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.1",
