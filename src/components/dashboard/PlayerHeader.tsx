@@ -14,6 +14,11 @@ import {
   getMilitaryStatusDisplay,
 } from '../../utils/formatters';
 import { TeamEmblem } from '../common/TeamEmblem';
+import {
+  getCareerNationality,
+  getNationalityInfo,
+  isKoreanNational,
+} from '../../data/nationalities';
 
 export function PlayerHeader({ career }: { career: CareerState }) {
   const leagueInfo = LEAGUE_CONFIG[career.league];
@@ -25,6 +30,9 @@ export function PlayerHeader({ career }: { career: CareerState }) {
   const traitLabels = (career.traits || []).map((tId) => getTraitInfo(tId).name);
   const cash = getEffectiveCashBalance(career);
   const militaryStatus = getMilitaryStatusDisplay(career);
+  // 1.2.0: 병역 상태는 대한민국 국적에만 표시하고, 국적은 이름 옆에 국기로 보여 줍니다.
+  const isKorean = isKoreanNational(career);
+  const nationalityInfo = getNationalityInfo(getCareerNationality(career));
   const militaryToneClass =
     militaryStatus.tone === 'ok'
       ? 'text-[var(--t-ok)]'
@@ -70,15 +78,27 @@ export function PlayerHeader({ career }: { career: CareerState }) {
             </div>
 
             <p className="text-[12px] text-[var(--t-g500)] truncate mt-0.5">
+              <span
+                data-testid="header-nationality"
+                role="img"
+                aria-label={`국적 ${nationalityInfo.name}`}
+                title={nationalityInfo.name}
+              >
+                {nationalityInfo.flag}
+              </span>{' '}
               {playstyleLabel}
               {traitLabels.length > 0 ? ` · ${traitLabels.join(' · ')}` : ''}
-              {' · '}
-              <span
-                data-testid="header-military-status"
-                className={`font-semibold ${militaryToneClass}`}
-              >
-                {militaryStatus.label}
-              </span>
+              {isKorean && (
+                <>
+                  {' · '}
+                  <span
+                    data-testid="header-military-status"
+                    className={`font-semibold ${militaryToneClass}`}
+                  >
+                    {militaryStatus.label}
+                  </span>
+                </>
+              )}
             </p>
           </div>
         </div>

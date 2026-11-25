@@ -29,6 +29,7 @@ import {
   TrainingPresetId,
 } from '../../types/game';
 import { formatCurrencyDetailed } from '../../utils/formatters';
+import { isKoreanNational } from '../../data/nationalities';
 import { Modal, SelectionCheckCircle } from '../common/Modal';
 import { getScoutingBalanceBadges } from '../create/PlayerCreator';
 
@@ -123,7 +124,11 @@ export function TrainingTab() {
   );
   const relationships = getEffectiveRelationships(career);
   const storyArcs = getEffectiveStoryArcs(career);
-  const arcList = (Object.keys(storyArcs) as StoryArcId[]).map((k) => storyArcs[k]);
+  // 1.2.0: 대한민국 국적이 아니면 국가대표·태극마크 관련 화면을 보여 주지 않습니다.
+  const isKorean = isKoreanNational(career);
+  const arcList = (Object.keys(storyArcs) as StoryArcId[])
+    .filter((k) => isKorean || k !== 'NATIONAL_TORCH_ARC')
+    .map((k) => storyArcs[k]);
   const relationshipKeys: (keyof RelationshipMetrics)[] = [
     'coachTrust',
     'lockerRoom',
@@ -524,8 +529,8 @@ export function TrainingTab() {
         </button>
       </section>
 
-      {/* 5. 대한민국 국가대표 활동 관리 */}
-      {(() => {
+      {/* 5. 대한민국 국가대표 활동 관리 (대한민국 국적만) */}
+      {isKorean && (() => {
         const caps = career.totals.internationalCaps || 0;
         const medals = career.totals.internationalMedals || {
           gold: 0,

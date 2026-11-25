@@ -6,7 +6,8 @@ import {
   canUseProTradeSystem,
   clampNum,
 } from '../config/balanceConfig';
-import { LEAGUE_CONFIG } from '../data/leagues';
+import { isHighSchoolLeague, LEAGUE_CONFIG } from '../data/leagues';
+import { isKoreanNational } from '../data/nationalities';
 import {
   getTeamsByLeague,
   SANGMU_TEAM,
@@ -210,7 +211,7 @@ export function determineTeamRolePromise(
 export function evaluateHighSchoolProspect(
   career: CareerState
 ): HighSchoolProspectEvaluation {
-  const hsLogs = career.seasonLogs.filter((l) => l.league === 'HIGH_SCHOOL');
+  const hsLogs = career.seasonLogs.filter((l) => isHighSchoolLeague(l.league));
   const totalGp = hsLogs.reduce((acc, l) => acc + l.gp, 0);
   const avgPpg =
     totalGp > 0
@@ -703,7 +704,7 @@ export function executeDraftResolution(
       Math.max(0, career.potential - kblCfg.potentialRef) * kblCfg.potentialWeight;
 
     let earlyEntryAdj = 0;
-    if (career.league === 'HIGH_SCHOOL') {
+    if (isHighSchoolLeague(career.league)) {
       const hsStars =
         career.prospectStars ?? evaluateHighSchoolProspect(career).stars;
       if (hsStars >= 5) {
@@ -1003,9 +1004,38 @@ function buildContenderPathOptions(
 /**
  * 동적 구단 생태계, 리그 수준 환산(League Translation), 베테랑 최저연봉, 구단 역할 약속(Role Promise)이 반영된 오프시즌 선택지 생성
  */
+/**
+ * 1.2.0: 미국 고교 졸업생의 NCAA 오퍼 후보.
+ * 4성 이상은 전체, 3성은 우승 후보를 뺀 팀, 2성 이하는 리빌딩 팀 위주로 제안합니다.
+ */
+function getUsHighSchoolNcaaPool(ncaaTeams: TeamInfo[], stars: number): TeamInfo[] {
+  if (stars >= 4) return ncaaTeams;
+  const pool =
+    stars === 3
+      ? ncaaTeams.filter((t) => t.direction !== 'CONTENDER')
+      : ncaaTeams.filter((t) => t.direction === 'REBUILDING');
+  return pool.length > 0 ? pool : ncaaTeams;
+}
+
 export function generateOffseasonOptions(
   career: CareerState,
   rng: () => number = Math.random
+): OffseasonOption[] {
+  const options = buildOffseasonOptions(career, rng);
+  if (isKoreanNational(career)) return options;
+  // 1.2.0: 외국 국적 선수가 받는 KBL 구단 제안은 외국인 선수 계약으로 표시합니다.
+  return options.map((option) =>
+    option.targetLeague === 'KBL' &&
+    option.actionType === 'SIGN_TEAM' &&
+    !option.badgeText.includes('외국인')
+      ? { ...option, badgeText: `${option.badgeText} · 외국인 선수` }
+      : option
+  );
+}
+
+function buildOffseasonOptions(
+  career: CareerState,
+  rng: () => number
 ): OffseasonOption[] {
   const options: OffseasonOption[] = [];
   const lastLog = career.seasonLogs[career.seasonLogs.length - 1];
@@ -1092,15 +1122,20 @@ export function generateOffseasonOptions(
     return options;
   }
 
+  // 1.2.0: KBL 드래프트는 대한민국 국적만 신청할 수 있습니다. (외국인은 FA 제안으로만 KBL에 입단)
+  const isKorean = isKoreanNational(career);
+
   // [Case 1] 고교 농구 재학 및 졸업 (만 16세 고1 입학 -> 3시즌 후 만 19세 고교 졸업 시 진로 선택)
-  if (career.league === 'HIGH_SCHOOL') {
+  // 한국 고교와 미국 고교(1.2.0) 모두 여기서 처리합니다.
+  if (isHighSchoolLeague(career.league)) {
+    const isUsHighSchool = career.league === 'US_HIGH_SCHOOL';
     if (career.age < 19 && career.contractYearsLeft > 0) {
       options.push({
         id: 'OPT_HS_NEXT_GRADE',
         title: `${career.team.name} 다음 학년 진급`,
         subtitle: '고교 무대에서 실전 경험을 쌓으며 스카우트 평가를 높입니다.',
         badgeText: '고교 재학',
-        targetLeague: 'HIGH_SCHOOL',
+        targetLeague: career.league,
         targetTeam: career.team,
         contractType: 'AMATEUR',
         contractYears: career.contractYearsLeft,
@@ -1116,7 +1151,9 @@ export function generateOffseasonOptions(
     const prospect = evaluateHighSchoolProspect(career);
 
     // 1) 국내 대학(U-리그): 포지션 니즈와 유망주 등급에 부합하는 1~2개 대학만 스카우트 오퍼 제시
-    const eligibleUniversities = uLeagueTeams
+    //    미국 고교 출신은 대한민국 국적일 때만 U-리그 스카우트를 받습니다.
+    const canReceiveULeagueOffers = !isUsHighSchool || isKorean;
+    const eligibleUniversities = (canReceiveULeagueOffers ? uLeagueTeams : [])
       .filter((uni) => {
         if (uni.direction === 'CONTENDER') {
           return prospect.stars >= 3;
@@ -1154,10 +1191,11 @@ export function generateOffseasonOptions(
 
     // 2) KBL 얼리 드래프트: 유망주 등급 3성 이상 또는 전국대회 우승/MVP 입증 시 참가 가능
     const kblEarlyEligible =
-      prospect.stars >= 3 ||
+      isKorean &&
+      (prospect.stars >= 3 ||
       prospect.compositeScore >= 44 ||
       prospect.championships >= 1 ||
-      prospect.mvps >= 1;
+      prospect.mvps >= 1);
     if (kblEarlyEligible) {
       options.push({
         id: 'OPT_ROUTE_B_KBL_EARLY',
@@ -1176,19 +1214,29 @@ export function generateOffseasonOptions(
     }
 
     // 3) 미국 NCAA D1 장학금 오퍼: 4성급 이상 유망주에게만 1~2곳 제시
-    if (prospect.stars >= 4) {
-      const sortedNcaa = [...ncaaTeams].sort((a, b) => {
+    //    미국 고교 출신은 현지 스카우트망 덕분에 별점과 상관없이 오퍼를 받되, 별이 낮을수록 약팀 위주입니다.
+    if (prospect.stars >= 4 || isUsHighSchool) {
+      const ncaaPool = isUsHighSchool ? getUsHighSchoolNcaaPool(ncaaTeams, prospect.stars) : ncaaTeams;
+      const sortedNcaa = [...ncaaPool].sort((a, b) => {
         const aNeed = a.neededPositions?.includes(career.primaryPos) ? 1 : 0;
         const bNeed = b.neededPositions?.includes(career.primaryPos) ? 1 : 0;
         return bNeed - aNeed || (rng() - 0.5);
       });
-      const ncaaOfferCount = prospect.stars === 5 ? 2 : 1;
+      const ncaaOfferCount = isUsHighSchool
+        ? prospect.stars >= 3
+          ? 2
+          : 1
+        : prospect.stars === 5
+        ? 2
+        : 1;
       for (const ncaaTeam of sortedNcaa.slice(0, ncaaOfferCount)) {
         const promise = determineTeamRolePromise(career, ncaaTeam, 'AMATEUR');
         options.push({
           id: `OPT_ROUTE_C_${ncaaTeam.id}`,
           title: `${ncaaTeam.name} D1 장학금 오퍼`,
-          subtitle: '미국 NCAA 디비전 1 공식 장학금 입학 제안입니다.',
+          subtitle: isUsHighSchool
+            ? '미국 고교 스카우트망을 통해 들어온 NCAA 디비전 1 장학금 입학 제안입니다.'
+            : '미국 NCAA 디비전 1 공식 장학금 입학 제안입니다.',
           badgeText: 'NCAA D1',
           targetLeague: 'NCAA',
           targetTeam: ncaaTeam,
@@ -1276,8 +1324,10 @@ export function generateOffseasonOptions(
       ? ((lastLog.ppg + lastLog.rpg * 0.7 + lastLog.apg * 0.8) * 36) /
         Math.max(12, lastLog.mpg)
       : 16;
+    // 1.2.0: 외국 국적은 KBL 드래프트가 없으므로 NBA 드래프트 신청을 항상 열어 둡니다.
     const collegeReadyForNbaDraft =
       career.league === 'NCAA' ||
+      !isKorean ||
       (collegePer36Impact >= 22.0 && career.draftStock >= 40);
     if (collegeReadyForNbaDraft) {
       options.push({
@@ -1292,7 +1342,7 @@ export function generateOffseasonOptions(
       });
     }
 
-    options.push({
+    if (isKorean) options.push({
       id: 'OPT_COLLEGE_TO_KBL_DRAFT',
       title: 'KBL 신인드래프트 참가',
       subtitle: '국내 프로 무대 KBL 10개 구단 지명에 참가합니다.',

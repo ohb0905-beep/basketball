@@ -7,7 +7,7 @@ import {
   canUseProTradeSystem,
   isPersonalCareAllowedInLeague,
 } from '../../config/balanceConfig';
-import { LEAGUE_CONFIG } from '../../data/leagues';
+import { isHighSchoolLeague, LEAGUE_CONFIG } from '../../data/leagues';
 import { getLeagueRecordChases } from '../../engine/recordBookEngine';
 import {
   FRESHMAN_ADAPTATION_CONFIG,
@@ -551,7 +551,7 @@ export function SeasonTab() {
                     career.militaryServiceSeasonsLeft === 0
                   ? '오프시즌 · FA 계약 만료'
                   : '오프시즌'}
-                {career.league === 'HIGH_SCHOOL' && career.prospectStars
+                {isHighSchoolLeague(career.league) && career.prospectStars
                   ? ` · 유망주 ${career.prospectStars}성`
                   : ''}
               </span>

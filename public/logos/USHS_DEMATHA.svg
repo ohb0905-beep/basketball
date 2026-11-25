@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <circle cx="60" cy="60" r="56" fill="#FFFFFF" stroke="#9F1239" stroke-width="3"/>
+  <defs>
+    <path id="arc" d="M 16,62 A 44,44 0 1,1 104,62" />
+  </defs>
+  <text fill="#9F1239" font-family="sans-serif" font-size="7.6" font-weight="800" letter-spacing="0.6">
+    <textPath href="#arc" startOffset="50%" text-anchor="middle">DEMATHA CATHOLIC</textPath>
+  </text>
+  <path d="M60 30 L86 40 V62 C86 80 74 92 60 98 C46 92 34 80 34 62 V40 Z" fill="#9F1239" stroke="#FECDD3" stroke-width="3"/>
+  <path d="M40 48 H80" stroke="#FECDD3" stroke-width="1.4" stroke-opacity="0.7"/>
+  <text x="60" y="72" text-anchor="middle" fill="#FFFFFF" font-family="sans-serif" font-size="30" font-weight="900">DM</text>
+  <text x="60" y="88" text-anchor="middle" fill="#FECDD3" font-family="sans-serif" font-size="6.5" font-weight="800" letter-spacing="1">PREP</text>
+</svg>

@@ -3,6 +3,7 @@ import type {
   GrowthDna,
   LeagueId,
   LegacyTierId,
+  NationalityCode,
   PlayerTraitId,
   PlaystyleArchetype,
   Position,
@@ -101,6 +102,8 @@ export interface CareerCreatedPayload {
   heightCm: number;
   startingLeague: LeagueId;
   startingTeamId: string;
+  /** 1.2.0: 선수 국적 코드 (예: 'KOR', 'USA'). 예전 버전 이벤트에는 없습니다. */
+  nationality?: NationalityCode;
   startingAge: number;
   growthDna: GrowthDna | null;
   playstyle: PlaystyleArchetype | null;

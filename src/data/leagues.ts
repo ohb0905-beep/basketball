@@ -15,6 +15,18 @@ export const LEAGUES: Record<LeagueId, LeagueConfig> = {
     country: '대한민국',
     badgeColor: '#475569',
   },
+  US_HIGH_SCHOOL: {
+    id: 'US_HIGH_SCHOOL',
+    name: '미국 고교농구 (전미 프렙 서킷)',
+    shortName: '미국 고교',
+    gamesPerSeason: 30,
+    games: 30,
+    ldr: 45,
+    growthCap: 63, // 1.2.0: 한국 고교(60)보다 높은 성장 상한
+    prestige: 0.35,
+    country: '미국',
+    badgeColor: '#1D4ED8',
+  },
   U_LEAGUE: {
     id: 'U_LEAGUE',
     name: '한국 대학농구 U-리그 (KUBF)',
@@ -117,6 +129,7 @@ export const LEAGUE_CONFIG = LEAGUES;
 
 export const LEAGUE_ORDER: LeagueId[] = [
   'HIGH_SCHOOL',
+  'US_HIGH_SCHOOL',
   'U_LEAGUE',
   'KBL',
   'B_LEAGUE',
@@ -126,3 +139,8 @@ export const LEAGUE_ORDER: LeagueId[] = [
   'EUROLEAGUE',
   'NBA',
 ];
+
+/** 1.2.0: 고교 리그 판별 (한국 고교, 미국 고교). 'HIGH_SCHOOL'을 직접 비교하지 말고 이 함수를 씁니다. */
+export function isHighSchoolLeague(league: LeagueId | null | undefined): boolean {
+  return league === 'HIGH_SCHOOL' || league === 'US_HIGH_SCHOOL';
+}

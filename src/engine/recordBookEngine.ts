@@ -638,6 +638,15 @@ const LEAGUE_BASELINE_RECORDS: Record<LeagueId, BaselineRecordSpec[]> = {
       year: 2021,
     },
   ],
+  US_HIGH_SCHOOL: [
+    { category: 'CAREER_POINTS', label: '통산 득점', unit: '점', value: 2600, holderName: '전미 프렙 역대 기록', teamName: '전미 프렙 서킷', year: 2019 },
+    { category: 'SINGLE_GAME_POINTS', label: '단일 경기 최다 득점', unit: '점', value: 55, holderName: '전미 프렙 역대 기록', teamName: '전미 프렙 서킷', year: 2017 },
+    { category: 'SEASON_PPG', label: '단일 시즌 평균 득점', unit: 'PPG', value: 30.5, holderName: '전미 프렙 역대 기록', teamName: '전미 프렙 서킷', year: 2018 },
+    { category: 'SEASON_RPG', label: '단일 시즌 평균 리바운드', unit: 'RPG', value: 14.5, holderName: '전미 프렙 역대 기록', teamName: '전미 프렙 서킷', year: 2016 },
+    { category: 'SEASON_APG', label: '단일 시즌 평균 어시스트', unit: 'APG', value: 9.5, holderName: '전미 프렙 역대 기록', teamName: '전미 프렙 서킷', year: 2020 },
+    { category: 'CHAMPIONSHIPS', label: '최다 우승', unit: '회', value: 3, holderName: '전미 프렙 역대 기록', teamName: '전미 프렙 서킷', year: 2022 },
+    { category: 'MVPS', label: '최다 전미 고교 MVP', unit: '회', value: 2, holderName: '전미 프렙 역대 기록', teamName: '전미 프렙 서킷', year: 2021 },
+  ],
 };
 
 export const LEGACY_TIER_CATALOG: {
@@ -692,6 +701,7 @@ const ALL_LEAGUE_IDS: LeagueId[] = [
   'NCAA',
   'U_LEAGUE',
   'HIGH_SCHOOL',
+  'US_HIGH_SCHOOL',
 ];
 
 export function createInitialRecordBook(): RecordBookState {

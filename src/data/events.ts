@@ -16,6 +16,8 @@ import {
   POSITION_EVENTS,
   rollCombinatorialEncounter,
 } from '../engine/encounterEngine';
+import { isHighSchoolLeague } from './leagues';
+import { isKoreanNational } from './nationalities';
 
 export { POSITION_EVENTS };
 
@@ -415,7 +417,7 @@ export function rollMidSeasonCrossroadsEvent(
 
   // 시나리오 1-B: 고교 가비지 타임 선수에게 찾아오는 '코치의 기회' (잡으면 이번 시즌 로테이션 진입)
   if (
-    career.league === 'HIGH_SCHOOL' &&
+    isHighSchoolLeague(career.league) &&
     career.role.includes('가비지') &&
     career.coachChanceRotationYear !== career.seasonYear &&
     rng() < ROLE_MPG_CONFIG.coachChance.triggerProb
@@ -693,8 +695,11 @@ export function rollSeasonEventQueue(
   };
 
   // 0) 병역 미필자 상무 입대 이벤트 (또는 입대 직전 마지막 특례 대회)
+  // 1.2.0: 병역·국가대표는 대한민국 국적에만 해당합니다.
+  const isKorean = isKoreanNational(career);
   const enlistAgeThreshold = getMilitaryEnlistAgeForLeague(career.league);
   if (
+    isKorean &&
     !career.militaryExempt &&
     career.militaryServiceSeasonsLeft === 0 &&
     career.age >= enlistAgeThreshold
@@ -746,6 +751,7 @@ export function rollSeasonEventQueue(
 
   // 4) 4년 주기 국제대회 국가대표 차출 (Slot A) + 서사 이벤트 동시 큐 적재 (Slot B)
   if (
+    isKorean &&
     !career.nationalTeamRetired &&
     !alreadyPlayedThisTournament &&
     career.militaryServiceSeasonsLeft === 0 &&

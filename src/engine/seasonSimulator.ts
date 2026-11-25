@@ -2,6 +2,7 @@ import {
   AWARD_VOTING_CONFIG,
   ECONOMY_CONFIG,
   GROWTH_CONFIG,
+  US_HIGH_SCHOOL_DEVELOPMENT_CONFIG,
   LEAGUE_AWARD_QUOTAS,
   LEAGUE_BALANCE_META,
   LeagueAwardQuotaConfig,
@@ -115,6 +116,7 @@ const AWARD_LEAGUE_PRIORITY: LeagueId[] = [
   'NCAA',
   'U_LEAGUE',
   'HIGH_SCHOOL',
+  'US_HIGH_SCHOOL',
 ];
 
 /**
@@ -1494,9 +1496,15 @@ export function calculateSeasonStatGrowth(
     // 프로 입단(23세 전후) 이후 성장 가속: 잠재력에 실제로 근접할 수 있도록 보정
     const proStageBoost =
       LEAGUE_BALANCE_META[career.league].isPro ? GROWTH_CONFIG.proStageGrowthBoost : 1.0;
+    // 1.2.0: 미국 고교 재학 중에는 성장 속도가 빠릅니다.
+    const usHighSchoolBoost =
+      career.league === 'US_HIGH_SCHOOL'
+        ? US_HIGH_SCHOOL_DEVELOPMENT_CONFIG.growthMultiplier
+        : 1.0;
     const baseGain =
       1.72 *
       proStageBoost *
+      usHighSchoolBoost *
       ptFactor *
       capPenalty *
       potPenalty *

@@ -36,6 +36,7 @@ const COMPENDIUM_LEAGUES: LeagueId[] = [
   'U_LEAGUE',
   'GLEAGUE',
   'HIGH_SCHOOL',
+  'US_HIGH_SCHOOL',
 ];
 
 export function BestFiveCourt() {

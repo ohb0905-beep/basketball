@@ -11,6 +11,7 @@
 import type { CareerState, LeagueId } from '../types/game';
 import type { SurveyAnswerValue, SurveyResponsePayload } from './analyticsSchema';
 import { normalizePlayoffResult } from './analytics';
+import { isHighSchoolLeague } from '../data/leagues';
 
 export const SURVEY_ID = 'difficulty_2026_11';
 
@@ -103,7 +104,7 @@ export function buildSurveyCareerContext(
     nbaChampionships: career.totals?.nbaChampionships ?? 0,
     kblSeasons: logs.filter((log) => log.league === 'KBL').length,
     overseasSeasons: logs.filter((log) => OVERSEAS_LEAGUES.includes(log.league)).length,
-    highSchoolSeasons: logs.filter((log) => log.league === 'HIGH_SCHOOL').length,
+    highSchoolSeasons: logs.filter((log) => isHighSchoolLeague(log.league)).length,
     seasonsPlayed: career.seasonsPlayed,
     finalLeague: career.league,
     retirementReason: career.retirementReason ?? null,

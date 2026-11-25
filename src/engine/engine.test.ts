@@ -12,6 +12,7 @@ import {
   EUROLEAGUE_TEAMS,
   NCAA_TEAMS,
   HIGH_SCHOOL_TEAMS,
+  US_HIGH_SCHOOL_TEAMS,
   U_LEAGUE_TEAMS,
   GLEAGUE_TEAMS,
   ASIAN_NATIONAL_TEAMS,
@@ -210,6 +211,7 @@ function createBaseCareer(overrides: Partial<CareerState> = {}): CareerState {
   return {
     id: 'TEST',
     name: '테스트선수',
+    nationality: 'KOR',
     jerseyNumber: '23',
     heightCm: 198,
     primaryPos: 'SG',
@@ -1141,6 +1143,8 @@ test('13. Strict GOAT Legacy Criteria (No Legacy Score Shortcut without NBA MVP>
 
 test('14. Expanded Real League Databases (24 HS, 12 U-League, 24 NCAA, 20 G-League, 30 NBA East/West, 8 Asian National)', () => {
   assert.ok(HIGH_SCHOOL_TEAMS.length >= 24, `Expected >=24 Korean High School teams, got ${HIGH_SCHOOL_TEAMS.length}`);
+  assert.ok(US_HIGH_SCHOOL_TEAMS.length >= 24, `Expected >=24 US High School teams, got ${US_HIGH_SCHOOL_TEAMS.length}`);
+  assert.ok(US_HIGH_SCHOOL_TEAMS.every((t) => t.league === 'US_HIGH_SCHOOL'));
   assert.ok(U_LEAGUE_TEAMS.length >= 12, `Expected >=12 Korean University teams, got ${U_LEAGUE_TEAMS.length}`);
   assert.ok(NCAA_TEAMS.length >= 24, `Expected >=24 NCAA D1 teams, got ${NCAA_TEAMS.length}`);
   assert.ok(GLEAGUE_TEAMS.length >= 20, `Expected >=20 NBA G-League teams, got ${GLEAGUE_TEAMS.length}`);
@@ -1354,13 +1358,13 @@ test('17. Asian Games 4-Year Cycle & Full Tournament (Group -> QF -> SF -> Final
   );
 });
 
-test('18. All 210 Teams Have Official Logo Assets & League-Specific SVG Fallback Generator', async () => {
+test('18. All 234 Teams Have Official Logo Assets & League-Specific SVG Fallback Generator', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
   const { generateLeagueFallbackSvgDataUri } = await import('../data/logoFallbacks');
 
   const combined = [...ALL_TEAMS, ...ASIAN_NATIONAL_TEAMS];
-  assert.equal(combined.length, 210, 'Total teams across all 9 leagues (201) + Asian National Teams (9) must be 210');
+  assert.equal(combined.length, 234, 'Total teams across all 10 leagues (225) + Asian National Teams (9) must be 234');
 
   const seenLogos = new Set<string>();
   for (const team of combined) {
@@ -1388,7 +1392,7 @@ test('18. All 210 Teams Have Official Logo Assets & League-Specific SVG Fallback
     assert.ok(decoded.includes('<svg') && decoded.includes('</svg>'), `Decoded SVG for ${team.id} must be valid SVG`);
   }
 
-  assert.equal(seenLogos.size, 210, 'Every single one of the 210 teams must have its own distinct logoUrl');
+  assert.equal(seenLogos.size, 234, 'Every single one of the 234 teams must have its own distinct logoUrl');
 
   for (const gl of GLEAGUE_TEAMS) {
     assert.ok(
@@ -2297,7 +2301,7 @@ test('30. Realistic 1-Possession Shooting Map (<=3pts), Zero Quarter-Start Score
 test('31. 역대 리그 기록실 경신·추격, 명예의 전당 도감, 세이브 마이그레이션 및 하단 도크 상태 검증', () => {
   const initialBook = createInitialRecordBook();
   const totalSlots = Object.values(initialBook).reduce((acc, arr) => acc + arr.length, 0);
-  assert.equal(totalSlots, 66, '6 leagues x 7 categories + NBA/KBL/EuroLeague x 8 categories = 66 baseline records');
+  assert.equal(totalSlots, 73, '7 leagues x 7 categories + NBA/KBL/EuroLeague x 8 categories = 73 baseline records');
 
   const log2032 = createSeasonLog({
     year: 2032,
@@ -2410,7 +2414,8 @@ test('31. 역대 리그 기록실 경신·추격, 명예의 전당 도감, 세�
   assert.equal(migrated.hofList[0].legacyTitle, '역대 최고 선수 (GOAT)');
   assert.equal(migrated.hofList[0].legacyEmoji, '');
   const migratedSlots = Object.values(migrated.recordBook).reduce((acc, arr) => acc + arr.length, 0);
-  assert.equal(migratedSlots, 66);
+  assert.equal(migratedSlots, 73, '예전 기록집도 미국 고교 기록 칸(1.2.0)을 채워 불러와야 합니다');
+  assert.equal(migrated.career?.nationality, 'KOR', '국적이 없는 예전 세이브는 대한민국 국적으로 이어집니다');
 
   // Bottom dock visibility helper stays true during finished playoff bracket
   const finishedPlayoffCareer = createBaseCareer({
@@ -3310,7 +3315,8 @@ test('39. Authentic League Expansion Across All 9 Leagues (Team Counts, Schedule
   assert.equal(GLEAGUE_TEAMS.length, 31);
   assert.equal(NCAA_TEAMS.length, 32);
   assert.equal(NBA_TEAMS.length, 30);
-  assert.equal(ALL_TEAMS.length, 202, '201 league clubs + 1 Sangmu military club = 202');
+  assert.equal(US_HIGH_SCHOOL_TEAMS.length, 24);
+  assert.equal(ALL_TEAMS.length, 226, '225 league clubs + 1 Sangmu military club = 226');
   assert.equal(LEAGUE_CONFIG.U_LEAGUE.gamesPerSeason, 16);
 
   // G League: 31 teams (East 16 / West 15), 12-team conference PO (R1 BO1 -> R2 BO1 w/ 1-2 bye -> CF BO1 -> Finals BO3)

@@ -52,7 +52,7 @@ interface RetirementCeremonyProps {
 }
 
 const OVERSEAS_LEAGUES: LeagueId[] = ['EUROLEAGUE', 'NBL', 'B_LEAGUE', 'GLEAGUE'];
-const AMATEUR_LEAGUES: LeagueId[] = ['HIGH_SCHOOL', 'U_LEAGUE', 'NCAA'];
+const AMATEUR_LEAGUES: LeagueId[] = ['HIGH_SCHOOL', 'US_HIGH_SCHOOL', 'U_LEAGUE', 'NCAA'];
 
 function TeamStintsTimeline({ stints }: { stints: TeamStintSummary[] }) {
   if (stints.length === 0) {

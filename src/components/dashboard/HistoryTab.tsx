@@ -31,6 +31,7 @@ const RECORD_LEAGUES: LeagueId[] = [
   'U_LEAGUE',
   'GLEAGUE',
   'HIGH_SCHOOL',
+  'US_HIGH_SCHOOL',
 ];
 
 function formatAwardsClean(log: SeasonBoxScore): string[] {

@@ -68,6 +68,14 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 - 노트는 `/patch-notes`에 표시되고, 푸터의 패치노트 링크에 새 버전을 아직 안 본 플레이어에게 NEW 배지가 한 번 뜹니다.
 - Vercel 미리보기(Preview) 배포에서 들어온 분석 이벤트는 `game_version`에 `-preview`가 붙어(예: `1.1.0-preview`) 정식 통계와 섞이지 않습니다. 관리자 대시보드에서 버전으로 골라 볼 수 있습니다.
 
+## 국적과 미국 고교 (1.2.0)
+
+- 국적 목록과 대한민국 국적 판별(`isKoreanNational`)은 `src/data/nationalities.ts`에 있습니다. 병역(상무), 국가대표 소집, 태극마크 아크, KBL 드래프트는 대한민국 국적에만 적용됩니다.
+- 미국 고교는 별도 리그 `US_HIGH_SCHOOL`이고 팀은 `US_HIGH_SCHOOL_TEAMS`(24개교)입니다. 고교 리그를 판별할 때는 `'HIGH_SCHOOL'`을 직접 비교하지 말고 `isHighSchoolLeague()`(`src/data/leagues.ts`)를 씁니다.
+- 미국 고교 육성 보정(잠재력, 성장 속도)은 `balanceConfig.ts`의 `US_HIGH_SCHOOL_DEVELOPMENT_CONFIG`, 성장 상한은 `leagues.ts`의 `growthCap`입니다.
+- 미국 고교 팀 전력 변동은 별도 난수를 씁니다(`evolveLeagueTeamRatings`). 공용 난수를 쓰면 시드 고정 밸런스 검사의 한국 경로 결과가 바뀝니다.
+- 미국 고교 경로 분포: `bun scripts/nba-path-sim.ts 300 20261125 --policy=mixed --start=us [--nationality=KOR]` (`balance:check` 기준은 한국 경로용이라 미국 경로에는 적용하지 않습니다)
+
 ## 앱 설치 (PWA, 1.1.4)
 
 - `app/manifest.ts`: 앱 이름·색·아이콘 정보. `app/icon.png`(탭 아이콘), `app/apple-icon.png`(아이폰 홈 화면)는 Next.js 규칙상 루트 `app/`에 둡니다.

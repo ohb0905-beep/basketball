@@ -53,6 +53,7 @@ export const POSITION_LABELS: Record<Position, string> = {
 
 export const LEAGUE_FUNNEL_ORDER: LeagueId[] = [
   'HIGH_SCHOOL',
+  'US_HIGH_SCHOOL',
   'U_LEAGUE',
   'NCAA',
   'KBL',
@@ -65,6 +66,7 @@ export const LEAGUE_FUNNEL_ORDER: LeagueId[] = [
 
 export const LEAGUE_SHORT_LABELS: Record<LeagueId, string> = {
   HIGH_SCHOOL: '한국 고교',
+  US_HIGH_SCHOOL: '미국 고교',
   U_LEAGUE: '대학 U-리그',
   NCAA: 'NCAA',
   KBL: 'KBL',
@@ -250,7 +252,8 @@ export function summarizeMilestonePayload(
       const height = asNumber(p.heightCm);
       const lg = leagueLabel(asString(p.startingLeague));
       const ovr = asNumber(p.initialOvr);
-      return `${pos}${height ? ` (${height}cm)` : ''} · ${lg} 시작${ovr !== null ? ` · OVR ${ovr}` : ''}`;
+      const nat = asString(p.nationality);
+      return `${pos}${height ? ` (${height}cm)` : ''} · ${lg} 시작${nat ? ` · 국적 ${nat}` : ''}${ovr !== null ? ` · OVR ${ovr}` : ''}`;
     }
     case 'season_completed': {
       const season = asNumber(p.seasonNumber);

@@ -17,6 +17,7 @@ import {
   canUseProTradeSystem,
 } from '../config/balanceConfig';
 import { PLAYER_TRAIT_META } from './statCalculator';
+import { isKoreanNational } from '../data/nationalities';
 
 const STAT_SHORT_LABEL: Record<keyof PlayerStats, string> = {
   ins: '골밑',
@@ -1090,7 +1091,9 @@ export function rollStoryArcEvent(
     });
   }
 
+  // 1.2.0: 태극마크 아크는 대한민국 국적만 해당합니다.
   if (
+    isKoreanNational(career) &&
     !career.nationalTeamRetired &&
     canAdvance(arcs.NATIONAL_TORCH_ARC, 1) &&
     ((career.totals.internationalCaps || 0) >= 1 || career.ovr >= 75)

@@ -1,6 +1,7 @@
 import { canUseProTradeSystem } from '../config/balanceConfig';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import { getTeamById, SANGMU_TEAM } from '../data/teams';
+import { getCareerNationality } from '../data/nationalities';
 import {
   CareerRetrospective,
   CareerState,
@@ -48,6 +49,7 @@ export function migrateLegacyLeagueId(
   }
   if (
     league === 'HIGH_SCHOOL' ||
+    league === 'US_HIGH_SCHOOL' ||
     league === 'U_LEAGUE' ||
     league === 'NCAA' ||
     league === 'KBL' ||
@@ -281,6 +283,8 @@ export function normalizeCareerSave(
 
   return {
     ...(cleanCareerRest as CareerState),
+    // 1.2.0: 국적이 없는 예전 세이브는 대한민국 국적으로 이어집니다.
+    nationality: getCareerNationality(career),
     league: migratedLeague,
     contractType: migratedContract,
     brokenRolePromise: allowProTrade ? Boolean(career.brokenRolePromise) : false,

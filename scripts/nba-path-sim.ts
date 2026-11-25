@@ -1,7 +1,8 @@
 /**
  * NBA 진입 경로·루키 역할 분석 (시드 고정)
  *
- * 실행: bun scripts/nba-path-sim.ts [커리어 수=300] [시드=20261125] [--policy=first|nba]
+ * 실행: bun scripts/nba-path-sim.ts [커리어 수=300] [시드=20261125] [--policy=first|nba] [--start=kr|us] [--nationality=KOR]
+ * 1.2.0: --start=us는 미국 고교(전력 62, 삼일고와 같은 전력)에서 시작합니다. 국적 기본값은 kr이면 KOR, us이면 USA.
  * - first: balance-sim과 같은 '첫 선택지' 자동 플레이
  * - nba:   NBA 진출을 노리는 플레이어처럼 드래프트 참가·NBA·G리그 선택지를 우선
  * - human: 실제 유저 패턴 근사 (고교→NCAA 우선, 대학 2년차부터 NBA 드래프트, 캠프·스킬랩 구매)
@@ -26,6 +27,10 @@ const CONTENDER_TAKE_SHARE = Number(rawArgs.find((a) => a.startsWith('--contende
 let takesContender = false;
 let contenderOffered = 0, contenderTaken = 0;
 const JSON_OUT = rawArgs.includes('--json');
+const START = (rawArgs.find((a) => a.startsWith('--start='))?.split('=')[1] ?? 'kr') as 'kr' | 'us';
+const START_SCHOOL_ID = START === 'us' ? 'USHS_PROLIFIC' : 'HS_SAMIL';
+const NATIONALITY = (rawArgs.find((a) => a.startsWith('--nationality='))?.split('=')[1] ??
+  (START === 'us' ? 'USA' : 'KOR')) as import('../src/types/game').NationalityCode;
 const CHECK = rawArgs.includes('--check');
 
 function mulberry32(seed: number) {
@@ -55,7 +60,7 @@ Math.random = mulberry32(SEED);
 const POS = ['PG', 'SG', 'SF', 'PF', 'C'] as const;
 const HEIGHT: Record<string, number> = { PG: 185, SG: 192, SF: 199, PF: 204, C: 211 };
 const LEAGUE_PREF: Record<string, number> = {
-  NBA: 100, GLEAGUE: 80, EUROLEAGUE: 60, NCAA: 55, KBL: 50, NBL: 45, B_LEAGUE: 40, U_LEAGUE: 30, HIGH_SCHOOL: 0,
+  NBA: 100, GLEAGUE: 80, EUROLEAGUE: 60, NCAA: 55, KBL: 50, NBL: 45, B_LEAGUE: 40, U_LEAGUE: 30, HIGH_SCHOOL: 0, US_HIGH_SCHOOL: 0,
 };
 
 function pickOption(opts: any[]): any {
@@ -73,7 +78,7 @@ function pickOption(opts: any[]): any {
     const collegeYears = (c?.seasonLogs || []).filter((l: any) => l.league === 'NCAA' || l.league === 'U_LEAGUE').length;
     const hscore = (o: any) => {
       if (o.actionType === 'ENTER_NBA_DRAFT') return collegeYears >= 2 || c?.league !== 'NCAA' ? 1000 : -10;
-      if (c?.league === 'HIGH_SCHOOL') return o.targetLeague === 'NCAA' ? 500 : o.targetLeague === 'U_LEAGUE' ? 300 : 100;
+      if (c?.league === 'HIGH_SCHOOL' || c?.league === 'US_HIGH_SCHOOL') return o.targetLeague === 'NCAA' ? 500 : o.targetLeague === 'U_LEAGUE' ? 300 : 100;
       const promiseBonus = o.promisedRole === 'ACE_GUARANTEE' ? 15 : o.promisedRole === 'STARTER_GUARANTEE' ? 8 : 0;
       return (LEAGUE_PREF[o.targetLeague] ?? 0) * 3 + promiseBonus + (o.actionType === 'STAY_TEAM' ? 5 : 0);
     };
@@ -108,7 +113,7 @@ for (let run = 0; run < CAREERS; run++) {
   takesContender = policyRng() < CONTENDER_TAKE_SHARE;
   activePolicy = POLICY === 'mixed' ? (policyRng() < MIXED_CASUAL_SHARE ? 'first' : 'human') : POLICY;
   const pos = POS[run % 5];
-  S().startNewCareer({ name: `SIM${run}`, jerseyNumber: '7', heightCm: HEIGHT[pos], primaryPos: pos, highSchoolTeamId: 'HS_SAMIL' });
+  S().startNewCareer({ name: `SIM${run}`, jerseyNumber: '7', heightCm: HEIGHT[pos], primaryPos: pos, highSchoolTeamId: START_SCHOOL_ID, nationality: NATIONALITY });
   S().setView('DASHBOARD');
   careers++;
   try {
@@ -185,7 +190,7 @@ for (let run = 0; run < CAREERS; run++) {
     }
   });
   for (const l of logs) {
-    if (l.league === 'HIGH_SCHOOL') {
+    if (l.league === 'HIGH_SCHOOL' || l.league === 'US_HIGH_SCHOOL') {
       hsSeasons++;
       if (String(l.role).includes('가비지')) hsGarbage++;
       if (l.wonMvp) hsMvp++;
@@ -196,7 +201,7 @@ for (let run = 0; run < CAREERS; run++) {
     }
     if (l.freshmanAdaptation) { ncaaFresh++; ncaaFreshGoals += l.freshmanAdaptation.achievedCount; }
   }
-  if (logs[0]?.league === 'HIGH_SCHOOL') { hsFirstSeasons++; if (String(logs[0].role).includes('가비지')) hsFirstSeasonGarbage++; }
+  if (logs[0]?.league === 'HIGH_SCHOOL' || logs[0]?.league === 'US_HIGH_SCHOOL') { hsFirstSeasons++; if (String(logs[0].role).includes('가비지')) hsFirstSeasonGarbage++; }
   const firstNbaIdx = logs.findIndex((l) => l.league === 'NBA');
   if (firstNbaIdx >= 0) {
     reachedNba++;
