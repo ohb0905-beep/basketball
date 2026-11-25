@@ -107,14 +107,14 @@ export interface CareerCreatedPayload {
   initialOvr: number;
 }
 
+// 1.1.3: 용량 절감을 위해 분석에 쓰지 않던 seasonYear, teamName, teamRank, spg, bpg,
+// fgPct, threePtPct를 뺐습니다. 1.1.2 이하 행에는 남아 있습니다.
 export interface SeasonCompletedPayload {
   // 기본 교차 분석 키
   league: LeagueId;
   position: Position;
   seasonNumber: number;
-  seasonYear: number;
   age: number;
-  teamName: string;
 
   // 우승 및 주요 수상 내역
   wonChampionship: boolean;
@@ -128,7 +128,6 @@ export interface SeasonCompletedPayload {
   playoffResult: NormalizedPlayoffResult;
   teamWins: number;
   teamLosses: number;
-  teamRank: number | null;
 
   // 선수 성장 & 벤치 → 주전 도약 지표
   overall: number;
@@ -143,10 +142,6 @@ export interface SeasonCompletedPayload {
   ppg: number;
   rpg: number;
   apg: number;
-  spg: number;
-  bpg: number;
-  fgPct: number;
-  threePtPct: number;
 
   // 메타 지표 (육성, 부상, 계약)
   trainingFocus: TrainingFocus;
