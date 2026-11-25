@@ -30,6 +30,7 @@ import { formatCurrencyDetailed } from '../../utils/formatters';
 import { TeamEmblem } from '../common/TeamEmblem';
 import { hasSeenSurvey, markSurveySeen } from '../../lib/survey';
 import { RetirementSurveyModal } from './RetirementSurveyModal';
+import { CareerShareModal } from './CareerShareModal';
 import { CareerTrajectoryChart } from './CareerTrajectoryChart';
 import { JerseyRetirementStage } from './JerseyRetirementStage';
 import { TrophyCabinetSection } from './TrophyCabinetSection';
@@ -350,6 +351,7 @@ export function RetirementCeremony({
   const prefersReducedMotion = useReducedMotion();
 
   const isReplayMode = Boolean(replayEntry);
+  const [shareCardOpen, setShareCardOpen] = useState(false);
 
   const retro: CareerRetrospective | null = useMemo(() => {
     if (replayEntry) {
@@ -360,6 +362,12 @@ export function RetirementCeremony({
     const evaluation = career.legacyEvaluation || evaluateCareerLegacy(career);
     return buildCareerRetrospective(career, reason, evaluation, recordBook);
   }, [replayEntry, career, recordBook]);
+
+  const shareLegacyEmoji = useMemo(() => {
+    if (replayEntry) return replayEntry.legacyEmoji;
+    if (!career) return '🏀';
+    return (career.legacyEvaluation || evaluateCareerLegacy(career)).tierEmoji;
+  }, [replayEntry, career]);
 
   const chapters = useMemo(() => {
     if (!retro) return [] as { key: ChapterKey; title: string }[];
@@ -469,6 +477,16 @@ export function RetirementCeremony({
           : 'max-w-[660px]'
       }`}
     >
+      {retro && shareCardOpen && (
+        <CareerShareModal
+          open={shareCardOpen}
+          retro={retro}
+          legacyEmoji={shareLegacyEmoji}
+          isReplay={isReplayMode}
+          onClose={() => setShareCardOpen(false)}
+        />
+      )}
+
       {career && !isReplayMode && (
         <RetirementSurveyModal
           open={surveyOpen}
@@ -1113,6 +1131,14 @@ export function RetirementCeremony({
 
           {/* 하단 액션 */}
           <div className="space-y-2.5 pt-2">
+            <button
+              type="button"
+              data-testid="open-career-card"
+              onClick={() => setShareCardOpen(true)}
+              className="t-cta-sub"
+            >
+              커리어 카드
+            </button>
             {isReplayMode && onCloseReplay ? (
               <button
                 type="button"
