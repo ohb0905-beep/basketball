@@ -92,6 +92,10 @@ app/              Next.js 라우트 진입점 (src/app 페이지를 다시 내�
 src/app/          페이지와 API 라우트 (api/feedback, api/analytics, api/admin, api/league-sync)
 src/engine/       게임 로직: 시즌 시뮬레이션, 드래프트, 플레이오프, 성장, 은퇴, 이벤트
 src/store/        Zustand 스토어와 저장 데이터 마이그레이션
+  useCareerStore.ts      스토어 조립 + 저장(persist) 설정
+  careerStoreTypes.ts    스토어 상태·액션 타입
+  careerStoreHelpers.ts  시즌 정산 등 액션이 함께 쓰는 순수 함수
+  actions/               기능별 액션 (화면, 세이브, 커리어 시작·은퇴, 성장, 시즌, 이벤트, 오프시즌)
 src/data/         팀, 리그, 이벤트, 헤드라인 데이터
 src/config/       밸런스와 경제 설정값
 src/components/   UI 컴포넌트
