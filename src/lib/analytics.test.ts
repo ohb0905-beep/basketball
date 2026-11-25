@@ -291,9 +291,16 @@ test('SQL migration for analytics_events enforces allowlist, indexes, and strict
   const sql = fs.readFileSync(sqlPath, 'utf8');
 
   assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.analytics_events/);
+
+  // 최신 허용 목록은 1.0.1 퍼널 이벤트 마이그레이션이 CHECK 제약을 교체해 정의합니다.
+  const latestAllowlistSql = fs.readFileSync(
+    path.join(process.cwd(), 'supabase/migrations/20261125_analytics_funnel_events.sql'),
+    'utf8'
+  );
+  assert.match(latestAllowlistSql, /ADD CONSTRAINT analytics_events_event_name_check/);
   for (const eventName of ANALYTICS_EVENT_NAMES) {
     assert.ok(
-      sql.includes(`'${eventName}'`),
+      latestAllowlistSql.includes(`'${eventName}'`),
       `SQL CHECK constraint must include ${eventName}`
     );
   }
@@ -343,7 +350,7 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   assert.equal(captured[0].payload.position, 'SF');
   assert.equal(captured[0].payload.startingLeague, 'HIGH_SCHOOL');
   assert.equal(captured[0].payload.initialOvr, 62);
-  assert.equal(captured[0].payload.initialOverall, 62);
+  assert.equal('initialOverall' in captured[0].payload, false);
   assert.equal(captured[0].payload.trainingFocus, 'OUTSIDE_SHOOTING');
   assert.equal('name' in captured[0].payload, false);
   assert.equal(
@@ -371,7 +378,7 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   assert.equal(captured[1].payload.threePtPct, 37.5);
   assert.equal(captured[1].payload.wonChampionship, true);
   assert.equal(captured[1].payload.wonMvp, true);
-  assert.equal(captured[1].payload.wonFmvp, true);
+  assert.equal('wonFmvp' in captured[1].payload, false);
   assert.equal(captured[1].payload.wonFinalsMvp, true);
   assert.deepEqual(captured[1].payload.awards, [
     'ROY',
@@ -504,9 +511,12 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   assert.equal(captured[3].payload.totalSeasons, 15);
   assert.equal(captured[3].payload.finalLeague, 'KBL');
   assert.equal(captured[3].payload.peakLeague, 'NBA');
-  assert.equal(captured[3].payload.totalChampionships, 5);
-  assert.equal(captured[3].payload.totalMvp, 3);
-  assert.equal(captured[3].payload.totalFmvp, 3);
+  assert.equal(captured[3].payload.championshipCount, 5);
+  assert.equal(captured[3].payload.mvpCount, 3);
+  assert.equal(captured[3].payload.finalsMvpCount, 3);
+  for (const aliasKey of ['totalChampionships', 'totalMvp', 'totalFmvp', 'totalAllStar']) {
+    assert.equal(aliasKey in captured[3].payload, false);
+  }
   assert.equal(captured[3].payload.totalAllLeague, 9);
   assert.equal(captured[3].payload.nbaChampionshipCount, 4);
   assert.equal(captured[3].payload.legacyTier, 'GOAT');
@@ -619,7 +629,6 @@ test('client tracker deduplicates StrictMode double-mount and silently survives 
       teamName: 'SK',
       wonChampionship: false,
       wonMvp: false,
-      wonFmvp: false,
       wonFinalsMvp: false,
       allStarSelected: true,
       awards: ['ALL_STAR'],
@@ -851,6 +860,12 @@ test('normalizers map role, playoffResult, awards, peakLeague, and leagueHonors 
   assert.equal(normalizePlayerRole('투웨이 콜업 로테이션'), 'two_way');
   assert.equal(normalizePlayerRole('가비지 타임 (벤치 끝자리)'), 'garbage_time');
   assert.equal(normalizePlayerRole('벤치 로테이션'), 'bench');
+  assert.equal(normalizePlayerRole('주전급 코어 유망주 (1라운드 픽)'), 'starter');
+  assert.equal(normalizePlayerRole('핵심 유망주 로테이션 (1라운드 픽)'), 'bench');
+  assert.equal(normalizePlayerRole('팀 에이스'), 'franchise_ace');
+  assert.equal(normalizePlayerRole('벤치 에이스'), 'bench');
+  assert.equal(normalizePlayerRole('세컨드 유닛 에이스'), 'sixth_man');
+  assert.equal(normalizePlayerRole(null), 'bench');
 
   assert.equal(normalizePlayoffResult('PO 탈락', false), 'missed');
   assert.equal(normalizePlayoffResult('플레이인 탈락', false), 'play_in');
@@ -902,7 +917,6 @@ test('validateAnalyticsEventPayload accepts upgraded arrays and nested leagueHon
       teamName: 'LAL',
       wonChampionship: true,
       wonMvp: true,
-      wonFmvp: true,
       wonFinalsMvp: true,
       allStarSelected: true,
       awards: ['DPOY', 'ALL_STAR', 'ALL_LEAGUE_1ST'],
@@ -955,10 +969,6 @@ test('validateAnalyticsEventPayload accepts upgraded arrays and nested leagueHon
       peakOverall: 96,
       finalOverall: 80,
       totalGames: 1120,
-      totalChampionships: 5,
-      totalMvp: 4,
-      totalFmvp: 4,
-      totalAllStar: 12,
       totalAllLeague: 11,
       totalDpoy: 2,
       totalSixthMan: 0,
@@ -1083,3 +1093,102 @@ test('buildRecentLogs stays compatible with mixed legacy and upgraded rows', () 
 });
 
 
+
+test('1.0.1 funnel events: creation_started once per entry and draft_completed on draft resolution', () => {
+  const captured: Array<{
+    eventName: string;
+    payload: Record<string, unknown>;
+    dedupeKey?: string;
+    dedupeScope?: string;
+  }> = [];
+  const dispatcher = {
+    track: (
+      eventName: string,
+      payload: unknown,
+      options?: { dedupeKey?: string; dedupeScope?: 'session' | 'persistent' }
+    ) => {
+      captured.push({
+        eventName,
+        payload: payload as Record<string, unknown>,
+        dedupeKey: options?.dedupeKey,
+        dedupeScope: options?.dedupeScope,
+      });
+    },
+    resolveCareerRunId: (careerId: string) => `run-for-${careerId}`,
+  };
+
+  // 홈 → 생성 화면
+  emitCareerStateTransitionEvents(
+    { view: 'HOME', career: null, hofList: [] },
+    { view: 'CREATE', career: null, hofList: [] },
+    dispatcher
+  );
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].eventName, 'creation_started');
+  assert.deepEqual(captured[0].payload, { hasExistingSave: false, hofCount: 0 });
+  assert.equal(captured[0].dedupeScope, 'session');
+
+  // 생성 화면에 머무는 동안에는 다시 보내지 않음
+  emitCareerStateTransitionEvents(
+    { view: 'CREATE', career: null, hofList: [] },
+    { view: 'CREATE', career: null, hofList: [] },
+    dispatcher
+  );
+  assert.equal(captured.length, 1);
+
+  // NBA 드래프트 지명
+  const beforeDraft = makeMockCareer({ league: 'NCAA', ovr: 74, draftResult: null });
+  const afterDraft = makeMockCareer({
+    league: 'NCAA',
+    ovr: 74,
+    draftResult: {
+      draftType: 'NBA',
+      pickNumber: 12,
+      round: 1,
+      draftedTeam: null,
+      twoWayOfferTeam: null,
+      scoutingGrade: 81.26,
+    },
+  });
+  emitCareerStateTransitionEvents(
+    { view: 'DASHBOARD', career: beforeDraft, hofList: [] },
+    { view: 'DRAFT_LIVE', career: afterDraft, hofList: [] },
+    dispatcher
+  );
+  assert.equal(captured.length, 2);
+  assert.equal(captured[1].eventName, 'draft_completed');
+  assert.equal(captured[1].payload.draftType, 'NBA');
+  assert.equal(captured[1].payload.fromLeague, 'NCAA');
+  assert.equal(captured[1].payload.pickNumber, 12);
+  assert.equal(captured[1].payload.drafted, true);
+  assert.equal(captured[1].payload.hasTwoWayOffer, false);
+  assert.equal(captured[1].payload.scoutingGrade, 81.3);
+
+  // 같은 드래프트 결과가 유지되는 동안에는 다시 보내지 않음
+  emitCareerStateTransitionEvents(
+    { view: 'DRAFT_LIVE', career: afterDraft, hofList: [] },
+    { view: 'DASHBOARD', career: { ...afterDraft }, hofList: [] },
+    dispatcher
+  );
+  assert.equal(captured.length, 2);
+
+  // 미지명도 기록
+  const undrafted = makeMockCareer({
+    league: 'HIGH_SCHOOL',
+    draftResult: {
+      draftType: 'KBL',
+      pickNumber: null,
+      round: null,
+      draftedTeam: null,
+      twoWayOfferTeam: null,
+    },
+  });
+  emitCareerStateTransitionEvents(
+    { view: 'DASHBOARD', career: makeMockCareer({ league: 'HIGH_SCHOOL', draftResult: null }), hofList: [] },
+    { view: 'DRAFT_LIVE', career: undrafted, hofList: [] },
+    dispatcher
+  );
+  assert.equal(captured.length, 3);
+  assert.equal(captured[2].payload.drafted, false);
+  assert.equal(captured[2].payload.scoutingGrade, null);
+});

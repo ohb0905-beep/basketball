@@ -38,6 +38,8 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
    - `20261124_create_feedbacks.sql`: 버그 제보·피드백 (`feedbacks`)
    - `20261124_create_analytics_events.sql`: 익명 플레이 통계 (`analytics_events`)
    - `20261125_admin_analytics_report.sql`: `/admin/analytics` 대시보드용 서버 집계 함수 (테이블은 변경하지 않음, service_role만 실행 가능)
+   - `20261125_analytics_funnel_events.sql`: 1.0.1 퍼널 이벤트(`creation_started`, `draft_completed`) 허용. 1.0.1 배포 전에 실행
+   - `20261125_analytics_retention.sql`: 일별 요약 테이블과 `analytics_rollup_and_prune(보존일수)` 함수. 만들기만 하고, 원본 삭제는 함수를 직접 실행할 때만 일어남
    - SQL 편집기에 붙여 넣거나, Supabase CLI로 `supabase db push`를 실행하면 됩니다.
 3. 프로젝트 설정의 API 메뉴에서 URL과 service_role 키를 복사해 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`에 넣습니다.
 
@@ -49,6 +51,16 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 - `/admin/analytics`: 익명 플레이 통계 대시보드 (리그별 우승·MVP·FMVP, 포지션 밸런스, 리셋 병목, 밸런스 리포트 JSON 복사)
 
 세션은 12시간 유지되고, 10분 동안 로그인을 8회 실패하면 잠시 차단됩니다.
+
+## 버전과 패치노트
+
+- 버전은 `src/config/appMeta.ts`의 `GAME_VERSION`과 `package.json`의 `version`을 함께 올립니다. 테스트가 둘이 같은지 확인합니다.
+- 밸런스 수치, 분석 이벤트 페이로드, 세이브 구조 중 하나라도 바뀌면 버전을 올립니다. 통계가 `game_version`으로 패치 전후를 나누기 때문입니다.
+  - 버그 수정·정비: PATCH (1.0.0 → 1.0.1)
+  - 새 기능·밸런스 패치: MINOR (1.0.1 → 1.1.0)
+- 버전을 올릴 때 `src/data/patchNotes.ts` 맨 앞에 노트를 추가합니다. 최신 노트 버전이 `GAME_VERSION`과 다르면 테스트가 실패합니다.
+- 패치노트 작성 원칙: 새 기능은 플레이어가 체감하는 말로 3~5줄, 밸런스는 무엇이 어느 방향으로 왜 바뀌었는지만 (정확한 수치는 적지 않음), 버그 수정은 한 줄씩, 기존 세이브에 영향이 있으면 `saveImpact`에 따로 적습니다.
+- 노트는 `/patch-notes`에 표시되고, 푸터의 패치노트 링크에 새 버전을 아직 안 본 플레이어에게 NEW 배지가 한 번 뜹니다.
 
 ## 명령어
 

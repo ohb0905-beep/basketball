@@ -1,7 +1,12 @@
 'use client';
 
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { GAME_NAME, GAME_VERSION } from '../../config/appMeta';
+import {
+  hasUnseenPatchNotes,
+  markPatchNotesSeen,
+  subscribePatchNotesSeen,
+} from '../../lib/patchNotesSeen';
 
 export interface FooterProps {
   onRequestFeedbackModal?: () => void;
@@ -16,6 +21,13 @@ export function Footer({
   wide = false,
   bottomSpacing = 'default',
 }: FooterProps) {
+  // 서버 렌더와 하이드레이션 중에는 배지를 숨기고, 이후 localStorage 값을 따릅니다.
+  const showPatchBadge = useSyncExternalStore(
+    subscribePatchNotesSeen,
+    () => hasUnseenPatchNotes(),
+    () => false
+  );
+
   const bottomPaddingClass =
     bottomSpacing === 'dock'
       ? 'pb-[156px]'
@@ -35,11 +47,31 @@ export function Footer({
       >
         {/* 1행: 게임 버전 + 법적 필수 정책 링크 + 문의/피드백 */}
         <div className="flex flex-wrap items-center justify-center sm:justify-between gap-x-4 gap-y-1">
-          <span
-            data-testid="footer-game-version"
-            className="text-[12px] font-medium text-[var(--t-g500)] tabular-nums"
-          >
-            v{GAME_VERSION}
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              data-testid="footer-game-version"
+              className="text-[12px] font-medium text-[var(--t-g500)] tabular-nums"
+            >
+              v{GAME_VERSION}
+            </span>
+            <a
+              href="/patch-notes"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="footer-patch-notes-link"
+              onClick={() => markPatchNotesSeen()}
+              className="min-h-[36px] px-1.5 inline-flex items-center gap-1 font-medium text-[var(--t-g600)] hover:text-[var(--t-g900)] hover:underline underline-offset-4 whitespace-nowrap transition-colors"
+            >
+              패치노트
+              {showPatchBadge && (
+                <span
+                  data-testid="footer-patch-notes-badge"
+                  className="rounded-full bg-[var(--t-accent-soft)] px-1.5 py-px text-[10px] font-bold leading-[14px] text-[var(--t-accent-ink)] no-underline"
+                >
+                  NEW
+                </span>
+              )}
+            </a>
           </span>
 
           <nav
