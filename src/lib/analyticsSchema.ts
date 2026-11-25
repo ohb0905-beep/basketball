@@ -24,6 +24,8 @@ export const ANALYTICS_EVENT_NAMES = [
   // 1.0.1 퍼널 이벤트
   'creation_started',
   'draft_completed',
+  // 1.1.2 난이도 설문 (1인 1회)
+  'survey_response',
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
@@ -258,6 +260,36 @@ export interface AnalyticsEventPayloadMap {
   career_reset: CareerResetPayload;
   creation_started: CreationStartedPayload;
   draft_completed: DraftCompletedPayload;
+  survey_response: SurveyResponsePayload;
+}
+
+/** 설문 5단계 응답 (난이도: 1 너무 쉬움 ~ 5 너무 어려움 / 고교 속도: 1 너무 지루함 ~ 5 너무 빠름) */
+export type SurveyAnswerValue = 1 | 2 | 3 | 4 | 5;
+
+export interface SurveyResponsePayload {
+  surveyId: string;
+  /** submitted = 응답 제출, skipped = 건너뛰기 (응답률 계산용, 답변은 모두 null) */
+  status: 'submitted' | 'skipped';
+  militaryExemptionRating: SurveyAnswerValue | null;
+  nbaEntryRating: SurveyAnswerValue | null;
+  nbaPlayoffsRating: SurveyAnswerValue | null;
+  kblOverseasRating: SurveyAnswerValue | null;
+  hsPacingRating: SurveyAnswerValue | null;
+  /** 의견 글을 피드백함에 남겼는지 (글 내용은 여기 담지 않습니다) */
+  hasComment: boolean;
+
+  // 답변과 비교할 실제 커리어 경험
+  militaryExempt: boolean;
+  reachedNba: boolean;
+  nbaSeasons: number;
+  nbaPlayoffSeasons: number;
+  nbaChampionships: number;
+  kblSeasons: number;
+  overseasSeasons: number;
+  highSchoolSeasons: number;
+  seasonsPlayed: number;
+  finalLeague: LeagueId;
+  retirementReason: RetirementReason | null;
 }
 
 export interface AnalyticsEventRequestBody<
@@ -533,6 +565,7 @@ const SESSION_EVENT_RULES: Record<AnalyticsEventName, RateRule> = {
   career_reset: { windowMs: 60 * 1000, maxCount: 10 },
   creation_started: { windowMs: 10 * 60 * 1000, maxCount: 3 },
   draft_completed: { windowMs: 60 * 1000, maxCount: 10 },
+  survey_response: { windowMs: 10 * 60 * 1000, maxCount: 3 },
 };
 
 const IP_BURST_RULE: RateRule = {
