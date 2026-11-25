@@ -39,9 +39,11 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
    - `20261124_create_analytics_events.sql`: 익명 플레이 통계 (`analytics_events`)
    - `20261125_admin_analytics_report.sql`: `/admin/analytics` 대시보드용 서버 집계 함수 (테이블은 변경하지 않음, service_role만 실행 가능). 2026-11-25 2차: 버전별 비교·난이도 설문·생성→드래프트 퍼널 추가 (다시 실행하면 교체됨)
    - `20261125_analytics_funnel_events.sql`: 1.0.1 퍼널 이벤트(`creation_started`, `draft_completed`) 허용. 1.0.1 배포 전에 실행
-   - `20261125_analytics_retention.sql`: 일별 요약 테이블과 `analytics_rollup_and_prune(보존일수)` 함수. 만들기만 하고, 원본 삭제는 함수를 직접 실행할 때만 일어남
+   - `20261125_analytics_retention.sql`: (사용 안 함) 예전 30일 보존안. `20261126_analytics_capacity.sql`로 대체되어 비워 둠
    - `20261125_analytics_survey_event.sql`: 1.1.2 난이도 설문 이벤트(`survey_response`) 허용. 1.1.2 배포 전에 실행
    - `20261125_analytics_drop_unused_index.sql`: 1.1.3 용량 절감. 거의 쓰지 않는 anonymous_id 인덱스 삭제 (배포 순서와 무관, 데이터 변경 없음)
+   - `20261126_analytics_capacity.sql`: 용량 대비 1단계. 커리어·플레이어·일별 요약 테이블과 자동 갱신 트리거, `analytics_daily_maintenance(보존일수)` 정리 함수, 집계 함수 v3(요약 테이블 + 최근 원본, DB 용량 표시). 실행만으로는 아무것도 지우지 않음
+   - `20261126_analytics_capacity_cron.sql`: 매일 04:00 KST에 `analytics_daily_maintenance(14)` 실행 예약 (pg_cron). 14일이 지난 원본 통계를 지움 (난이도 설문은 남김). 위 파일 다음에 실행
    - SQL 편집기에 붙여 넣거나, Supabase CLI로 `supabase db push`를 실행하면 됩니다.
 3. 프로젝트 설정의 API 메뉴에서 URL과 service_role 키를 복사해 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`에 넣습니다.
 

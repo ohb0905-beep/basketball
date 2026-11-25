@@ -15,6 +15,8 @@ import {
   buildVersionCompare,
   compareGameVersionsDesc,
   buildShareableAnalyticsSummary,
+  buildStorageReport,
+  DB_SIZE_LIMIT_BYTES,
   getAnalyticsRangeStartIso,
   INSIGHT_MIN_SAMPLE,
   isValidAnalyticsDateRange,
@@ -440,6 +442,11 @@ test('GET /api/admin/analytics calls the aggregate RPC with filters and reports 
 
 const PSQL_COMMAND = process.env.ANALYTICS_SQL_TEST_PSQL?.trim();
 
+// 원본과 요약 테이블을 함께 비웁니다 (요약은 트리거로 채워지므로 원본만 비우면 이전 테스트 값이 남음).
+const TRUNCATE_ANALYTICS_SQL = `TRUNCATE public.analytics_events, public.analytics_career_runs,
+  public.analytics_player_versions, public.analytics_creation_sessions, public.analytics_daily_stats,
+  public.analytics_daily_players, public.analytics_maintenance_log;`;
+
 function runPsql(sql: string): string {
   const [bin, ...args] = (PSQL_COMMAND ?? '').split(/\s+/);
   return execFileSync(bin, [...args, '-v', 'ON_ERROR_STOP=1', '-At', '-q'], {
@@ -463,7 +470,8 @@ test(
       \\i ${path.join(migrationsDir, '20261124_create_analytics_events.sql')}
       \\i ${path.join(migrationsDir, '20261125_analytics_survey_event.sql')}
       \\i ${path.join(migrationsDir, '20261125_admin_analytics_report.sql')}
-      TRUNCATE public.analytics_events;
+      \\i ${path.join(migrationsDir, '20261126_analytics_capacity.sql')}
+      ${TRUNCATE_ANALYTICS_SQL}
     `);
 
     const ins = (
@@ -678,7 +686,8 @@ test(
       \\i ${path.join(migrationsDir, '20261124_create_analytics_events.sql')}
       \\i ${path.join(migrationsDir, '20261125_analytics_survey_event.sql')}
       \\i ${path.join(migrationsDir, '20261125_admin_analytics_report.sql')}
-      TRUNCATE public.analytics_events;
+      \\i ${path.join(migrationsDir, '20261126_analytics_capacity.sql')}
+      ${TRUNCATE_ANALYTICS_SQL}
     `);
 
     const at = '2026-11-24T03:00:00Z';
@@ -719,7 +728,7 @@ test(
     );
 
     const raw = JSON.parse(runPsql(`SELECT public.admin_analytics_report(NULL, NULL, NULL);`));
-    assert.equal(raw.schemaVersion, 2);
+    assert.equal(raw.schemaVersion, 3);
     const report = buildAdminAnalyticsReport(raw, [], {
       range: 'all',
       version: 'all',
@@ -772,5 +781,166 @@ test(
     assert.equal(v110.careerSeasonsAvg, 12);
     const v100 = filtered.versionCompare.find((v) => v.version === '1.0.0')!;
     assert.deepEqual(v100.nbaChampionship, { count: 1, n: 1, percent: 100 });
+  }
+);
+
+test('storage report: levels, stale cleanup, and raw-only range note', () => {
+  const MB = 1024 * 1024;
+  const nowMs = Date.parse('2026-12-01T06:00:00Z'); // 15:00 KST
+  const base = {
+    schemaVersion: 3,
+    storage: { dbBytes: 120 * MB, eventsBytes: 40 * MB, summaryBytes: 2 * MB, eventsLast24h: 10_000, eventsRetained: 100_000 },
+    maintenance: { ranAt: '2026-11-30T19:00:05Z', result: { retainDays: 14, eventsDeleted: 9000 } },
+    rawSince: '2026-11-16T15:00:10Z',
+    prunedBefore: '2026-11-16T15:00:00Z',
+  };
+
+  const ok = buildStorageReport(base, '7d', nowMs);
+  assert.equal(ok.available, true);
+  assert.equal(ok.level, 'ok');
+  assert.equal(ok.usedPercent, 24);
+  assert.equal(ok.dailyGrowthBytes, 4 * MB);
+  assert.equal(ok.daysUntilLimitIfNoCleanup, 95);
+  assert.equal(ok.maintenance.hoursAgo, 10);
+  assert.equal(ok.maintenance.stale, false);
+  assert.equal(ok.maintenance.eventsDeleted, 9000);
+  assert.equal(ok.rawLimited, false); // 7일은 원본 범위 안
+  assert.equal(buildStorageReport(base, '30d', nowMs).rawLimited, true);
+  assert.equal(buildStorageReport(base, 'all', nowMs).rawLimited, true);
+  assert.equal(buildStorageReport({ ...base, prunedBefore: null }, 'all', nowMs).rawLimited, false);
+
+  const warn = buildStorageReport({ ...base, storage: { ...base.storage, dbBytes: 320 * MB } }, '7d', nowMs);
+  assert.equal(warn.level, 'warn');
+  const danger = buildStorageReport({ ...base, storage: { ...base.storage, dbBytes: 450 * MB } }, '7d', nowMs);
+  assert.equal(danger.level, 'danger');
+  assert.equal(danger.limitBytes, DB_SIZE_LIMIT_BYTES);
+
+  // 정리가 한 번도 안 돌았거나 오래되면 경고
+  assert.equal(buildStorageReport({ ...base, maintenance: null }, '7d', nowMs).maintenance.stale, true);
+  const old = buildStorageReport(
+    { ...base, maintenance: { ranAt: '2026-11-29T10:00:00Z', result: {} } },
+    '7d',
+    nowMs
+  );
+  assert.equal(old.maintenance.stale, true);
+  assert.equal(old.maintenance.hoursAgo, 44);
+
+  // 예전 집계 함수(schemaVersion 2)는 설치 안내만
+  const legacy = buildStorageReport({ schemaVersion: 2 }, 'all', nowMs);
+  assert.equal(legacy.available, false);
+  assert.equal(legacy.maintenance.stale, false);
+  assert.equal(legacy.usedPercent, null);
+  assert.equal(hasNaNDeep(legacy), false);
+
+  const report = buildAdminAnalyticsReport(base, [], { range: '30d', version: 'all', league: 'all', nowMs });
+  assert.equal(report.storage.rawLimited, true);
+});
+
+/** 같은 값끼리 순서만 다른 배열(동점 정렬)을 비교할 수 있게 정렬합니다. */
+function sortDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortDeep).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, sortDeep(v)])
+    );
+  }
+  return value;
+}
+
+test(
+  'capacity SQL: summaries keep long-term metrics after the 14-day prune',
+  { skip: PSQL_COMMAND ? false : 'ANALYTICS_SQL_TEST_PSQL not set' },
+  () => {
+    const migrationsDir = path.resolve(__dirname, '../../supabase/migrations');
+    runPsql(`
+      SET client_min_messages = warning;
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated; END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN CREATE ROLE service_role; END IF;
+      END $$;
+      \\i ${path.join(migrationsDir, '20261124_create_analytics_events.sql')}
+      \\i ${path.join(migrationsDir, '20261125_analytics_survey_event.sql')}
+      \\i ${path.join(migrationsDir, '20261125_admin_analytics_report.sql')}
+      \\i ${path.join(migrationsDir, '20261126_analytics_capacity.sql')}
+      ${TRUNCATE_ANALYTICS_SQL}
+    `);
+
+    // when: 'old' = 20일 전 (정리 대상), 'new' = 1분 전
+    const ins = (
+      eventName: string,
+      session: string,
+      run: string | null,
+      payload: Record<string, unknown>,
+      version: string,
+      anon: string,
+      when: 'old' | 'new'
+    ) =>
+      `INSERT INTO public.analytics_events (event_name, anonymous_id, session_id, career_run_id, game_version, device_type, payload, created_at)
+       VALUES ('${eventName}', '${anon}', '${session}', ${run ? `'${run}'` : 'NULL'}, '${version}', 'mobile', '${JSON.stringify(payload)}'::jsonb,
+               now() - interval '${when === 'old' ? '20 days' : '1 minute'}');`;
+
+    runPsql(
+      [
+        ins('session_start', 's-old', null, {}, '1.1.0', 'a-old', 'old'),
+        ins('creation_started', 's-old', null, { hasExistingSave: false }, '1.1.0', 'a-old', 'old'),
+        ins('career_created', 's-old', 'run-old', { position: 'PG', playstyle: 'SCORER' }, '1.1.0', 'a-old', 'old'),
+        ins('draft_completed', 's-old', 'run-old', { draftType: 'NBA', drafted: true, round: 1, pickNumber: 5, overall: 80, hasTwoWayOffer: false }, '1.1.0', 'a-old', 'old'),
+        ins('league_changed', 's-old', 'run-old', { fromLeague: 'NCAA', toLeague: 'NBA', changeReason: 'DRAFT' }, '1.1.0', 'a-old', 'old'),
+        ins('season_completed', 's-old', 'run-old', { league: 'NBA', position: 'PG', overall: 80, ppg: 20, wonChampionship: true, wonMvp: true, wonFmvp: true, madePlayoffs: true, playoffResult: 'champion' }, '1.1.0', 'a-old', 'old'),
+        ins('career_ended', 's-old', 'run-old', { endingType: 'NBA_VETERAN', hallOfFame: true, totalSeasons: 10 }, '1.1.0', 'a-old', 'old'),
+        ins('survey_response', 's-old', 'run-old', { status: 'submitted', hasComment: false, hsPacingRating: 4 }, '1.1.0', 'a-old', 'old'),
+        ins('session_start', 's-new', null, {}, '1.1.3', 'a-new', 'new'),
+        ins('creation_started', 's-new', null, { hasExistingSave: false }, '1.1.3', 'a-new', 'new'),
+        ins('career_created', 's-new', 'run-new', { position: 'C' }, '1.1.3', 'a-new', 'new'),
+        ins('season_completed', 's-new', 'run-new', { league: 'HIGH_SCHOOL', overall: 55, wonChampionship: false, wonMvp: false, wonFmvp: false, madePlayoffs: false }, '1.1.3', 'a-new', 'new'),
+        ins('career_reset', 's-new', 'run-new', { abandonedLeague: 'HIGH_SCHOOL', abandonedSeason: 1 }, '1.1.3', 'a-new', 'new'),
+      ].join('\n')
+    );
+
+    const fetchRaw = () => JSON.parse(runPsql(`SELECT public.admin_analytics_report(NULL, NULL, NULL);`));
+    const before = fetchRaw();
+    assert.equal(before.schemaVersion, 3);
+    assert.equal(before.prunedBefore, null);
+    assert.equal(before.kpi.uniquePlayers, 2);
+    assert.equal(before.creationFunnel.runs, 2);
+
+    const result = JSON.parse(runPsql(`SELECT public.analytics_daily_maintenance(14);`));
+    assert.equal(result.eventsDeleted, 7); // 설문 1건은 남김
+    assert.equal(runPsql(`SELECT count(*) FROM public.analytics_events WHERE event_name = 'survey_response';`), '1');
+
+    const after = fetchRaw();
+    assert.notEqual(after.prunedBefore, null);
+    // 요약 테이블에서 읽는 지표는 정리 전과 같습니다.
+    for (const key of [
+      'kpi', 'daily', 'devices', 'versions', 'availableVersions', 'leagues', 'positionsCreated',
+      'positionSeasons', 'endings', 'created', 'creationFunnel', 'survey',
+    ]) {
+      assert.deepEqual(sortDeep(after[key]), sortDeep(before[key]), key);
+    }
+    assert.deepEqual(sortDeep(after.versionCompare), sortDeep(before.versionCompare));
+    assert.equal(after.kpi.championships, 1);
+    assert.equal(after.creationFunnel.nbaDrafted, 1);
+    // 원본에서만 계산하는 섹션은 남은 원본(최근 14일)만 봅니다.
+    assert.equal(before.leagueChanges.total, 1);
+    assert.equal(after.leagueChanges.total, 0);
+
+    const report = buildAdminAnalyticsReport(after, [], { range: 'all', version: 'all', league: 'all', nowMs: Date.now() });
+    assert.equal(report.storage.available, true);
+    assert.equal(report.storage.rawLimited, true);
+    assert.equal(report.storage.maintenance.eventsDeleted, 7);
+    assert.equal(report.storage.maintenance.stale, false);
+    assert.equal(hasNaNDeep(report), false);
+
+    // 두 번 돌려도 요약은 그대로
+    runPsql(`SELECT public.analytics_daily_maintenance(14);`);
+    assert.deepEqual(fetchRaw().kpi, before.kpi);
+
+    // 보존 기간 하한과 권한
+    assert.throws(() => runPsql(`SELECT public.analytics_daily_maintenance(3);`));
+    assert.throws(() => runPsql(`SET ROLE anon; SELECT public.analytics_daily_maintenance(14);`));
+    assert.throws(() => runPsql(`SET ROLE anon; SELECT count(*) FROM public.analytics_career_runs;`));
   }
 );

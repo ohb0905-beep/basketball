@@ -79,6 +79,13 @@ const MAX_DAILY_TREND_DAYS = 90;
 /** 규칙 기반 인사이트를 만들기 위한 최소 표본 수 */
 export const INSIGHT_MIN_SAMPLE = 30;
 
+/** Supabase 무료 플랜 DB 한도. 넘으면 읽기 전용이 되어 통계·피드백 저장이 멈춥니다. */
+export const DB_SIZE_LIMIT_BYTES = 500 * 1024 * 1024;
+export const DB_SIZE_WARN_BYTES = 300 * 1024 * 1024;
+export const DB_SIZE_DANGER_BYTES = 400 * 1024 * 1024;
+/** 매일 정리(04:00 KST)가 이 시간보다 오래 안 돌았으면 경고합니다. */
+export const MAINTENANCE_STALE_HOURS = 36;
+
 export function isValidAnalyticsDateRange(
   value: string
 ): value is AnalyticsDateRange {
@@ -550,6 +557,41 @@ export interface AdminAnalyticsReport {
   creationFunnel: CreationFunnelReport;
   survey: SurveyReport;
   versionCompare: VersionCompareRow[];
+  /** 3차 추가: DB 용량과 매일 정리 상태 (집계 함수 schemaVersion 3 이상) */
+  storage: StorageReport;
+}
+
+export type StorageLevel = 'ok' | 'warn' | 'danger';
+
+export interface StorageReport {
+  /** 용량 대비 SQL(20261126_analytics_capacity.sql)이 설치되어 값이 있는지 */
+  available: boolean;
+  dbBytes: number;
+  limitBytes: number;
+  usedPercent: number | null;
+  level: StorageLevel;
+  eventsBytes: number;
+  summaryBytes: number;
+  eventsRetained: number;
+  eventsLast24h: number;
+  /** 원본 행이 하루에 늘어나는 양 (최근 24시간 행 수 × 행당 평균 크기) */
+  dailyGrowthBytes: number | null;
+  /** 정리가 멈춘다면 한도까지 남은 일수 */
+  daysUntilLimitIfNoCleanup: number | null;
+  maintenance: {
+    ranAt: string | null;
+    hoursAgo: number | null;
+    retainDays: number | null;
+    eventsDeleted: number | null;
+    /** 마지막 정리가 36시간보다 오래됐거나 한 번도 안 돌았음 */
+    stale: boolean;
+  };
+  /** 원본이 남아 있는 첫 시각 */
+  rawSince: string | null;
+  /** 이 시각 전의 원본은 정리되어 요약만 남음 (정리 전이면 null) */
+  prunedBefore: string | null;
+  /** 선택한 기간이 원본 보존 범위보다 길어서, 원본 기반 섹션은 prunedBefore 이후만 보임 */
+  rawLimited: boolean;
 }
 
 export interface FunnelStep {
@@ -1189,6 +1231,71 @@ export function buildVersionCompare(rawRows: unknown): VersionCompareRow[] {
   return rows.sort((a, b) => compareGameVersionsDesc(a.version, b.version));
 }
 
+function toIsoOrNull(value: unknown): string | null {
+  const str = asString(value);
+  if (!str) return null;
+  const ms = Date.parse(str);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+export function buildStorageReport(
+  rawAggregate: unknown,
+  range: AnalyticsDateRange,
+  nowMs: number
+): StorageReport {
+  const raw = asRecord(rawAggregate);
+  const available = toCount(raw.schemaVersion) >= 3;
+  const st = asRecord(raw.storage);
+  const dbBytes = toCount(st.dbBytes);
+  const eventsBytes = toCount(st.eventsBytes);
+  const eventsRetained = toCount(st.eventsRetained);
+  const eventsLast24h = toCount(st.eventsLast24h);
+
+  const dailyGrowthBytes =
+    available && eventsRetained > 0 ? Math.round((eventsBytes / eventsRetained) * eventsLast24h) : null;
+  const daysUntilLimitIfNoCleanup =
+    dailyGrowthBytes && dailyGrowthBytes > 0
+      ? Math.max(0, Math.floor((DB_SIZE_LIMIT_BYTES - dbBytes) / dailyGrowthBytes))
+      : null;
+
+  const maint = asRecord(raw.maintenance);
+  const result = asRecord(maint.result);
+  const ranAt = toIsoOrNull(maint.ranAt);
+  const hoursAgo = ranAt ? Math.max(0, Math.floor((nowMs - Date.parse(ranAt)) / (60 * 60 * 1000))) : null;
+
+  const prunedBefore = toIsoOrNull(raw.prunedBefore);
+  const rangeStartIso = getAnalyticsRangeStartIso(range, nowMs);
+  const rawLimited =
+    prunedBefore !== null && (rangeStartIso === null || Date.parse(rangeStartIso) < Date.parse(prunedBefore));
+
+  const level: StorageLevel =
+    dbBytes >= DB_SIZE_DANGER_BYTES ? 'danger' : dbBytes >= DB_SIZE_WARN_BYTES ? 'warn' : 'ok';
+
+  return {
+    available,
+    dbBytes,
+    limitBytes: DB_SIZE_LIMIT_BYTES,
+    usedPercent: available ? safePercent(dbBytes, DB_SIZE_LIMIT_BYTES) : null,
+    level: available ? level : 'ok',
+    eventsBytes,
+    summaryBytes: toCount(st.summaryBytes),
+    eventsRetained,
+    eventsLast24h,
+    dailyGrowthBytes,
+    daysUntilLimitIfNoCleanup,
+    maintenance: {
+      ranAt,
+      hoursAgo,
+      retainDays: asNumber(result.retainDays),
+      eventsDeleted: asNumber(result.eventsDeleted),
+      stale: available && (hoursAgo === null || hoursAgo > MAINTENANCE_STALE_HOURS),
+    },
+    rawSince: toIsoOrNull(raw.rawSince),
+    prunedBefore,
+    rawLimited,
+  };
+}
+
 export interface BuildAdminAnalyticsReportOptions {
   range: AnalyticsDateRange;
   version: string;
@@ -1343,6 +1450,7 @@ export function buildAdminAnalyticsReport(
     creationFunnel: buildCreationFunnel(raw.creationFunnel),
     survey: buildSurveyReport(raw.survey),
     versionCompare: buildVersionCompare(raw.versionCompare),
+    storage: buildStorageReport(raw, options.range, nowMs),
     ...partial,
   };
 }
