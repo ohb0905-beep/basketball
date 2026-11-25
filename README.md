@@ -1,0 +1,85 @@
+# 벤치에서 MVP까지 (From Bench to MVP)
+
+고교 농구 벤치 끝자리에서 시작해 U리그·NCAA, KBL·해외 리그, G리그를 거쳐 NBA MVP와 영구결번 레전드에 도전하는 농구 선수 커리어 육성 시뮬레이션 웹 게임입니다.
+
+- **프레임워크:** Next.js 15 (App Router), React 19, TypeScript
+- **상태 관리:** Zustand (게임 저장은 브라우저 localStorage)
+- **스타일:** Tailwind CSS 4
+- **런타임·패키지 매니저:** [Bun](https://bun.sh)
+- **서버 저장소:** Supabase (피드백·익명 플레이 통계, 서버 API 라우트에서만 접근)
+
+## 빠른 시작
+
+```bash
+bun install
+cp .env.example .env.local   # 필요한 값만 채우면 됩니다 (아래 참고)
+bun run dev                  # http://localhost:3000
+```
+
+게임 자체는 환경변수 없이도 실행됩니다. Supabase와 관리자 콘솔을 쓰려면 아래 환경변수를 설정하세요.
+
+## 환경변수
+
+모든 값은 **서버 전용**입니다. 절대 `NEXT_PUBLIC_` 접두사를 붙이지 마세요.
+
+| 변수 | 필요한 기능 | 설명 |
+| --- | --- | --- |
+| `SUPABASE_URL` | 피드백 제출, 통계 수집, 관리자 콘솔 | Supabase 프로젝트 URL (`https://<project>.supabase.co`). 로컬 개발은 `http://localhost`도 허용 |
+| `SUPABASE_SERVICE_ROLE_KEY` | 위와 동일 | Supabase service_role 키. 서버 API 라우트에서만 사용 |
+| `ADMIN_PASSWORD` | 관리자 콘솔 | 관리자 로그인 비밀번호 |
+| `ADMIN_SESSION_SECRET` | 관리자 콘솔 | 관리자 세션 쿠키 서명 키. `openssl rand -base64 32`로 생성 권장 |
+
+Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌려주고, 관리자 값이 없으면 관리자 로그인이 비활성화됩니다.
+
+### Supabase 설정
+
+1. Supabase에서 프로젝트를 만듭니다.
+2. `supabase/migrations/`의 SQL을 순서대로 실행해 테이블을 만듭니다.
+   - `20261124_create_feedbacks.sql`: 버그 제보·피드백 (`feedbacks`)
+   - `20261124_create_analytics_events.sql`: 익명 플레이 통계 (`analytics_events`)
+   - SQL 편집기에 붙여 넣거나, Supabase CLI로 `supabase db push`를 실행하면 됩니다.
+3. 프로젝트 설정의 API 메뉴에서 URL과 service_role 키를 복사해 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`에 넣습니다.
+
+### 관리자 콘솔
+
+`ADMIN_PASSWORD`와 `ADMIN_SESSION_SECRET`을 설정한 뒤 아래 주소로 접속해 비밀번호로 로그인합니다.
+
+- `/admin/feedback`: 피드백 목록 조회, 상태 변경, 관리자 메모
+- `/admin/analytics`: 익명 플레이 통계 대시보드
+
+세션은 12시간 유지되고, 10분 동안 로그인을 8회 실패하면 잠시 차단됩니다.
+
+## 명령어
+
+| 명령 | 설명 |
+| --- | --- |
+| `bun run dev` | 개발 서버 |
+| `bun run build` / `bun run start` | 프로덕션 빌드 및 실행 (`output: 'standalone'`) |
+| `bun run typecheck` | TypeScript 타입 검사 (`tsc --noEmit`) |
+| `bun run lint` | ESLint |
+| `bun run test` | 전체 테스트 (`bun test src`) |
+| `bun run balance` | 밸런스 시뮬레이션. 인자: `[커리어 수=200] [시드=20261121]` |
+| `bun run balance:check` | 시드를 고정한 밸런스 회귀 검사. 목표 범위를 벗어나면 실패 |
+
+## CI
+
+`.github/workflows/ci.yml`이 `main` 푸시와 모든 PR에서 타입 검사, 린트, 테스트, 밸런스 검사를 실행합니다. 같은 검사를 로컬에서 돌리려면:
+
+```bash
+bun run typecheck && bun run lint && bun run test && bun run balance:check
+```
+
+## 폴더 구조
+
+```
+app/              Next.js 라우트 진입점 (src/app 페이지를 다시 내보냄)
+src/app/          페이지와 API 라우트 (api/feedback, api/analytics, api/admin, api/league-sync)
+src/engine/       게임 로직: 시즌 시뮬레이션, 드래프트, 플레이오프, 성장, 은퇴, 이벤트
+src/store/        Zustand 스토어와 저장 데이터 마이그레이션
+src/data/         팀, 리그, 이벤트, 헤드라인 데이터
+src/config/       밸런스와 경제 설정값
+src/components/   UI 컴포넌트
+src/lib/          서버 유틸 (Supabase, 관리자 인증, 통계)
+scripts/          밸런스 시뮬레이터
+supabase/         DB 마이그레이션 SQL
+```
