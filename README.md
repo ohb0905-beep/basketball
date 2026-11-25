@@ -44,6 +44,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
    - `20261125_analytics_drop_unused_index.sql`: 1.1.3 용량 절감. 거의 쓰지 않는 anonymous_id 인덱스 삭제 (배포 순서와 무관, 데이터 변경 없음)
    - `20261126_analytics_capacity.sql`: 용량 대비 1단계. 커리어·플레이어·일별 요약 테이블과 자동 갱신 트리거, `analytics_daily_maintenance(보존일수)` 정리 함수, 집계 함수 v3(요약 테이블 + 최근 원본, DB 용량 표시). 실행만으로는 아무것도 지우지 않음
    - `20261126_analytics_capacity_cron.sql`: 매일 04:00 KST에 `analytics_daily_maintenance(14)` 실행 예약 (pg_cron). 14일이 지난 원본 통계를 지움 (난이도 설문은 남김). 위 파일 다음에 실행
+   - `20261127_admin_analytics_v4.sql`: 집계 함수 v4. 최근 24시간·오늘 시간별 추이, 미리보기를 뺀 정식 버전 필터(`release`). 테이블 데이터는 바꾸지 않음 (다시 실행하면 교체됨)
    - SQL 편집기에 붙여 넣거나, Supabase CLI로 `supabase db push`를 실행하면 됩니다.
 3. 프로젝트 설정의 API 메뉴에서 URL과 service_role 키를 복사해 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`에 넣습니다.
 
@@ -51,7 +52,7 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 
 `ADMIN_PASSWORD`와 `ADMIN_SESSION_SECRET`을 설정한 뒤 아래 주소로 접속해 비밀번호로 로그인합니다.
 
-- `/admin/feedback`: 피드백 목록 조회, 상태 변경, 관리자 메모
+- `/admin/feedback`: 피드백 목록 조회(제목·내용·메모 검색, 설문·버전 필터), 상태 변경, 관리자 메모
 - `/admin/analytics`: 익명 플레이 통계 대시보드 (리그별 우승·MVP·FMVP, 포지션 밸런스, 리셋 병목, 밸런스 리포트 JSON 복사)
 
 세션은 12시간 유지되고, 10분 동안 로그인을 8회 실패하면 잠시 차단됩니다.

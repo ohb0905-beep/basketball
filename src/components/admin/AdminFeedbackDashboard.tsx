@@ -277,11 +277,25 @@ function FeedbackDetailBody({
   );
 }
 
+type SurveyFilter = 'all' | 'only' | 'exclude';
+
+const SURVEY_FILTER_OPTIONS: Array<{ value: SurveyFilter; label: string }> = [
+  { value: 'all', label: '전체' },
+  { value: 'only', label: '설문 의견만' },
+  { value: 'exclude', label: '설문 제외' },
+];
+
 export function AdminFeedbackDashboard() {
   const router = useRouter();
 
   const [typeFilter, setTypeFilter] = useState<FeedbackType | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<FeedbackStatus | 'all'>('all');
+  const [surveyFilter, setSurveyFilter] = useState<SurveyFilter>('all');
+  const [versionFilter, setVersionFilter] = useState('all');
+  const [versions, setVersions] = useState<string[]>([]);
+  // 입력 중인 검색어와, 0.3초 멈춘 뒤 실제로 조회에 쓰는 검색어
+  const [queryInput, setQueryInput] = useState('');
+  const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -332,6 +346,36 @@ export function AdminFeedbackDashboard() {
     setOffset(0);
   };
 
+  const handleChangeSurveyFilter = (next: SurveyFilter) => {
+    setLoading(true);
+    setErrorMessage(null);
+    setSurveyFilter(next);
+    setOffset(0);
+  };
+
+  const handleChangeVersionFilter = (next: string) => {
+    setLoading(true);
+    setErrorMessage(null);
+    setVersionFilter(next);
+    setOffset(0);
+  };
+
+  const handleChangeQuery = (next: string) => {
+    setQueryInput(next);
+    if (next.trim() !== query) setLoading(true);
+  };
+
+  useEffect(() => {
+    const trimmed = queryInput.trim();
+    if (trimmed === query) return;
+    const timer = setTimeout(() => {
+      setErrorMessage(null);
+      setQuery(trimmed);
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [queryInput, query]);
+
   const handleChangeOffset = (next: number) => {
     setLoading(true);
     setErrorMessage(null);
@@ -344,6 +388,9 @@ export function AdminFeedbackDashboard() {
     const qs = new URLSearchParams({
       type: typeFilter,
       status: statusFilter,
+      survey: surveyFilter,
+      version: versionFilter,
+      q: query,
       limit: String(PAGE_SIZE),
       offset: String(offset),
     });
@@ -365,6 +412,7 @@ export function AdminFeedbackDashboard() {
           items?: FeedbackRecord[];
           totalFiltered?: number;
           counts?: FeedbackStatusCounts;
+          versions?: string[];
         };
 
         if (cancelled) return;
@@ -386,6 +434,9 @@ export function AdminFeedbackDashboard() {
         );
         if (data.counts) {
           setCounts(data.counts);
+        }
+        if (Array.isArray(data.versions)) {
+          setVersions(data.versions);
         }
 
         setSelectedId((prev) => {
@@ -409,7 +460,7 @@ export function AdminFeedbackDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [typeFilter, statusFilter, offset, reloadTick, router]);
+  }, [typeFilter, statusFilter, surveyFilter, versionFilter, query, offset, reloadTick, router]);
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedId) ?? null,
@@ -636,6 +687,64 @@ export function AdminFeedbackDashboard() {
           className="bg-[var(--t-card)] border border-[var(--t-g200)] rounded-[20px] p-4 space-y-3"
         >
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <label htmlFor="feedback-search" className="text-[12px] font-bold text-[var(--t-g500)] sm:w-16 shrink-0">
+              검색
+            </label>
+            <input
+              id="feedback-search"
+              type="search"
+              data-testid="feedback-search"
+              value={queryInput}
+              maxLength={50}
+              onChange={(e) => handleChangeQuery(e.target.value)}
+              placeholder="제목, 내용, 관리자 메모에서 찾기"
+              className="w-full sm:max-w-[360px] min-h-[36px] px-3 rounded-xl bg-[var(--t-g100)] text-[14px] text-[var(--t-g900)] placeholder:text-[var(--t-g400)] focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)]"
+            />
+          </div>
+
+          <div className="pt-3 border-t border-[var(--t-g100)] flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <span className="text-[12px] font-bold text-[var(--t-g500)] sm:w-16 shrink-0">
+              구분
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {SURVEY_FILTER_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  data-testid={`filter-survey-${opt.value}`}
+                  onClick={() => handleChangeSurveyFilter(opt.value)}
+                  className={`min-h-[36px] px-3 rounded-xl text-[13px] font-semibold whitespace-nowrap transition cursor-pointer ${
+                    surveyFilter === opt.value
+                      ? 'bg-[var(--t-g900)] text-[var(--t-card)]'
+                      : 'bg-[var(--t-g100)] text-[var(--t-g700)] hover:bg-[var(--t-g200)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+              <label className="flex items-center gap-2 sm:ml-2">
+                <span className="text-[12px] font-bold text-[var(--t-g500)] whitespace-nowrap">버전</span>
+                <select
+                  data-testid="filter-version"
+                  value={versionFilter}
+                  onChange={(e) => handleChangeVersionFilter(e.target.value)}
+                  className="min-h-[36px] px-2.5 rounded-xl bg-[var(--t-g100)] text-[13px] font-semibold text-[var(--t-g800)] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)]"
+                >
+                  <option value="all">전체 버전</option>
+                  {versionFilter !== 'all' && !versions.includes(versionFilter) && (
+                    <option value={versionFilter}>v{versionFilter}</option>
+                  )}
+                  {versions.map((ver) => (
+                    <option key={ver} value={ver}>
+                      v{ver}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-[var(--t-g100)] flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
             <span className="text-[12px] font-bold text-[var(--t-g500)] sm:w-16 shrink-0">
               제보 유형
             </span>

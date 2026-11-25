@@ -170,3 +170,18 @@ test('4. Supabase feedbacks SQL 마이그레이션 필수 제약·인덱스·RLS
   assert.ok(sql.includes('ENABLE ROW LEVEL SECURITY'));
   assert.ok(sql.includes('REVOKE ALL ON TABLE public.feedbacks FROM anon, authenticated'));
 });
+
+test('admin feedback search filter quotes PostgREST special characters', async () => {
+  const { buildFeedbackSearchFilter } = await import('./supabaseAdmin');
+  assert.equal(buildFeedbackSearchFilter('   '), null);
+  assert.equal(
+    buildFeedbackSearchFilter(' 드래프트 '),
+    '(title.ilike."*드래프트*",content.ilike."*드래프트*",admin_note.ilike."*드래프트*")'
+  );
+  // 쉼표·괄호는 따옴표 안에 두고, 따옴표와 역슬래시는 이스케이프합니다.
+  assert.equal(
+    buildFeedbackSearchFilter('a,b) "c" \\'),
+    '(title.ilike."*a,b) \\"c\\" \\\\*",content.ilike."*a,b) \\"c\\" \\\\*",admin_note.ilike."*a,b) \\"c\\" \\\\*")'
+  );
+  assert.equal(buildFeedbackSearchFilter('x'.repeat(80))?.includes('x'.repeat(51)), false);
+});

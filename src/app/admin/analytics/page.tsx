@@ -16,7 +16,17 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function AdminAnalyticsPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function AdminAnalyticsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<SearchParams>;
+}) {
   const authenticated = await isAdminSessionAuthenticated();
 
   if (!authenticated) {
@@ -30,5 +40,14 @@ export default async function AdminAnalyticsPage() {
     );
   }
 
-  return <AdminAnalyticsDashboard />;
+  const params = (await searchParams) ?? {};
+  return (
+    <AdminAnalyticsDashboard
+      initialFilters={{
+        range: firstParam(params.range),
+        version: firstParam(params.version),
+        league: firstParam(params.league),
+      }}
+    />
+  );
 }

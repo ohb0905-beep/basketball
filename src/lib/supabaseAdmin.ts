@@ -79,14 +79,37 @@ export interface ListFeedbacksResult {
   items: FeedbackRecord[];
   totalFiltered: number;
   counts: FeedbackStatusCounts;
+  /** 피드백에 기록된 게임 버전 목록 (최신순) */
+  versions: string[];
+}
+
+export type FeedbackSurveyFilter = 'all' | 'only' | 'exclude';
+
+/** 설문 의견 글은 제목이 이 말로 시작합니다 (src/lib/survey.ts SURVEY_FEEDBACK_TITLE). */
+const SURVEY_TITLE_PREFIX = '[설문]';
+
+/**
+ * PostgREST or=() 안에 넣을 검색어를 큰따옴표로 감쌉니다.
+ * 쉼표·괄호·점 같은 구분 문자가 필터 문법으로 해석되지 않게 하고, \와 "는 이스케이프합니다.
+ */
+export function buildFeedbackSearchFilter(query: string): string | null {
+  const q = query.trim().slice(0, 50);
+  if (!q) return null;
+  const escaped = q.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const value = `"*${escaped}*"`;
+  return `(title.ilike.${value},content.ilike.${value},admin_note.ilike.${value})`;
 }
 
 /**
  * 관리자 전용 피드백 목록 조회 및 상태별 요약 카운트 집계
+ * - 상태별 카운트는 행을 내려받지 않고 DB에서 바로 셉니다 (count=exact).
  */
 export async function listFeedbacksFromSupabase(params: {
   type?: FeedbackType | 'all';
   status?: FeedbackStatus | 'all';
+  q?: string;
+  survey?: FeedbackSurveyFilter;
+  version?: string;
   limit: number;
   offset: number;
 }): Promise<
@@ -114,28 +137,48 @@ export async function listFeedbacksFromSupabase(params: {
   if (params.status && params.status !== 'all') {
     listUrl.searchParams.set('status', `eq.${params.status}`);
   }
+  if (params.version && params.version !== 'all') {
+    listUrl.searchParams.set('game_version', `eq.${params.version}`);
+  }
+  if (params.survey === 'only') {
+    listUrl.searchParams.set('title', `like.${SURVEY_TITLE_PREFIX}*`);
+  } else if (params.survey === 'exclude') {
+    listUrl.searchParams.set('title', `not.like.${SURVEY_TITLE_PREFIX}*`);
+  }
+  const searchFilter = buildFeedbackSearchFilter(params.q ?? '');
+  if (searchFilter) {
+    listUrl.searchParams.set('or', searchFilter);
+  }
 
-  // 상태별 전체 요약 카운트 조회 (경량 status 컬럼만 조회)
-  const countsUrl = new URL(restBaseUrl);
-  countsUrl.searchParams.set('select', 'status');
-  countsUrl.searchParams.set('limit', '5000');
+  // 상태별 전체 카운트: 행 없이 개수만 받습니다.
+  const countUrl = (status: FeedbackStatus | null) => {
+    const url = new URL(restBaseUrl);
+    url.searchParams.set('select', 'id');
+    url.searchParams.set('limit', '1');
+    if (status) url.searchParams.set('status', `eq.${status}`);
+    return url.toString();
+  };
+  const countStatuses: Array<FeedbackStatus | null> = [null, 'received', 'reviewing', 'resolved', 'rejected'];
+
+  const versionsUrl = new URL(restBaseUrl);
+  versionsUrl.searchParams.set('select', 'game_version');
+  versionsUrl.searchParams.set('game_version', 'not.is.null');
+  versionsUrl.searchParams.set('order', 'created_at.desc');
+  versionsUrl.searchParams.set('limit', '2000');
+
+  const get = (url: string, prefer?: string) =>
+    fetch(url, {
+      method: 'GET',
+      headers: buildSupabaseHeaders(serviceRoleKey, prefer ? { Prefer: prefer } : undefined),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      cache: 'no-store',
+    });
 
   try {
-    const [listRes, countsRes] = await Promise.all([
-      fetch(listUrl.toString(), {
-        method: 'GET',
-        headers: buildSupabaseHeaders(serviceRoleKey, {
-          Prefer: 'count=exact',
-        }),
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-        cache: 'no-store',
-      }),
-      fetch(countsUrl.toString(), {
-        method: 'GET',
-        headers: buildSupabaseHeaders(serviceRoleKey),
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-        cache: 'no-store',
-      }),
+    const [listRes, versionsRes, ...countResponses] = await Promise.all([
+      get(listUrl.toString(), 'count=exact'),
+      get(versionsUrl.toString()),
+      ...countStatuses.map((st) => get(countUrl(st), 'count=exact')),
     ]);
 
     if (!listRes.ok) {
@@ -156,24 +199,23 @@ export async function listFeedbacksFromSupabase(params: {
       safeItems.length
     );
 
+    const countOf = (res: Response | undefined) =>
+      res && res.ok ? parseContentRangeTotal(res.headers.get('content-range'), 0) : 0;
     const counts: FeedbackStatusCounts = {
-      total: 0,
-      received: 0,
-      reviewing: 0,
-      resolved: 0,
-      rejected: 0,
+      total: countOf(countResponses[0]),
+      received: countOf(countResponses[1]),
+      reviewing: countOf(countResponses[2]),
+      resolved: countOf(countResponses[3]),
+      rejected: countOf(countResponses[4]),
     };
 
-    if (countsRes.ok) {
-      const statusRows = (await countsRes.json()) as Array<{ status?: string }>;
-      if (Array.isArray(statusRows)) {
-        counts.total = statusRows.length;
-        for (const row of statusRows) {
-          if (row.status === 'received') counts.received += 1;
-          else if (row.status === 'reviewing') counts.reviewing += 1;
-          else if (row.status === 'resolved') counts.resolved += 1;
-          else if (row.status === 'rejected') counts.rejected += 1;
-        }
+    let versions: string[] = [];
+    if (versionsRes.ok) {
+      const rows = (await versionsRes.json()) as Array<{ game_version?: string | null }>;
+      if (Array.isArray(rows)) {
+        versions = Array.from(
+          new Set(rows.map((r) => r.game_version).filter((v): v is string => typeof v === 'string' && v.length > 0))
+        );
       }
     }
 
@@ -183,6 +225,7 @@ export async function listFeedbacksFromSupabase(params: {
         items: safeItems,
         totalFiltered,
         counts,
+        versions,
       },
     };
   } catch (err) {
@@ -452,23 +495,37 @@ export async function fetchAdminAnalyticsFromSupabase(
   if (params.sinceIso) {
     recentUrl.searchParams.set('created_at', `gte.${params.sinceIso}`);
   }
-  if (versionFilter) {
+  if (versionFilter === 'release') {
+    // 정식 버전 전체: 미리보기 배포(-preview) 제외
+    recentUrl.searchParams.set('game_version', 'not.like.*-preview');
+  } else if (versionFilter) {
     recentUrl.searchParams.set('game_version', `eq.${versionFilter}`);
   }
+  if (leagueFilter) {
+    // 이벤트마다 리그가 담긴 키가 달라서 그중 하나라도 맞으면 보여 줍니다.
+    const keys = ['league', 'toLeague', 'fromLeague', 'startingLeague', 'finalLeague', 'abandonedLeague'];
+    recentUrl.searchParams.set(
+      'or',
+      `(${keys.map((k) => `payload->>${k}.eq.${leagueFilter}`).join(',')})`
+    );
+  }
+
+  const callRpc = (pVersion: string | null) =>
+    fetch(rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(serviceRoleKey),
+      body: JSON.stringify({
+        p_since: params.sinceIso,
+        p_version: pVersion,
+        p_league: leagueFilter,
+      }),
+      signal: AbortSignal.timeout(ADMIN_ANALYTICS_RPC_TIMEOUT_MS),
+      cache: 'no-store',
+    });
 
   try {
-    const [rpcRes, recentRes] = await Promise.all([
-      fetch(rpcUrl, {
-        method: 'POST',
-        headers: buildSupabaseHeaders(serviceRoleKey),
-        body: JSON.stringify({
-          p_since: params.sinceIso,
-          p_version: versionFilter,
-          p_league: leagueFilter,
-        }),
-        signal: AbortSignal.timeout(ADMIN_ANALYTICS_RPC_TIMEOUT_MS),
-        cache: 'no-store',
-      }),
+    let [rpcRes, recentRes] = await Promise.all([
+      callRpc(versionFilter),
       fetch(recentUrl.toString(), {
         method: 'GET',
         headers: buildSupabaseHeaders(serviceRoleKey),
@@ -492,7 +549,14 @@ export async function fetchAdminAnalyticsFromSupabase(
     let setupRequired = false;
     if (rpcRes.ok) {
       aggregate = await rpcRes.json();
-    } else {
+      // 집계 함수 v4 전에는 'release'를 모르므로 (정확히 같은 버전만 찾아 0이 됨) 전체 버전으로 다시 조회합니다.
+      const schemaVersion = Number((aggregate as { schemaVersion?: unknown } | null)?.schemaVersion ?? 0);
+      if (versionFilter === 'release' && schemaVersion < 4) {
+        rpcRes = await callRpc(null);
+        aggregate = rpcRes.ok ? await rpcRes.json() : null;
+      }
+    }
+    if (!rpcRes.ok) {
       const code = await readPostgrestErrorCode(rpcRes);
       if (code === 'PGRST202' || (rpcRes.status === 404 && code !== '42P01')) {
         // 함수 미설치: 집계 없이 최근 로그만 보여 주고 설치 안내를 표시합니다.

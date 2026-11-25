@@ -1,17 +1,22 @@
 import type { AnalyticsDeviceType, AnalyticsEventName } from './analyticsSchema';
 import type { LeagueId, Position } from '../types/game';
 
-export const ANALYTICS_DATE_RANGES = ['7d', '30d', '90d', 'all'] as const;
+export const ANALYTICS_DATE_RANGES = ['24h', 'today', '7d', '30d', '90d', 'all'] as const;
 export type AnalyticsDateRange = (typeof ANALYTICS_DATE_RANGES)[number];
 
+/** 시간별 추이를 보여 주는 짧은 기간 */
+export const HOURLY_RANGES: readonly AnalyticsDateRange[] = ['24h', 'today'];
+
 export const ANALYTICS_RANGE_LABELS: Record<AnalyticsDateRange, string> = {
+  '24h': '최근 24시간',
+  today: '오늘',
   '7d': '최근 7일',
   '30d': '최근 30일',
   '90d': '최근 90일',
   all: '전체',
 };
 
-const RANGE_DAYS: Record<Exclude<AnalyticsDateRange, 'all'>, number> = {
+const RANGE_DAYS: Record<Exclude<AnalyticsDateRange, 'all' | '24h' | 'today'>, number> = {
   '7d': 7,
   '30d': 30,
   '90d': 90,
@@ -92,8 +97,18 @@ export function isValidAnalyticsDateRange(
   return (ANALYTICS_DATE_RANGES as readonly string[]).includes(value);
 }
 
+/** 버전 필터 값: 'all' = 미리보기 포함 전체, 'release' = 미리보기(-preview) 제외 정식 버전 전체 (기본값) */
+export const VERSION_FILTER_ALL = 'all';
+export const VERSION_FILTER_RELEASE = 'release';
+export const DEFAULT_VERSION_FILTER = VERSION_FILTER_RELEASE;
+export const PREVIEW_VERSION_SUFFIX = '-preview';
+
+export function isPreviewVersion(version: string): boolean {
+  return version.endsWith(PREVIEW_VERSION_SUFFIX);
+}
+
 export function isValidAnalyticsVersionFilter(value: string): boolean {
-  if (value === 'all') return true;
+  if (value === VERSION_FILTER_ALL || value === VERSION_FILTER_RELEASE) return true;
   return SAFE_VERSION_FILTER_PATTERN.test(value);
 }
 
@@ -144,7 +159,8 @@ export function getAnalyticsRangeStartIso(
   nowMs: number = Date.now()
 ): string | null {
   if (range === 'all') return null;
-  const days = RANGE_DAYS[range];
+  if (range === '24h') return new Date(nowMs - DAY_MS).toISOString();
+  const days = range === 'today' ? 1 : RANGE_DAYS[range];
   const todayKstKey = toKstDateKey(nowMs);
   const [y, m, d] = todayKstKey.split('-').map(Number);
   const todayMidnightKstUtcMs = Date.UTC(y, m - 1, d) - KST_OFFSET_MS;
@@ -420,8 +436,8 @@ export interface AnalyticsKpiSummary {
 }
 
 export interface DailyTrendPoint {
-  dateKey: string; // YYYY-MM-DD (KST)
-  label: string; // MM/DD
+  dateKey: string; // YYYY-MM-DD (KST), 시간별이면 YYYY-MM-DDTHH
+  label: string; // MM/DD, 시간별이면 HH시
   uniquePlayers: number;
   careersCreated: number;
   seasonsCompleted: number;
@@ -501,6 +517,8 @@ export interface AdminAnalyticsReport {
   tableNotReady: boolean;
   kpi: AnalyticsKpiSummary;
   dailyTrend: DailyTrendPoint[];
+  /** 'hour'면 dailyTrend가 KST 시간별 점입니다 (최근 24시간·오늘, 집계 함수 v4 이상) */
+  trendGranularity: 'day' | 'hour';
   leagueAwards: LeagueAwardRow[];
   positionBalance: {
     rows: PositionBalanceRow[];
@@ -794,6 +812,10 @@ function buildDailyTrend(
     if (sorted.length === 0) return [];
     const [fy, fm, fd] = sorted[0].split('-').map(Number);
     days = Math.floor((todayUtc - Date.UTC(fy, fm - 1, fd)) / DAY_MS) + 1;
+  } else if (range === '24h') {
+    days = 2;
+  } else if (range === 'today') {
+    days = 1;
   } else {
     days = RANGE_DAYS[range];
   }
@@ -807,6 +829,52 @@ function buildDailyTrend(
     points.push({
       dateKey: key,
       label: formatShortDateLabel(key),
+      uniquePlayers: v?.players ?? 0,
+      careersCreated: v?.careers ?? 0,
+      seasonsCompleted: v?.seasons ?? 0,
+    });
+  }
+  return points;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** KST 시간별 추이 (빈 시간은 0으로 채움). 집계 함수 v4의 hourly 키를 씁니다. */
+export function buildHourlyTrend(
+  rawHourly: unknown,
+  range: AnalyticsDateRange,
+  nowMs: number
+): DailyTrendPoint[] {
+  const byHour = new Map<string, { players: number; careers: number; seasons: number }>();
+  for (const raw of asArray(rawHourly)) {
+    const rec = asRecord(raw);
+    const hour = asString(rec.hour);
+    if (!hour || !/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(hour)) continue;
+    byHour.set(hour, {
+      players: toCount(rec.players),
+      careers: toCount(rec.careers),
+      seasons: toCount(rec.seasons),
+    });
+  }
+
+  const kstNow = new Date(nowMs + KST_OFFSET_MS);
+  const currentHourKstMs = Date.UTC(
+    kstNow.getUTCFullYear(),
+    kstNow.getUTCMonth(),
+    kstNow.getUTCDate(),
+    kstNow.getUTCHours()
+  );
+  const hours = range === 'today' ? kstNow.getUTCHours() + 1 : 24;
+
+  const points: DailyTrendPoint[] = [];
+  for (let i = hours - 1; i >= 0; i -= 1) {
+    const dt = new Date(currentHourKstMs - i * HOUR_MS);
+    const hh = String(dt.getUTCHours()).padStart(2, '0');
+    const key = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}T${hh}`;
+    const v = byHour.get(key);
+    points.push({
+      dateKey: key,
+      label: `${hh}시`,
       uniquePlayers: v?.players ?? 0,
       careersCreated: v?.careers ?? 0,
       seasonsCompleted: v?.seasons ?? 0,
@@ -1401,7 +1469,15 @@ export function buildAdminAnalyticsReport(
     generatedAt: new Date(nowMs).toISOString(),
     setupRequired: Boolean(options.setupRequired),
     tableNotReady: Boolean(options.tableNotReady),
-    dailyTrend: buildDailyTrend(raw.daily, options.range, nowMs),
+    ...(HOURLY_RANGES.includes(options.range) && toCount(raw.schemaVersion) >= 4
+      ? {
+          dailyTrend: buildHourlyTrend(raw.hourly, options.range, nowMs),
+          trendGranularity: 'hour' as const,
+        }
+      : {
+          dailyTrend: buildDailyTrend(raw.daily, options.range, nowMs),
+          trendGranularity: 'day' as const,
+        }),
     funnel: {
       leagueReach,
       leagueReachDenominator: reachDenominator,
