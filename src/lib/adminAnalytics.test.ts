@@ -15,7 +15,9 @@ import {
   buildVersionCompare,
   compareGameVersionsDesc,
   buildShareableAnalyticsSummary,
+  buildHourlyTrend,
   buildStorageReport,
+  isValidAnalyticsVersionFilter,
   DB_SIZE_LIMIT_BYTES,
   getAnalyticsRangeStartIso,
   INSIGHT_MIN_SAMPLE,
@@ -471,6 +473,7 @@ test(
       \\i ${path.join(migrationsDir, '20261125_analytics_survey_event.sql')}
       \\i ${path.join(migrationsDir, '20261125_admin_analytics_report.sql')}
       \\i ${path.join(migrationsDir, '20261126_analytics_capacity.sql')}
+      \\i ${path.join(migrationsDir, '20261127_admin_analytics_v4.sql')}
       ${TRUNCATE_ANALYTICS_SQL}
     `);
 
@@ -687,6 +690,7 @@ test(
       \\i ${path.join(migrationsDir, '20261125_analytics_survey_event.sql')}
       \\i ${path.join(migrationsDir, '20261125_admin_analytics_report.sql')}
       \\i ${path.join(migrationsDir, '20261126_analytics_capacity.sql')}
+      \\i ${path.join(migrationsDir, '20261127_admin_analytics_v4.sql')}
       ${TRUNCATE_ANALYTICS_SQL}
     `);
 
@@ -728,7 +732,7 @@ test(
     );
 
     const raw = JSON.parse(runPsql(`SELECT public.admin_analytics_report(NULL, NULL, NULL);`));
-    assert.equal(raw.schemaVersion, 3);
+    assert.equal(raw.schemaVersion, 4);
     const report = buildAdminAnalyticsReport(raw, [], {
       range: 'all',
       version: 'all',
@@ -865,6 +869,7 @@ test(
       \\i ${path.join(migrationsDir, '20261125_analytics_survey_event.sql')}
       \\i ${path.join(migrationsDir, '20261125_admin_analytics_report.sql')}
       \\i ${path.join(migrationsDir, '20261126_analytics_capacity.sql')}
+      \\i ${path.join(migrationsDir, '20261127_admin_analytics_v4.sql')}
       ${TRUNCATE_ANALYTICS_SQL}
     `);
 
@@ -902,7 +907,7 @@ test(
 
     const fetchRaw = () => JSON.parse(runPsql(`SELECT public.admin_analytics_report(NULL, NULL, NULL);`));
     const before = fetchRaw();
-    assert.equal(before.schemaVersion, 3);
+    assert.equal(before.schemaVersion, 4);
     assert.equal(before.prunedBefore, null);
     assert.equal(before.kpi.uniquePlayers, 2);
     assert.equal(before.creationFunnel.runs, 2);
@@ -938,9 +943,75 @@ test(
     runPsql(`SELECT public.analytics_daily_maintenance(14);`);
     assert.deepEqual(fetchRaw().kpi, before.kpi);
 
+    // 미리보기 배포 이벤트는 'release' 필터에서 빠집니다.
+    runPsql(
+      [
+        ins('session_start', 's-pv', null, {}, '1.1.3-preview', 'a-pv', 'new'),
+        ins('career_created', 's-pv', 'run-pv', { position: 'SF' }, '1.1.3-preview', 'a-pv', 'new'),
+      ].join('\n')
+    );
+    const withPreview = JSON.parse(runPsql(`SELECT public.admin_analytics_report(now() - interval '1 day', NULL, NULL);`));
+    const release = JSON.parse(runPsql(`SELECT public.admin_analytics_report(now() - interval '1 day', 'release', NULL);`));
+    assert.equal(withPreview.kpi.uniquePlayers, release.kpi.uniquePlayers + 1);
+    assert.equal(withPreview.kpi.careersCreated, release.kpi.careersCreated + 1);
+    assert.deepEqual(release.versions.map((v: { key: string }) => v.key), ['1.1.3']);
+
+    // 짧은 기간이면 시간별 추이를 같이 줍니다.
+    const hourlyPlayers = (withPreview.hourly as Array<{ players: number }>).reduce((sum, h) => sum + h.players, 0);
+    assert.ok(hourlyPlayers >= 2);
+    assert.deepEqual(after.hourly, []); // 기간 제한 없음 → 시간별 없음
+    const hourlyReport = buildAdminAnalyticsReport(withPreview, [], { range: '24h', version: 'all', league: 'all', nowMs: Date.now() });
+    assert.equal(hourlyReport.trendGranularity, 'hour');
+    assert.equal(hourlyReport.dailyTrend.length, 24);
+    assert.equal(hourlyReport.dailyTrend.reduce((sum, p) => sum + p.careersCreated, 0), 2);
+
     // 보존 기간 하한과 권한
     assert.throws(() => runPsql(`SELECT public.analytics_daily_maintenance(3);`));
     assert.throws(() => runPsql(`SET ROLE anon; SELECT public.analytics_daily_maintenance(14);`));
     assert.throws(() => runPsql(`SET ROLE anon; SELECT count(*) FROM public.analytics_career_runs;`));
   }
 );
+
+test('short ranges: 24h and today start times, hourly trend and version filter values', () => {
+  // NOW_MS = 2026-11-24 15:00 KST
+  assert.equal(isValidAnalyticsDateRange('24h'), true);
+  assert.equal(isValidAnalyticsDateRange('today'), true);
+  assert.equal(getAnalyticsRangeStartIso('24h', NOW_MS), '2026-11-23T06:00:00.000Z');
+  assert.equal(getAnalyticsRangeStartIso('today', NOW_MS), '2026-11-23T15:00:00.000Z'); // 11/24 00:00 KST
+  assert.equal(isValidAnalyticsVersionFilter('release'), true);
+  assert.equal(isValidAnalyticsVersionFilter('1.1.3-preview'), true);
+  assert.equal(isValidAnalyticsVersionFilter('1.1.3;drop'), false);
+
+  const hourly = [
+    { hour: '2026-11-24T15', players: 3, careers: 1, seasons: 9 },
+    { hour: '2026-11-24T02', players: 1, careers: 0, seasons: 2 },
+    { hour: 'bad', players: 99 },
+  ];
+  const today = buildHourlyTrend(hourly, 'today', NOW_MS);
+  assert.equal(today.length, 16); // 00시 ~ 15시
+  assert.equal(today[0].label, '00시');
+  assert.equal(today[15].uniquePlayers, 3);
+  assert.equal(today[2].seasonsCompleted, 2);
+  const day = buildHourlyTrend(hourly, '24h', NOW_MS);
+  assert.equal(day.length, 24);
+  assert.equal(day[0].dateKey, '2026-11-23T16');
+  assert.equal(day[23].dateKey, '2026-11-24T15');
+
+  // 집계 함수 v4 전에는 짧은 기간도 일별로 보여 줍니다.
+  const legacy = buildAdminAnalyticsReport({ schemaVersion: 3, daily: [], hourly }, [], {
+    range: '24h',
+    version: 'release',
+    league: 'all',
+    nowMs: NOW_MS,
+  });
+  assert.equal(legacy.trendGranularity, 'day');
+  assert.equal(legacy.dailyTrend.length, 2);
+  const v4 = buildAdminAnalyticsReport({ schemaVersion: 4, hourly }, [], {
+    range: 'today',
+    version: 'release',
+    league: 'all',
+    nowMs: NOW_MS,
+  });
+  assert.equal(v4.trendGranularity, 'hour');
+  assert.equal(hasNaNDeep(v4), false);
+});

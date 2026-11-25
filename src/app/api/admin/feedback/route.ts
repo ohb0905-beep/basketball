@@ -6,13 +6,16 @@ import {
   isValidFeedbackStatus,
   isValidFeedbackType,
 } from '../../../../lib/feedback';
-import { listFeedbacksFromSupabase } from '../../../../lib/supabaseAdmin';
+import { FeedbackSurveyFilter, listFeedbacksFromSupabase } from '../../../../lib/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' };
+const MAX_QUERY_LENGTH = 50;
+const SAFE_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,32}$/;
+const SURVEY_FILTERS: FeedbackSurveyFilter[] = ['all', 'only', 'exclude'];
 
 export async function GET(request: NextRequest) {
   // 1. 서버 관리자 세션 인증 최우선 검증
@@ -29,6 +32,28 @@ export async function GET(request: NextRequest) {
   const rawStatus = searchParams.get('status') || 'all';
   const rawLimit = searchParams.get('limit');
   const rawOffset = searchParams.get('offset');
+  const rawQuery = (searchParams.get('q') || '').trim();
+  const rawSurvey = searchParams.get('survey') || 'all';
+  const rawVersion = (searchParams.get('version') || 'all').trim();
+
+  if (rawQuery.length > MAX_QUERY_LENGTH) {
+    return NextResponse.json(
+      { ok: false, error: `검색어는 ${MAX_QUERY_LENGTH}자 이하로 입력해 주세요.` },
+      { status: 400, headers: NO_STORE_HEADERS }
+    );
+  }
+  if (!SURVEY_FILTERS.includes(rawSurvey as FeedbackSurveyFilter)) {
+    return NextResponse.json(
+      { ok: false, error: '유효하지 않은 설문 필터입니다. (all, only, exclude)' },
+      { status: 400, headers: NO_STORE_HEADERS }
+    );
+  }
+  if (rawVersion !== 'all' && !SAFE_VERSION_PATTERN.test(rawVersion)) {
+    return NextResponse.json(
+      { ok: false, error: '유효하지 않은 게임 버전 필터입니다.' },
+      { status: 400, headers: NO_STORE_HEADERS }
+    );
+  }
 
   let typeFilter: FeedbackType | 'all' = 'all';
   if (rawType !== 'all') {
@@ -94,6 +119,9 @@ export async function GET(request: NextRequest) {
   const result = await listFeedbacksFromSupabase({
     type: typeFilter,
     status: statusFilter,
+    q: rawQuery,
+    survey: rawSurvey as FeedbackSurveyFilter,
+    version: rawVersion,
     limit,
     offset,
   });
@@ -111,6 +139,7 @@ export async function GET(request: NextRequest) {
       items: result.data.items,
       totalFiltered: result.data.totalFiltered,
       counts: result.data.counts,
+      versions: result.data.versions,
       limit,
       offset,
     },

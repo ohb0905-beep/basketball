@@ -15,6 +15,13 @@ import {
 import { GAME_NAME, GAME_VERSION } from '../../config/appMeta';
 import {
   ANALYTICS_DATE_RANGES,
+  DEFAULT_VERSION_FILTER,
+  VERSION_FILTER_ALL,
+  VERSION_FILTER_RELEASE,
+  isPreviewVersion,
+  isValidAnalyticsDateRange,
+  isValidAnalyticsLeagueFilter,
+  isValidAnalyticsVersionFilter,
   ANALYTICS_RANGE_LABELS,
   AdminAnalyticsReport,
   AnalyticsDateRange,
@@ -45,6 +52,12 @@ import {
 } from './AdminAnalyticsExtraSections';
 
 const SETUP_SQL_PATH = 'supabase/migrations/20261125_admin_analytics_report.sql';
+
+/** 'YYYY-MM-DD' 또는 시간별 'YYYY-MM-DDTHH'를 읽기 쉬운 글로 바꿉니다. */
+function formatTrendKey(key: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/.exec(key);
+  return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : key;
+}
 
 function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -99,7 +112,7 @@ function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
         {activePoint && (
           <div className="flex flex-wrap items-center gap-2 text-[var(--t-g600)] tabular-nums">
             <span className="font-bold text-[var(--t-g900)]">
-              {activePoint.dateKey} (KST)
+              {formatTrendKey(activePoint.dateKey)} (KST)
             </span>
             <span aria-hidden="true">·</span>
             <span>플레이어 {activePoint.uniquePlayers.toLocaleString()}명</span>
@@ -155,7 +168,7 @@ function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
                     onMouseEnter={() => setSelectedIndex(idx)}
                     onFocus={() => setSelectedIndex(idx)}
                     onClick={() => setSelectedIndex(idx)}
-                    aria-label={`${point.dateKey} 고유 플레이어 ${point.uniquePlayers}명, 커리어 생성 ${point.careersCreated}건`}
+                    aria-label={`${formatTrendKey(point.dateKey)} 고유 플레이어 ${point.uniquePlayers}명, 커리어 생성 ${point.careersCreated}건`}
                     className={`group relative flex-1 h-full flex items-end justify-center gap-[2px] px-0.5 rounded-t-md cursor-pointer transition-colors ${
                       isSelected ? 'bg-[var(--t-g100)]/60' : 'hover:bg-[var(--t-g50)]'
                     }`}
@@ -193,7 +206,7 @@ function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
                 return (
                   <div
                     key={point.dateKey}
-                    className="flex-1 text-center text-[10px] sm:text-[11px] font-mono text-[var(--t-g500)] tabular-nums truncate"
+                    className="flex-1 min-w-0 text-center text-[10px] sm:text-[11px] font-mono text-[var(--t-g500)] tabular-nums whitespace-nowrap overflow-visible"
                   >
                     {showLabel ? point.label : ''}
                   </div>
@@ -210,12 +223,32 @@ function DailyTrendChart({ points }: { points: DailyTrendPoint[] }) {
 
 type CopyState = 'idle' | 'copied' | 'failed';
 
-export function AdminAnalyticsDashboard() {
-  const router = useRouter();
+export interface AdminAnalyticsInitialFilters {
+  range?: string;
+  version?: string;
+  league?: string;
+}
 
-  const [range, setRange] = useState<AnalyticsDateRange>('7d');
-  const [versionFilter, setVersionFilter] = useState<string>('all');
-  const [leagueFilter, setLeagueFilter] = useState<string>('all');
+/** 주소(?range=&version=&league=)의 필터 값을 검증해 초기값으로 씁니다. */
+export function resolveInitialAnalyticsFilters(raw: AdminAnalyticsInitialFilters) {
+  return {
+    range: raw.range && isValidAnalyticsDateRange(raw.range) ? raw.range : ('7d' as AnalyticsDateRange),
+    version: raw.version && isValidAnalyticsVersionFilter(raw.version) ? raw.version : DEFAULT_VERSION_FILTER,
+    league: raw.league && isValidAnalyticsLeagueFilter(raw.league) ? raw.league : 'all',
+  };
+}
+
+export function AdminAnalyticsDashboard({
+  initialFilters = {},
+}: {
+  initialFilters?: AdminAnalyticsInitialFilters;
+}) {
+  const router = useRouter();
+  const [initial] = useState(() => resolveInitialAnalyticsFilters(initialFilters));
+
+  const [range, setRange] = useState<AnalyticsDateRange>(initial.range);
+  const [versionFilter, setVersionFilter] = useState<string>(initial.version);
+  const [leagueFilter, setLeagueFilter] = useState<string>(initial.league);
   const [funnelTab, setFunnelTab] = useState<'reach' | 'maxSeason'>('reach');
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -235,6 +268,23 @@ export function AdminAnalyticsDashboard() {
     setErrorMessage(null);
     setReloadTick((prev) => prev + 1);
   }, []);
+
+  // 필터를 주소에 남겨 새로고침하거나 링크를 보내도 같은 화면이 열리게 합니다.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const setOrDelete = (key: string, value: string, fallback: string) => {
+      if (value === fallback) params.delete(key);
+      else params.set(key, value);
+    };
+    setOrDelete('range', range, '7d');
+    setOrDelete('version', versionFilter, DEFAULT_VERSION_FILTER);
+    setOrDelete('league', leagueFilter, 'all');
+    const qs = params.toString();
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
+    if (next !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, '', next);
+    }
+  }, [range, versionFilter, leagueFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -332,7 +382,15 @@ export function AdminAnalyticsDashboard() {
       ? null
       : LEAGUE_SHORT_LABELS[leagueFilter as keyof typeof LEAGUE_SHORT_LABELS] ?? leagueFilter;
   const leagueScopeNote = leagueLabel ? `리그 필터: ${leagueLabel}` : '전체 리그';
-  const versionScopeNote = versionFilter === 'all' ? '전체 버전' : `v${versionFilter}`;
+  const versionScopeNote =
+    versionFilter === VERSION_FILTER_RELEASE
+      ? '정식 버전 전체'
+      : versionFilter === VERSION_FILTER_ALL
+        ? '미리보기 포함 전체'
+        : `v${versionFilter}`;
+  // 리그 필터를 걸었을 때, 필터가 적용되지 않는 섹션에 "전체 리그 기준"을 붙입니다.
+  const allLeagues = (aside?: string) =>
+    leagueLabel ? [`전체 리그 기준`, aside].filter(Boolean).join(' · ') : aside;
   // 원본은 최근 14일만 남기므로, 기간이 그보다 길면 원본에서만 계산하는 섹션에 범위를 알려 줍니다.
   const prunedBefore = report?.storage.rawLimited ? report.storage.prunedBefore : null;
   const rawOnly = (description: string) =>
@@ -352,6 +410,8 @@ export function AdminAnalyticsDashboard() {
   ];
 
   const availableVersions = report?.availableVersions ?? [];
+  // availableVersions는 최신순으로 정렬되어 옵니다.
+  const latestReleaseVersion = availableVersions.find((v) => !isPreviewVersion(v)) ?? null;
   const selectClass =
     'min-h-[40px] px-3 rounded-xl bg-[var(--t-g100)] text-[13px] font-semibold text-[var(--t-g900)] focus:outline-none focus:ring-2 focus:ring-[var(--t-accent)] cursor-pointer disabled:opacity-60';
   const toolButtonClass =
@@ -416,7 +476,7 @@ export function AdminAnalyticsDashboard() {
               <div
                 role="group"
                 aria-label="조회 기간"
-                className="inline-flex items-center p-1 rounded-xl bg-[var(--t-g100)]"
+                className="inline-flex flex-wrap items-center p-1 rounded-xl bg-[var(--t-g100)]"
               >
                 {ANALYTICS_DATE_RANGES.map((option) => {
                   const active = range === option;
@@ -454,14 +514,30 @@ export function AdminAnalyticsDashboard() {
                   }}
                   className={selectClass}
                 >
-                  <option value="all">전체 버전</option>
+                  <option value={VERSION_FILTER_RELEASE}>정식 버전 전체</option>
+                  <option value={VERSION_FILTER_ALL}>미리보기 포함 전체</option>
                   {availableVersions.map((ver) => (
                     <option key={ver} value={ver}>
                       v{ver}
+                      {isPreviewVersion(ver) ? ' (미리보기)' : ''}
                     </option>
                   ))}
                 </select>
               </label>
+              {latestReleaseVersion && versionFilter !== latestReleaseVersion && (
+                <button
+                  type="button"
+                  data-testid="analytics-latest-version"
+                  disabled={loading}
+                  onClick={() => {
+                    beginLoad();
+                    setVersionFilter(latestReleaseVersion);
+                  }}
+                  className="min-h-[34px] px-2.5 rounded-lg text-[12px] font-semibold text-[var(--t-accent-ink)] bg-[var(--t-accent-soft)] whitespace-nowrap cursor-pointer disabled:opacity-50"
+                >
+                  최신 v{latestReleaseVersion}만
+                </button>
+              )}
 
               <label className="flex items-center gap-2">
                 <span className="text-[12px] font-bold text-[var(--t-g500)] whitespace-nowrap">리그</span>
@@ -526,7 +602,7 @@ export function AdminAnalyticsDashboard() {
                 {leagueLabel && (
                   <>
                     <span aria-hidden="true"> · </span>
-                    리그 필터는 포지션·리셋·역할·수상 섹션에 적용됩니다
+                    리그 필터는 포지션·리셋·역할·플레이오프·수상 섹션과 최근 로그에 적용되고, 나머지는 &quot;전체 리그 기준&quot;으로 표시됩니다
                   </>
                 )}
               </>
@@ -643,7 +719,7 @@ export function AdminAnalyticsDashboard() {
               <SectionHeader
                 title="🆚 버전별 비교"
                 description="기간 필터만 적용 (버전·리그 필터 무시). 커리어 지표는 커리어를 만든 버전, 시즌·은퇴 지표는 그 이벤트가 기록된 버전 기준입니다. 업데이트 전에 연 탭은 예전 버전으로 계속 기록됩니다."
-                aside="옆으로 밀어서 보기"
+                aside={allLeagues('옆으로 밀어서 보기')}
               />
               <VersionCompareTable rows={report.versionCompare} />
             </section>
@@ -653,7 +729,7 @@ export function AdminAnalyticsDashboard() {
                 <SectionHeader
                   title="🗳️ 난이도 설문 결과"
                   description="은퇴 화면 1인 1회 설문 (1 쉬움 ~ 5 어려움). 버전·기간 필터 적용"
-                  aside={versionScopeNote}
+                  aside={allLeagues(versionScopeNote)}
                 />
                 <SurveyResultsCard survey={report.survey} />
               </div>
@@ -661,7 +737,7 @@ export function AdminAnalyticsDashboard() {
                 <SectionHeader
                   title="🧭 생성 → 드래프트 퍼널"
                   description="1.0.1부터 수집된 생성 화면 진입 기준. 버전·기간 필터 적용"
-                  aside={versionScopeNote}
+                  aside={allLeagues(versionScopeNote)}
                 />
                 <CreationFunnelCard funnel={report.creationFunnel} />
               </div>
@@ -674,7 +750,7 @@ export function AdminAnalyticsDashboard() {
           <SectionHeader
             title="🏆 리그별 MVP · FMVP · 우승"
             description="season_completed 기준. 비율 아래 숫자는 발생/모수이며, 모수는 해당 필드가 실제로 수집된 시즌만 셉니다 (구버전 FMVP는 wonFinalsMvp 사용)."
-            aside="열 제목을 눌러 정렬"
+            aside={allLeagues('열 제목을 눌러 정렬')}
           />
           {showSkeleton ? (
             <SkeletonRows count={6} />
@@ -703,11 +779,11 @@ export function AdminAnalyticsDashboard() {
             <SectionHeader
               title="📈 커리어 성장 퍼널"
               description={rawOnly("고유 커리어(career_run_id) 단위 리그 도달률과 최대 도달 시즌")}
-              aside={
+              aside={allLeagues(
                 report && report.funnel.leagueReachDenominator > 0
                   ? `모수 ${report.funnel.leagueReachDenominator.toLocaleString()}커리어`
                   : undefined
-              }
+              )}
             />
             <div className="inline-flex items-center p-1 rounded-xl bg-[var(--t-g100)]">
               {(
@@ -831,11 +907,11 @@ export function AdminAnalyticsDashboard() {
             <SectionHeader
               title="🏁 커리어 엔딩 · 명예의 전당"
               description="career_ended 기준"
-              aside={
+              aside={allLeagues(
                 report
                   ? `명예의 전당 ${formatPercentText(report.endings.hallOfFame.percent)} (${report.endings.hallOfFame.count}/${report.endings.hallOfFame.n})`
                   : undefined
-              }
+              )}
             />
             {showSkeleton ? (
               <SkeletonRows count={5} />
@@ -851,6 +927,7 @@ export function AdminAnalyticsDashboard() {
           <div data-testid="analytics-build-meta" className={`${CARD_CLASS} lg:col-span-2`}>
             <SectionHeader
               title="🧬 초기 빌드 · 육성 · 이동 메타"
+              aside={allLeagues()}
               description={prunedBefore ? `career_created의 플레이스타일·성장 DNA·훈련 방향 (전체 기간), league_changed의 이동 사유와 드래프트 라운드 (원본이 남아 있는 ${formatAnalyticsDateKst(prunedBefore)} 이후)` : "career_created의 플레이스타일·성장 DNA·훈련 방향, league_changed의 이동 사유와 드래프트 라운드"}
             />
             {showSkeleton ? (
@@ -879,9 +956,13 @@ export function AdminAnalyticsDashboard() {
         {/* 일별 추이 · 환경 분포 */}
         <section aria-label="일별 추이" data-testid="analytics-daily-trend" className={CARD_CLASS}>
           <SectionHeader
-            title="일별 플레이 추이"
-            description="한국 시간(KST) 기준 날짜별 고유 플레이어 수 및 신규 커리어 생성 건수"
-            aside={ANALYTICS_RANGE_LABELS[range]}
+            title={report?.trendGranularity === 'hour' ? '시간별 플레이 추이' : '일별 플레이 추이'}
+            description={
+              report?.trendGranularity === 'hour'
+                ? '한국 시간(KST) 기준 시간별 고유 플레이어 수 및 신규 커리어 생성 건수'
+                : '한국 시간(KST) 기준 날짜별 고유 플레이어 수 및 신규 커리어 생성 건수'
+            }
+            aside={allLeagues(ANALYTICS_RANGE_LABELS[range])}
           />
           {showSkeleton ? (
             <div className="h-[220px] rounded-xl bg-[var(--t-g50)] animate-pulse" />
@@ -892,7 +973,7 @@ export function AdminAnalyticsDashboard() {
 
         <section aria-label="접속 환경" data-testid="analytics-dist-env" className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className={CARD_CLASS}>
-            <SectionHeader title="기기별 플레이어" description="기기 유형별 고유 플레이어 수" />
+            <SectionHeader title="기기별 플레이어" description="기기 유형별 고유 플레이어 수" aside={allLeagues()} />
             {showSkeleton ? (
               <SkeletonRows count={3} />
             ) : (
@@ -905,7 +986,7 @@ export function AdminAnalyticsDashboard() {
             )}
           </div>
           <div className={CARD_CLASS}>
-            <SectionHeader title="게임 버전별 이벤트" description="game_version별 이벤트 수" />
+            <SectionHeader title="게임 버전별 이벤트" description="game_version별 이벤트 수" aside={allLeagues()} />
             {showSkeleton ? (
               <SkeletonRows count={2} />
             ) : (
@@ -928,7 +1009,7 @@ export function AdminAnalyticsDashboard() {
             <SectionHeader
               title="최근 주요 마일스톤 로그"
               description="세션 시작을 제외한 최신 30건 (선수명·개인정보 미포함). 항목을 누르면 원본 payload JSON이 펼쳐집니다."
-              aside={report ? `${report.recentLogs.length}건 표시` : undefined}
+              aside={report ? `${leagueLabel ? `${leagueScopeNote} · ` : ''}${report.recentLogs.length}건 표시` : undefined}
             />
           </div>
           {showSkeleton ? (
