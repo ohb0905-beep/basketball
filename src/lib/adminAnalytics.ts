@@ -26,6 +26,7 @@ export const ANALYTICS_EVENT_LABELS: Record<AnalyticsEventName, string> = {
   career_reset: '중도 초기화',
   creation_started: '생성 화면 진입',
   draft_completed: '드래프트',
+  survey_response: '난이도 설문',
 };
 
 export const ANALYTICS_DEVICE_LABELS: Record<AnalyticsDeviceType | 'unknown', string> = {
@@ -273,6 +274,11 @@ export function summarizeMilestonePayload(
       const pick = asNumber(p.pickNumber);
       const ovr = asNumber(p.overall);
       return `${type} 드래프트 · ${pick !== null ? `#${pick} 지명` : '미지명'}${ovr !== null ? ` · OVR ${ovr}` : ''}`;
+    }
+    case 'survey_response': {
+      if (p.status === 'skipped') return '난이도 설문 건너뜀';
+      const r = (key: string) => asNumber(p[key]) ?? '-';
+      return `난이도 설문 · 병역 ${r('militaryExemptionRating')} · NBA 진출 ${r('nbaEntryRating')} · NBA PO ${r('nbaPlayoffsRating')} · KBL·해외 ${r('kblOverseasRating')} · 고교 속도 ${r('hsPacingRating')}${p.hasComment ? ' · 의견 있음' : ''}`;
     }
     default:
       return '플레이 이벤트 기록';

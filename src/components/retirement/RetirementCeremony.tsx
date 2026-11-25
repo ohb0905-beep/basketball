@@ -28,6 +28,8 @@ import {
 } from '../../types/game';
 import { formatCurrencyDetailed } from '../../utils/formatters';
 import { TeamEmblem } from '../common/TeamEmblem';
+import { hasSeenSurvey, markSurveySeen } from '../../lib/survey';
+import { RetirementSurveyModal } from './RetirementSurveyModal';
 import { CareerTrajectoryChart } from './CareerTrajectoryChart';
 import { JerseyRetirementStage } from './JerseyRetirementStage';
 import { TrophyCabinetSection } from './TrophyCabinetSection';
@@ -379,17 +381,28 @@ export function RetirementCeremony({
   const [slideDirection, setSlideDirection] = useState<1 | -1>(1);
   const [archiveTab, setArchiveTab] = useState<ArchiveTabKey>('SUMMARY');
 
+  const [surveyOpen, setSurveyOpen] = useState(false);
+
   const safeChapterIdx = Math.min(chapterIdx, Math.max(0, chapters.length - 1));
   const currentChapter = chapters[safeChapterIdx];
 
+  // 1.1.2 난이도 설문: 업데이트 후 처음 완주한 커리어의 전체 리포트 진입 시 한 번만 띄웁니다.
+  const enterArchive = useCallback(() => {
+    setViewMode('ARCHIVE');
+    if (!isReplayMode && career && !hasSeenSurvey()) {
+      markSurveySeen();
+      setSurveyOpen(true);
+    }
+  }, [isReplayMode, career]);
+
   const handleNextChapter = useCallback(() => {
     if (safeChapterIdx >= chapters.length - 1) {
-      setViewMode('ARCHIVE');
+      enterArchive();
       return;
     }
     setSlideDirection(1);
     setChapterIdx((prev) => Math.min(chapters.length - 1, prev + 1));
-  }, [safeChapterIdx, chapters.length]);
+  }, [safeChapterIdx, chapters.length, enterArchive]);
 
   const handlePrevChapter = useCallback(() => {
     if (safeChapterIdx <= 0) return;
@@ -456,6 +469,14 @@ export function RetirementCeremony({
           : 'max-w-[660px]'
       }`}
     >
+      {career && !isReplayMode && (
+        <RetirementSurveyModal
+          open={surveyOpen}
+          career={career}
+          onClose={() => setSurveyOpen(false)}
+        />
+      )}
+
       {/* 재감상 모드 상단 복귀 링크 */}
       {isReplayMode && onCloseReplay && (
         <div className="flex items-center justify-between gap-2">
@@ -493,7 +514,7 @@ export function RetirementCeremony({
               <button
                 type="button"
                 data-testid="skip-to-archive-btn"
-                onClick={() => setViewMode('ARCHIVE')}
+                onClick={enterArchive}
                 className="min-h-[36px] px-2.5 rounded-xl text-[12px] font-semibold text-[var(--t-g500)] hover:text-[var(--t-g900)] hover:bg-[var(--t-g100)] inline-flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
               >
                 <span>전체 리포트</span>
