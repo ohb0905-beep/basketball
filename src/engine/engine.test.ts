@@ -2301,7 +2301,7 @@ test('30. Realistic 1-Possession Shooting Map (<=3pts), Zero Quarter-Start Score
 test('31. 역대 리그 기록실 경신·추격, 명예의 전당 도감, 세이브 마이그레이션 및 하단 도크 상태 검증', () => {
   const initialBook = createInitialRecordBook();
   const totalSlots = Object.values(initialBook).reduce((acc, arr) => acc + arr.length, 0);
-  assert.equal(totalSlots, 73, '7 leagues x 7 categories + NBA/KBL/EuroLeague x 8 categories = 73 baseline records');
+  assert.equal(totalSlots, 71, '6 leagues x 7 categories + US HS 5 categories + NBA/KBL/EuroLeague x 8 categories = 71 baseline records');
 
   const log2032 = createSeasonLog({
     year: 2032,
@@ -2414,7 +2414,7 @@ test('31. 역대 리그 기록실 경신·추격, 명예의 전당 도감, 세�
   assert.equal(migrated.hofList[0].legacyTitle, '역대 최고 선수 (GOAT)');
   assert.equal(migrated.hofList[0].legacyEmoji, '');
   const migratedSlots = Object.values(migrated.recordBook).reduce((acc, arr) => acc + arr.length, 0);
-  assert.equal(migratedSlots, 73, '예전 기록집도 미국 고교 기록 칸(1.2.0)을 채워 불러와야 합니다');
+  assert.equal(migratedSlots, 71, '예전 기록집도 미국 고교 기록 칸(1.2.0)을 채워 불러와야 합니다');
   assert.equal(migrated.career?.nationality, 'KOR', '국적이 없는 예전 세이브는 대한민국 국적으로 이어집니다');
 
   // Bottom dock visibility helper stays true during finished playoff bracket

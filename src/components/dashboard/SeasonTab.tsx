@@ -712,7 +712,7 @@ export function SeasonTab() {
                       <TeamEmblem team={career.team} size="md" />
                       <div className="min-w-0 flex-1">
                         <span className="block text-[11px] font-bold text-[var(--t-accent-ink)]">
-                          기존 계약 유지 · 재계약 없음
+                          {LEAGUE_CONFIG[career.league].shortName} · 기존 계약 유지 · 재계약 없음
                         </span>
                         <span className="block text-[16px] font-bold text-[var(--t-g900)] truncate">
                           {career.team.name}
@@ -820,7 +820,8 @@ export function SeasonTab() {
                                 <Lock className="w-3.5 h-3.5 text-[var(--t-g400)] shrink-0" />
                               )}
                             </div>
-                            <p className="text-[12px] text-[var(--t-g500)] truncate tabular-nums">
+                            <p className="text-[12px] text-[var(--t-g500)] line-clamp-2 tabular-nums leading-snug">
+                              <OptionLeagueLabel option={option} />
                               {dirLabel} · {roleText} · {chanceText}
                             </p>
                           </div>
@@ -879,7 +880,8 @@ export function SeasonTab() {
                           <Lock className="w-3.5 h-3.5 text-[var(--t-g400)] shrink-0" />
                         )}
                       </div>
-                      <p className="text-[12px] text-[var(--t-g500)] truncate tabular-nums">
+                      <p className="text-[12px] text-[var(--t-g500)] line-clamp-2 tabular-nums leading-snug">
+                        <OptionLeagueLabel option={option} />
                         {dirLabel} · {roleText} · {salaryText}
                       </p>
                     </div>
@@ -1545,5 +1547,30 @@ export function SeasonTab() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 1.2.0: 오프시즌 제안 카드에 구단이 속한 리그를 표시합니다 (예: "NCAA · 리빌딩 · 코어 유망주 육성 · 아마추어 4년").
+ * 줄이 잘려도 보이도록 맨 앞에 둡니다.
+ */
+function OptionLeagueLabel({ option }: { option: OffseasonOption }) {
+  // 은퇴·은퇴 투어 카드는 계약이 아니므로 리그를 붙이지 않습니다.
+  if (option.actionType.startsWith('RETIRE') || option.actionType === 'START_FAREWELL_TOUR') {
+    return null;
+  }
+  const league = option.targetTeam?.league ?? option.targetLeague;
+  const leagueInfo = league ? LEAGUE_CONFIG[league] : undefined;
+  if (!leagueInfo) return null;
+  return (
+    <>
+      <span
+        data-testid="offseason-option-league"
+        className="font-bold text-[var(--t-accent-ink)]"
+      >
+        {leagueInfo.shortName}
+      </span>
+      {' · '}
+    </>
   );
 }
