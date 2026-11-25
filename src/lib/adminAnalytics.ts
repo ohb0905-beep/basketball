@@ -293,6 +293,7 @@ export function summarizeMilestonePayload(
       const badges: string[] = [];
       if (p.wonChampionship) badges.push('우승');
       if (p.wonMvp) badges.push('MVP');
+      if (p.wonFmvp || p.wonFinalsMvp) badges.push('FMVP');
       if (p.allStarSelected) badges.push('올스타');
       const badgeSuffix = badges.length > 0 ? ` · ${badges.join('/')}` : '';
       return `${season !== null ? `${season}시즌` : '시즌'} · ${lg}${ovr !== null ? ` · OVR ${ovr}` : ''}${ppg !== null ? ` · ${ppg} PPG` : ''}${badgeSuffix}`;
@@ -302,16 +303,19 @@ export function summarizeMilestonePayload(
       const toLg = leagueLabel(asString(p.toLeague));
       const season = asNumber(p.seasonNumber);
       const ovr = asNumber(p.overall);
-      return `${fromLg} → ${toLg}${season !== null ? ` (${season}시즌)` : ''}${ovr !== null ? ` · OVR ${ovr}` : ''}`;
+      const pick = asNumber(p.draftPick);
+      const pickSuffix = pick !== null ? ` · #${pick} 지명` : '';
+      return `${fromLg} → ${toLg}${season !== null ? ` (${season}시즌)` : ''}${pickSuffix}${ovr !== null ? ` · OVR ${ovr}` : ''}`;
     }
     case 'career_ended': {
       const totalSeasons = asNumber(p.totalSeasons);
       const finalLg = leagueLabel(asString(p.finalLeague));
       const peakOvr = asNumber(p.peakOverall);
-      const champs = asNumber(p.championshipCount) ?? 0;
-      const mvps = asNumber(p.mvpCount) ?? 0;
+      const champs = asNumber(p.totalChampionships) ?? asNumber(p.championshipCount) ?? 0;
+      const mvps = asNumber(p.totalMvp) ?? asNumber(p.mvpCount) ?? 0;
+      const fmvps = asNumber(p.totalFmvp) ?? asNumber(p.finalsMvpCount) ?? 0;
       const tier = asString(p.legacyTier);
-      return `${totalSeasons !== null ? `총 ${totalSeasons}시즌` : '은퇴'} · ${finalLg}${peakOvr !== null ? ` · 최고 OVR ${peakOvr}` : ''} · 우승 ${champs} · MVP ${mvps}${tier ? ` · ${tier}` : ''}`;
+      return `${totalSeasons !== null ? `총 ${totalSeasons}시즌` : '은퇴'} · ${finalLg}${peakOvr !== null ? ` · 최고 OVR ${peakOvr}` : ''} · 우승 ${champs} · MVP ${mvps}${fmvps > 0 ? ` · FMVP ${fmvps}` : ''}${tier ? ` · ${tier}` : ''}`;
     }
     case 'career_reset': {
       const lg = leagueLabel(asString(p.abandonedLeague));

@@ -1,12 +1,23 @@
 'use client';
 
 import { GAME_VERSION } from '../config/appMeta';
-import type { CareerState, HallOfFameEntry, ViewState } from '../types/game';
+import type {
+  CareerState,
+  HallOfFameEntry,
+  LeagueId,
+  SeasonBoxScore,
+  ViewState,
+} from '../types/game';
 import type {
   AnalyticsDeviceType,
   AnalyticsEventName,
   AnalyticsEventPayloadMap,
   AnalyticsEventRequestBody,
+  LeagueChangeReason,
+  LeagueHonorSummary,
+  NormalizedPlayerRole,
+  NormalizedPlayoffResult,
+  SeasonAwardCode,
 } from './analyticsSchema';
 
 const ANALYTICS_ENDPOINT = '/api/analytics/event';
@@ -14,15 +25,195 @@ const ANALYTICS_ENDPOINT = '/api/analytics/event';
 const ANONYMOUS_ID_STORAGE_KEY = 'road_to_mvp_analytics_anon_id_v1';
 const SESSION_ID_STORAGE_KEY = 'road_to_mvp_analytics_session_id_v1';
 const DEDUPE_STORAGE_KEY = 'road_to_mvp_analytics_dedupe_v1';
+const PERSISTENT_DEDUPE_STORAGE_KEY = 'road_to_mvp_analytics_milestone_dedupe_v1';
 const CAREER_RUN_MAP_STORAGE_KEY = 'road_to_mvp_analytics_career_runs_v1';
 
 const MAX_TRACKED_CAREER_RUNS = 20;
 const MAX_STORED_DEDUPE_KEYS = 120;
+const MAX_PERSISTENT_DEDUPE_KEYS = 200;
+
+const LEAGUE_TIER_RANK: Record<LeagueId, number> = {
+  HIGH_SCHOOL: 1,
+  U_LEAGUE: 2,
+  NCAA: 3,
+  KBL: 4,
+  B_LEAGUE: 4,
+  NBL: 4,
+  GLEAGUE: 5,
+  EUROLEAGUE: 5,
+  NBA: 6,
+};
 
 let memoryAnonymousId: string | null = null;
 let memorySessionId: string | null = null;
 const memoryDedupeSet = new Set<string>();
+const memoryPersistentDedupeSet = new Set<string>();
 const memoryCareerRunMap = new Map<string, string>();
+
+function round1(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * 게임 엔진의 한국어 역할 문자열을 분석용 표준 역할 코드로 정규화합니다.
+ */
+export function normalizePlayerRole(rawRole: string | null | undefined): NormalizedPlayerRole {
+  const text = (rawRole || '').trim();
+  if (text.includes('프랜차이즈') || text.includes('에이스') || text.includes('1옵션')) {
+    return 'franchise_ace';
+  }
+  if (text.includes('주전') || text.includes('스타터')) {
+    return 'starter';
+  }
+  if (text.includes('식스맨')) {
+    return 'sixth_man';
+  }
+  if (text.includes('투웨이')) {
+    return 'two_way';
+  }
+  if (text.includes('가비지') || text.includes('끝자리')) {
+    return 'garbage_time';
+  }
+  return 'bench';
+}
+
+export function isStarterRole(role: NormalizedPlayerRole): boolean {
+  return role === 'starter' || role === 'franchise_ace';
+}
+
+/**
+ * 실제 플레이오프 결과 문자열 및 우승 여부를 표준 코드로 정규화합니다.
+ */
+export function normalizePlayoffResult(
+  rawResult: string | null | undefined,
+  wonChampionship: boolean
+): NormalizedPlayoffResult {
+  if (wonChampionship) return 'champion';
+  const text = (rawResult || '').trim();
+  if (!text) return 'missed';
+
+  if (text.includes('준우승')) return 'finals_loss';
+  if (text.includes('우승')) return 'champion';
+  if (
+    text.includes('컨퍼런스 파이널') ||
+    text.includes('세미파이널') ||
+    text.includes('Final Four') ||
+    text.includes('4강')
+  ) {
+    return 'semifinals';
+  }
+  if (text.includes('8강')) return 'quarterfinals';
+  if (text.includes('플레이인')) return 'play_in';
+  if (
+    text.includes('1R') ||
+    text.includes('6강') ||
+    text.includes('16강') ||
+    text.includes('진출')
+  ) {
+    return 'round1';
+  }
+  if (text.includes('PO 탈락') || text.includes('토너먼트 탈락')) {
+    return 'missed';
+  }
+  return 'missed';
+}
+
+/**
+ * 실제 SeasonBoxScore에 존재하는 시즌 수상 내역을 표준 코드 배열로 추출합니다.
+ */
+export function extractSeasonAwards(
+  log: SeasonBoxScore | null | undefined
+): SeasonAwardCode[] {
+  if (!log) return [];
+  const awards: SeasonAwardCode[] = [];
+  if (log.wonRookieOfYear) awards.push('ROY');
+  if (log.wonDpoy) awards.push('DPOY');
+  if (log.wonSixthMan) awards.push('6MOY');
+  if (log.wonMip) awards.push('MIP');
+  if (log.allStarSelected) awards.push('ALL_STAR');
+  if (log.allLeagueTeam === 1) awards.push('ALL_LEAGUE_1ST');
+  else if (log.allLeagueTeam === 2) awards.push('ALL_LEAGUE_2ND');
+  else if (log.allLeagueTeam === 3) awards.push('ALL_LEAGUE_3RD');
+  return awards;
+}
+
+/**
+ * 리그 변경 전/후 커리어 상태를 바탕으로 이동 사유를 추론합니다.
+ */
+export function inferLeagueChangeReason(
+  prev: TrackableCareerStoreSnapshot,
+  next: TrackableCareerStoreSnapshot
+): LeagueChangeReason {
+  const prevCareer = prev.career;
+  const nextCareer = next.career;
+  if (!prevCareer || !nextCareer) return 'free_agency';
+
+  if (nextCareer.contractType === 'MILITARY_SERVICE' || nextCareer.team.isMilitaryTeam) {
+    return 'military_enlist';
+  }
+  if (prevCareer.contractType === 'MILITARY_SERVICE' || prevCareer.team.isMilitaryTeam) {
+    return 'military_discharge';
+  }
+  if (
+    prev.view === 'DRAFT_LIVE' ||
+    Boolean(prevCareer.draftResult) ||
+    (nextCareer.draftPedigreePick != null && prevCareer.draftPedigreePick == null)
+  ) {
+    return 'draft';
+  }
+  if (nextCareer.contractType === 'SUMMER_LEAGUE_INVITE') {
+    return 'summer_league';
+  }
+  if (nextCareer.contractType === 'TWO_WAY') {
+    return 'two_way';
+  }
+
+  const fromRank = LEAGUE_TIER_RANK[prevCareer.league] ?? 0;
+  const toRank = LEAGUE_TIER_RANK[nextCareer.league] ?? 0;
+  if (toRank > fromRank) return 'promotion';
+  if (toRank < fromRank) return 'relegation';
+  return 'free_agency';
+}
+
+/**
+ * 커리어 시즌 로그와 현재 리그 중 도달한 최고 위상 리그를 계산합니다.
+ */
+export function resolvePeakLeague(career: CareerState): LeagueId {
+  let peak: LeagueId = career.league;
+  let peakRank = LEAGUE_TIER_RANK[peak] ?? 0;
+  for (const log of career.seasonLogs) {
+    const rank = LEAGUE_TIER_RANK[log.league] ?? 0;
+    if (rank > peakRank) {
+      peakRank = rank;
+      peak = log.league;
+    }
+  }
+  return peak;
+}
+
+/**
+ * 커리어 시즌 로그에서 리그별 시즌 수·우승·MVP·FMVP 영예를 집계합니다.
+ */
+export function buildLeagueHonorsSummary(
+  seasonLogs: SeasonBoxScore[]
+): Partial<Record<LeagueId, LeagueHonorSummary>> {
+  const honors: Partial<Record<LeagueId, LeagueHonorSummary>> = {};
+  for (const log of seasonLogs) {
+    const existing = honors[log.league] ?? {
+      seasons: 0,
+      championships: 0,
+      mvp: 0,
+      fmvp: 0,
+    };
+    existing.seasons += 1;
+    if (log.wonChampionship) existing.championships += 1;
+    if (log.wonMvp) existing.mvp += 1;
+    if (log.wonFinalsMvp) existing.fmvp += 1;
+    honors[log.league] = existing;
+  }
+  return honors;
+}
 
 function generateAnonymousUuid(): string {
   try {
@@ -198,9 +389,9 @@ export function detectAnalyticsDeviceType(): AnalyticsDeviceType {
   }
 }
 
-function readSessionDedupeKeys(): string[] {
+function readDedupeKeys(storage: Storage | undefined, key: string): string[] {
   if (typeof window === 'undefined') return [];
-  const raw = safeStorageGet(window.sessionStorage, DEDUPE_STORAGE_KEY);
+  const raw = safeStorageGet(storage, key);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -213,25 +404,37 @@ function readSessionDedupeKeys(): string[] {
   return [];
 }
 
-function hasAndMarkDedupeKey(dedupeKey: string): boolean {
-  if (memoryDedupeSet.has(dedupeKey)) {
+function hasAndMarkDedupeKey(
+  dedupeKey: string,
+  scope: 'session' | 'persistent'
+): boolean {
+  const memSet =
+    scope === 'persistent' ? memoryPersistentDedupeSet : memoryDedupeSet;
+  if (memSet.has(dedupeKey)) {
     return true;
   }
 
-  const persisted = readSessionDedupeKeys();
+  const storage =
+    typeof window !== 'undefined'
+      ? scope === 'persistent'
+        ? window.localStorage
+        : window.sessionStorage
+      : undefined;
+  const storageKey =
+    scope === 'persistent' ? PERSISTENT_DEDUPE_STORAGE_KEY : DEDUPE_STORAGE_KEY;
+  const maxKeys =
+    scope === 'persistent' ? MAX_PERSISTENT_DEDUPE_KEYS : MAX_STORED_DEDUPE_KEYS;
+
+  const persisted = readDedupeKeys(storage, storageKey);
   if (persisted.includes(dedupeKey)) {
-    memoryDedupeSet.add(dedupeKey);
+    memSet.add(dedupeKey);
     return true;
   }
 
-  memoryDedupeSet.add(dedupeKey);
+  memSet.add(dedupeKey);
   if (typeof window !== 'undefined') {
-    const nextKeys = [...persisted, dedupeKey].slice(-MAX_STORED_DEDUPE_KEYS);
-    safeStorageSet(
-      window.sessionStorage,
-      DEDUPE_STORAGE_KEY,
-      JSON.stringify(nextKeys)
-    );
+    const nextKeys = [...persisted, dedupeKey].slice(-maxKeys);
+    safeStorageSet(storage, storageKey, JSON.stringify(nextKeys));
   }
   return false;
 }
@@ -239,6 +442,11 @@ function hasAndMarkDedupeKey(dedupeKey: string): boolean {
 export interface TrackGameEventOptions {
   careerRunId?: string | null;
   dedupeKey?: string;
+  /**
+   * 'session': 탭 세션 단위 중복 차단 (session_start용)
+   * 'persistent': 동일 커리어·동일 시즌의 재진입/새로고침/새 탭 중복 차단 (마일스톤용)
+   */
+  dedupeScope?: 'session' | 'persistent';
 }
 
 /**
@@ -256,8 +464,12 @@ export function trackGameEvent<E extends AnalyticsEventName>(
   try {
     const sessionId = getOrCreateSessionId();
     if (options.dedupeKey) {
-      const scopedKey = `${sessionId}:${options.dedupeKey}`;
-      if (hasAndMarkDedupeKey(scopedKey)) {
+      const scope = options.dedupeScope ?? 'session';
+      const resolvedKey =
+        scope === 'persistent'
+          ? options.dedupeKey
+          : `${sessionId}:${options.dedupeKey}`;
+      if (hasAndMarkDedupeKey(resolvedKey, scope)) {
         return;
       }
     }
@@ -343,14 +555,18 @@ export function emitCareerStateTransitionEvents(
         heightCm: nextCareer.heightCm,
         startingLeague: nextCareer.league,
         startingTeamId: nextCareer.team.id,
+        startingAge: nextCareer.age,
         growthDna: nextCareer.growthDna ?? null,
         playstyle: nextCareer.playstyle ?? null,
         innateTrait: nextCareer.traits?.[0] ?? null,
+        trainingFocus: nextCareer.trainingFocus,
         initialOvr: nextCareer.ovr,
+        initialOverall: nextCareer.ovr,
       },
       {
         careerRunId,
         dedupeKey: `career_created:${careerRunId}`,
+        dedupeScope: 'persistent',
       }
     );
   }
@@ -366,32 +582,76 @@ export function emitCareerStateTransitionEvents(
     const latestLog =
       nextCareer.seasonLogs[nextCareer.seasonLogs.length - 1] ?? null;
 
+    const wonChampionship = Boolean(latestLog?.wonChampionship);
+    const wonMvp = Boolean(latestLog?.wonMvp);
+    const wonFmvp = Boolean(latestLog?.wonFinalsMvp);
+    const playoffResult = normalizePlayoffResult(
+      latestLog?.playoffResult,
+      wonChampionship
+    );
+    const madePlayoffs = playoffResult !== 'missed';
+    const normalizedRole = normalizePlayerRole(latestLog?.role ?? nextCareer.role);
+    const injuredGames = Math.max(0, Math.round(latestLog?.injuredGamesMissed ?? 0));
+    const hadInjury =
+      injuredGames > 0 ||
+      (Boolean(latestLog?.injurySeverity) && latestLog?.injurySeverity !== 'NONE');
+
     dispatcher.track(
       'season_completed',
       {
+        league: latestLog?.league ?? nextCareer.league,
+        position: nextCareer.primaryPos,
         seasonNumber: latestLog?.seasonNumber ?? nextCareer.seasonsPlayed,
         seasonYear: latestLog?.year ?? nextCareer.seasonYear,
-        league: latestLog?.league ?? nextCareer.league,
+        age: latestLog?.age ?? nextCareer.age,
         teamName:
           latestLog?.teamShortName ||
           latestLog?.teamName ||
           nextCareer.team.shortName ||
           nextCareer.team.name,
+
+        wonChampionship,
+        wonMvp,
+        wonFmvp,
+        wonFinalsMvp: wonFmvp,
+        allStarSelected: Boolean(latestLog?.allStarSelected),
+        awards: extractSeasonAwards(latestLog),
+
+        madePlayoffs,
+        playoffResult,
+        teamWins: latestLog?.wins ?? 0,
+        teamLosses: latestLog?.losses ?? 0,
+        teamRank:
+          typeof latestLog?.teamRank === 'number' && Number.isFinite(latestLog.teamRank)
+            ? latestLog.teamRank
+            : null,
+
         overall: nextCareer.ovr,
         seasonOvr: latestLog?.ovr ?? nextCareer.ovr,
-        age: latestLog?.age ?? nextCareer.age,
+        overallDelta: Math.round(nextCareer.ovr - prevCareer.ovr),
+        role: normalizedRole,
+        isStarter: isStarterRole(normalizedRole),
+        mpg: round1(latestLog?.mpg ?? 0),
+
         gamesPlayed: latestLog?.gp ?? 0,
-        ppg: latestLog?.ppg ?? 0,
-        rpg: latestLog?.rpg ?? 0,
-        apg: latestLog?.apg ?? 0,
-        wonChampionship: Boolean(latestLog?.wonChampionship),
-        wonMvp: Boolean(latestLog?.wonMvp),
-        wonFinalsMvp: Boolean(latestLog?.wonFinalsMvp),
-        allStarSelected: Boolean(latestLog?.allStarSelected),
+        ppg: round1(latestLog?.ppg ?? 0),
+        rpg: round1(latestLog?.rpg ?? 0),
+        apg: round1(latestLog?.apg ?? 0),
+        spg: round1(latestLog?.spg ?? 0),
+        bpg: round1(latestLog?.bpg ?? 0),
+        fgPct: round1(latestLog?.fgPct ?? 0),
+        threePtPct: round1(latestLog?.tpPct ?? 0),
+
+        trainingFocus: prevCareer.trainingFocus ?? nextCareer.trainingFocus,
+        injuredGames,
+        hadInjury,
+        contractType: latestLog?.contractType ?? nextCareer.contractType,
+        salary: Math.round(latestLog?.salaryEarned ?? nextCareer.annualSalary ?? 0),
       },
       {
         careerRunId,
         dedupeKey: `season_completed:${careerRunId}:${nextCareer.seasonsPlayed}`,
+        dedupeScope: 'persistent',
       }
     );
   }
@@ -404,20 +664,38 @@ export function emitCareerStateTransitionEvents(
     prevCareer.league !== nextCareer.league
   ) {
     const careerRunId = dispatcher.resolveCareerRunId(nextCareer.id);
+    const changeReason = inferLeagueChangeReason(prev, next);
+    const draftSource = prevCareer.draftResult ?? nextCareer.draftResult;
+    const draftPick =
+      draftSource?.pickNumber ??
+      (nextCareer.draftPedigreePick != null && prevCareer.draftPedigreePick == null
+        ? nextCareer.draftPedigreePick
+        : null);
+    const draftRound =
+      draftSource?.round ??
+      (nextCareer.draftPedigreeRound != null && prevCareer.draftPedigreeRound == null
+        ? nextCareer.draftPedigreeRound
+        : null);
+
     dispatcher.track(
       'league_changed',
       {
         fromLeague: prevCareer.league,
         toLeague: nextCareer.league,
+        position: nextCareer.primaryPos,
         seasonNumber: nextCareer.seasonsPlayed,
         seasonYear: nextCareer.seasonYear,
         overall: nextCareer.ovr,
         age: nextCareer.age,
         contractType: nextCareer.contractType,
+        changeReason,
+        draftPick,
+        draftRound,
       },
       {
         careerRunId,
         dedupeKey: `league_changed:${careerRunId}:${nextCareer.seasonsPlayed}:${prevCareer.league}:${nextCareer.league}`,
+        dedupeScope: 'persistent',
       }
     );
   }
@@ -430,27 +708,56 @@ export function emitCareerStateTransitionEvents(
 
   if (nextCareer && enteredRetirement) {
     const careerRunId = dispatcher.resolveCareerRunId(nextCareer.id);
+    const gp = nextCareer.totals.gp ?? 0;
+    const points = nextCareer.totals.points ?? 0;
+    const rebounds = nextCareer.totals.rebounds ?? 0;
+    const assists = nextCareer.totals.assists ?? 0;
+    const legacyTier = nextCareer.legacyEvaluation?.tierId ?? null;
+    const retirementReason = nextCareer.retirementReason ?? 'VOLUNTARY_HONOR';
+    const hallOfFame =
+      legacyTier === 'GOAT' || legacyTier === 'FIRST_BALLOT_HOF';
+
     dispatcher.track(
       'career_ended',
       {
+        position: nextCareer.primaryPos,
         totalSeasons: nextCareer.seasonsPlayed,
         finalLeague: nextCareer.league,
+        peakLeague: resolvePeakLeague(nextCareer),
         finalAge: nextCareer.age,
         peakOverall: nextCareer.peakOvr,
         finalOverall: nextCareer.ovr,
-        totalGames: nextCareer.totals.gp,
-        mvpCount: nextCareer.totals.mvps,
-        championshipCount: nextCareer.totals.championships,
-        nbaChampionshipCount: nextCareer.totals.nbaChampionships,
-        finalsMvpCount: nextCareer.totals.finalsMvps,
-        allStarCount: nextCareer.totals.allStars,
-        retirementReason: nextCareer.retirementReason ?? 'VOLUNTARY_HONOR',
-        legacyTier: nextCareer.legacyEvaluation?.tierId ?? null,
+        totalGames: gp,
+
+        totalChampionships: nextCareer.totals.championships ?? 0,
+        totalMvp: nextCareer.totals.mvps ?? 0,
+        totalFmvp: nextCareer.totals.finalsMvps ?? 0,
+        totalAllStar: nextCareer.totals.allStars ?? 0,
+        totalAllLeague: nextCareer.totals.allLeagueSelections ?? 0,
+        totalDpoy: nextCareer.totals.dpoys ?? 0,
+        totalSixthMan: nextCareer.totals.sixthManAwards ?? 0,
+        totalMip: nextCareer.totals.mips ?? 0,
+        mvpCount: nextCareer.totals.mvps ?? 0,
+        championshipCount: nextCareer.totals.championships ?? 0,
+        nbaChampionshipCount: nextCareer.totals.nbaChampionships ?? 0,
+        finalsMvpCount: nextCareer.totals.finalsMvps ?? 0,
+        allStarCount: nextCareer.totals.allStars ?? 0,
+        leagueHonors: buildLeagueHonorsSummary(nextCareer.seasonLogs),
+
+        endingType: legacyTier ?? retirementReason,
+        retirementReason,
+        legacyTier,
+        hallOfFame,
         jerseyRetired: Boolean(nextCareer.legacyEvaluation?.jerseyRetired),
+        careerPoints: Math.round(points),
+        careerPpg: gp > 0 ? round1(points / gp) : 0,
+        careerRpg: gp > 0 ? round1(rebounds / gp) : 0,
+        careerApg: gp > 0 ? round1(assists / gp) : 0,
       },
       {
         careerRunId,
         dedupeKey: `career_ended:${careerRunId}`,
+        dedupeScope: 'persistent',
       }
     );
   }
@@ -463,18 +770,36 @@ export function emitCareerStateTransitionEvents(
     nextCareer === null
   ) {
     const prevCareerRunId = dispatcher.resolveCareerRunId(prevCareer.id);
+    const abandonedRole = normalizePlayerRole(prevCareer.role);
+    const hadWonChampionship =
+      (prevCareer.totals.championships ?? 0) > 0 ||
+      prevCareer.seasonLogs.some((l) => l.wonChampionship);
+    const hadWonMvp =
+      (prevCareer.totals.mvps ?? 0) > 0 ||
+      prevCareer.seasonLogs.some((l) => l.wonMvp);
+    const hadWonFmvp =
+      (prevCareer.totals.finalsMvps ?? 0) > 0 ||
+      prevCareer.seasonLogs.some((l) => l.wonFinalsMvp);
+
     dispatcher.track(
       'career_reset',
       {
+        position: prevCareer.primaryPos,
         abandonedLeague: prevCareer.league,
         abandonedSeason: prevCareer.seasonsPlayed,
         abandonedSeasonYear: prevCareer.seasonYear,
         abandonedAge: prevCareer.age,
         abandonedOverall: prevCareer.ovr,
+        abandonedRole,
+        wasStarter: isStarterRole(abandonedRole),
+        hadWonChampionship,
+        hadWonMvp,
+        hadWonFmvp,
       },
       {
         careerRunId: prevCareerRunId,
         dedupeKey: `career_reset:${prevCareerRunId}`,
+        dedupeScope: 'persistent',
       }
     );
   }
@@ -540,6 +865,7 @@ export function attachCareerAnalyticsTracker(
       {
         careerRunId: initialCareerRunId,
         dedupeKey: 'session_start',
+        dedupeScope: 'session',
       }
     );
 
@@ -595,5 +921,6 @@ export function __resetAnalyticsClientMemoryForTest(): void {
   memoryAnonymousId = null;
   memorySessionId = null;
   memoryDedupeSet.clear();
+  memoryPersistentDedupeSet.clear();
   memoryCareerRunMap.clear();
 }

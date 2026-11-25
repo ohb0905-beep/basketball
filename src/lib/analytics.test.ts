@@ -6,17 +6,26 @@ import { NextRequest } from 'next/server';
 import {
   __resetAnalyticsClientMemoryForTest,
   attachCareerAnalyticsTracker,
+  buildLeagueHonorsSummary,
   emitCareerStateTransitionEvents,
+  extractSeasonAwards,
+  isStarterRole,
+  normalizePlayerRole,
+  normalizePlayoffResult,
+  resolvePeakLeague,
   trackGameEvent,
   type SubscribableCareerStore,
   type TrackableCareerStoreSnapshot,
 } from './analytics';
 import {
   ANALYTICS_EVENT_NAMES,
+  MAX_ANALYTICS_ARRAY_LENGTH,
   MAX_ANALYTICS_PAYLOAD_BYTES,
   createAnalyticsRateLimiter,
   validateAnalyticsEventPayload,
+  type SeasonCompletedPayload,
 } from './analyticsSchema';
+import { aggregateAnalyticsEvents } from './adminAnalytics';
 import { POST } from '../app/api/analytics/event/route';
 import {
   __resetAnalyticsSupabaseCooldownForTest,
@@ -61,20 +70,22 @@ function makeMockSeasonLog(
     teamName: '삼일상고',
     teamShortName: '삼일',
     contractType: 'AMATEUR',
-    role: '주전 포워드',
+    role: '주전 스타터',
     ovr: 66,
     gp: 24,
-    injuredGamesMissed: 0,
+    injuredGamesMissed: 2,
+    injurySeverity: 'MINOR',
     mpg: 28.5,
-    ppg: 18.2,
-    rpg: 6.1,
-    apg: 4.4,
-    spg: 1.5,
-    bpg: 0.7,
-    fgPct: 49.0,
-    tpPct: 37.5,
+    ppg: 18.24,
+    rpg: 6.12,
+    apg: 4.44,
+    spg: 1.52,
+    bpg: 0.74,
+    fgPct: 49.04,
+    tpPct: 37.54,
     wins: 21,
     losses: 3,
+    teamRank: 1,
     playoffResult: '우승',
     salaryEarned: 0,
     wonChampionship: true,
@@ -83,8 +94,8 @@ function makeMockSeasonLog(
     wonDpoy: false,
     wonSixthMan: false,
     wonMip: false,
-    wonRookieOfYear: false,
-    allStarSelected: false,
+    wonRookieOfYear: true,
+    allStarSelected: true,
     allLeagueTeam: 1,
     singleGameHighPts: 34,
     ...overrides,
@@ -101,7 +112,9 @@ function makeMockCareer(overrides: Partial<CareerState> = {}): CareerState {
     secondaryPos: 'SG',
     growthDna: 'STANDARD',
     playstyle: 'SCORER',
-    traits: ['CLUTCH_GENE'],
+    traits: ['CLUTCH_PERFORMER'],
+    trainingFocus: 'OUTSIDE_SHOOTING',
+    role: '벤치 로테이션',
     age: 17,
     seasonYear: 2026,
     seasonsPlayed: 0,
@@ -120,26 +133,29 @@ function makeMockCareer(overrides: Partial<CareerState> = {}): CareerState {
       defenseRating: 74,
     },
     contractType: 'AMATEUR',
-    contractSalaryManWon: 0,
+    annualSalary: 0,
     contractYearsLeft: 1,
     ovr: 62,
     peakOvr: 62,
+    draftResult: null,
+    draftPedigreePick: null,
+    draftPedigreeRound: null,
     totals: {
       gp: 0,
-      pts: 0,
-      reb: 0,
-      ast: 0,
-      stl: 0,
-      blk: 0,
+      points: 0,
+      rebounds: 0,
+      assists: 0,
+      steals: 0,
+      blocks: 0,
       championships: 0,
       nbaChampionships: 0,
       mvps: 0,
       finalsMvps: 0,
       allStars: 0,
-      allLeagueFirst: 0,
-      dpoy: 0,
-      sixthMan: 0,
-      mip: 0,
+      allLeagueSelections: 0,
+      dpoys: 0,
+      sixthManAwards: 0,
+      mips: 0,
     },
     seasonLogs: [],
     retirementReason: null,
@@ -326,17 +342,21 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   assert.equal(captured[0].eventName, 'career_created');
   assert.equal(captured[0].payload.position, 'SF');
   assert.equal(captured[0].payload.startingLeague, 'HIGH_SCHOOL');
+  assert.equal(captured[0].payload.initialOvr, 62);
+  assert.equal(captured[0].payload.initialOverall, 62);
+  assert.equal(captured[0].payload.trainingFocus, 'OUTSIDE_SHOOTING');
   assert.equal('name' in captured[0].payload, false);
   assert.equal(
     JSON.stringify(captured[0].payload).includes('민감한사용자입력선수명'),
     false
   );
 
-  // 2. season_completed
+  // 2. season_completed (고도화된 수상·플레이오프·성장·부상·메타 지표 검증)
   const afterSeason1 = makeMockCareer({
     seasonsPlayed: 1,
     ovr: 68,
     peakOvr: 68,
+    role: '주전 스타터',
     seasonLogs: [makeMockSeasonLog()],
   });
   emitCareerStateTransitionEvents(
@@ -346,43 +366,115 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   );
   assert.equal(captured[1].eventName, 'season_completed');
   assert.equal(captured[1].payload.seasonNumber, 1);
+  assert.equal(captured[1].payload.position, 'SF');
   assert.equal(captured[1].payload.ppg, 18.2);
+  assert.equal(captured[1].payload.threePtPct, 37.5);
   assert.equal(captured[1].payload.wonChampionship, true);
   assert.equal(captured[1].payload.wonMvp, true);
+  assert.equal(captured[1].payload.wonFmvp, true);
+  assert.equal(captured[1].payload.wonFinalsMvp, true);
+  assert.deepEqual(captured[1].payload.awards, [
+    'ROY',
+    'ALL_STAR',
+    'ALL_LEAGUE_1ST',
+  ]);
+  assert.equal(captured[1].payload.madePlayoffs, true);
+  assert.equal(captured[1].payload.playoffResult, 'champion');
+  assert.equal(captured[1].payload.teamWins, 21);
+  assert.equal(captured[1].payload.teamLosses, 3);
+  assert.equal(captured[1].payload.teamRank, 1);
+  assert.equal(captured[1].payload.overallDelta, 6);
+  assert.equal(captured[1].payload.role, 'starter');
+  assert.equal(captured[1].payload.isStarter, true);
+  assert.equal(captured[1].payload.trainingFocus, 'OUTSIDE_SHOOTING');
+  assert.equal(captured[1].payload.injuredGames, 2);
+  assert.equal(captured[1].payload.hadInjury, true);
 
-  // 3. league_changed (HIGH_SCHOOL -> KBL)
+  // 3. league_changed (HIGH_SCHOOL -> KBL 드래프트 지명 시나리오)
+  const draftPending = makeMockCareer({
+    ...afterSeason1,
+    draftResult: {
+      draftType: 'KBL',
+      round: 1,
+      pickNumber: 2,
+      draftedTeam: afterSeason1.team,
+      twoWayOfferTeam: null,
+      scoutingGrade: 88,
+    },
+  });
   const inKbl = makeMockCareer({
     seasonsPlayed: 1,
     seasonYear: 2027,
     age: 18,
     league: 'KBL',
     ovr: 70,
+    role: '핵심 식스맨',
     contractType: 'KBL_ROOKIE',
+    annualSalary: 12000,
+    draftPedigreePick: 2,
+    draftPedigreeRound: 1,
+    seasonLogs: [makeMockSeasonLog()],
+    totals: {
+      ...createdCareer.totals,
+      championships: 1,
+      mvps: 1,
+      finalsMvps: 1,
+    },
   });
   emitCareerStateTransitionEvents(
-    { view: 'DASHBOARD', career: afterSeason1, hofList: [] },
+    { view: 'DRAFT_LIVE', career: draftPending, hofList: [] },
     { view: 'DASHBOARD', career: inKbl, hofList: [] },
     dispatcher
   );
   assert.equal(captured[2].eventName, 'league_changed');
   assert.equal(captured[2].payload.fromLeague, 'HIGH_SCHOOL');
   assert.equal(captured[2].payload.toLeague, 'KBL');
+  assert.equal(captured[2].payload.position, 'SF');
+  assert.equal(captured[2].payload.changeReason, 'draft');
+  assert.equal(captured[2].payload.draftPick, 2);
+  assert.equal(captured[2].payload.draftRound, 1);
 
-  // 4. career_ended (동일 시즌/리그에서 은퇴 선언 시나리오)
+  // 4. career_ended (동일 시즌/리그에서 은퇴 선언 + 리그별 수상 집계 검증)
+  const nbaLog1 = makeMockSeasonLog({
+    seasonNumber: 10,
+    year: 2035,
+    age: 26,
+    league: 'NBA',
+    wonChampionship: true,
+    wonMvp: true,
+    wonFinalsMvp: true,
+  });
+  const kblLog1 = makeMockSeasonLog({
+    seasonNumber: 2,
+    year: 2027,
+    age: 18,
+    league: 'KBL',
+    wonChampionship: true,
+    wonMvp: false,
+    wonFinalsMvp: true,
+  });
   const preRetirement = makeMockCareer({
     seasonsPlayed: 15,
     age: 35,
-    league: 'NBA',
+    league: 'KBL',
     ovr: 79,
     peakOvr: 95,
+    seasonLogs: [makeMockSeasonLog(), kblLog1, nbaLog1],
     totals: {
       ...createdCareer.totals,
-      gp: 1020,
+      gp: 1000,
+      points: 22500,
+      rebounds: 6400,
+      assists: 5100,
       mvps: 3,
       championships: 5,
       nbaChampionships: 4,
       finalsMvps: 3,
       allStars: 11,
+      allLeagueSelections: 9,
+      dpoys: 1,
+      sixthManAwards: 1,
+      mips: 1,
     },
   });
   const retired = makeMockCareer({
@@ -410,8 +502,24 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   );
   assert.equal(captured[3].eventName, 'career_ended');
   assert.equal(captured[3].payload.totalSeasons, 15);
+  assert.equal(captured[3].payload.finalLeague, 'KBL');
+  assert.equal(captured[3].payload.peakLeague, 'NBA');
+  assert.equal(captured[3].payload.totalChampionships, 5);
+  assert.equal(captured[3].payload.totalMvp, 3);
+  assert.equal(captured[3].payload.totalFmvp, 3);
+  assert.equal(captured[3].payload.totalAllLeague, 9);
   assert.equal(captured[3].payload.nbaChampionshipCount, 4);
   assert.equal(captured[3].payload.legacyTier, 'GOAT');
+  assert.equal(captured[3].payload.endingType, 'GOAT');
+  assert.equal(captured[3].payload.hallOfFame, true);
+  assert.equal(captured[3].payload.careerPpg, 22.5);
+  assert.equal(captured[3].payload.careerRpg, 6.4);
+  assert.equal(captured[3].payload.careerApg, 5.1);
+  assert.deepEqual(captured[3].payload.leagueHonors, {
+    HIGH_SCHOOL: { seasons: 1, championships: 1, mvp: 1, fmvp: 1 },
+    KBL: { seasons: 1, championships: 1, mvp: 0, fmvp: 1 },
+    NBA: { seasons: 1, championships: 1, mvp: 1, fmvp: 1 },
+  });
 
   // 5. 정상 은퇴 완료 후 홈 복귀(completeRetirementAndReturnHome)는 career_reset을 발생시키지 않아야 함
   emitCareerStateTransitionEvents(
@@ -431,6 +539,11 @@ test('emitCareerStateTransitionEvents emits exact milestone payloads without cus
   assert.equal(captured[4].eventName, 'career_reset');
   assert.equal(captured[4].payload.abandonedLeague, 'KBL');
   assert.equal(captured[4].payload.abandonedSeason, 1);
+  assert.equal(captured[4].payload.abandonedRole, 'sixth_man');
+  assert.equal(captured[4].payload.wasStarter, false);
+  assert.equal(captured[4].payload.hadWonChampionship, true);
+  assert.equal(captured[4].payload.hadWonMvp, true);
+  assert.equal(captured[4].payload.hadWonFmvp, true);
 });
 
 test('client tracker deduplicates StrictMode double-mount and silently survives offline fetch failure', () => {
@@ -497,51 +610,84 @@ test('client tracker deduplicates StrictMode double-mount and silently survives 
       true
     );
 
+    const sampleSeasonPayload: SeasonCompletedPayload = {
+      league: 'KBL',
+      position: 'SF',
+      seasonNumber: 4,
+      seasonYear: 2029,
+      age: 20,
+      teamName: 'SK',
+      wonChampionship: false,
+      wonMvp: false,
+      wonFmvp: false,
+      wonFinalsMvp: false,
+      allStarSelected: true,
+      awards: ['ALL_STAR'],
+      madePlayoffs: true,
+      playoffResult: 'semifinals',
+      teamWins: 34,
+      teamLosses: 20,
+      teamRank: 3,
+      overall: 76,
+      seasonOvr: 75,
+      overallDelta: 3,
+      role: 'starter',
+      isStarter: true,
+      mpg: 31.2,
+      gamesPlayed: 54,
+      ppg: 17.5,
+      rpg: 4.8,
+      apg: 5.2,
+      spg: 1.4,
+      bpg: 0.6,
+      fgPct: 48.3,
+      threePtPct: 37.9,
+      trainingFocus: 'OUTSIDE_SHOOTING',
+      injuredGames: 0,
+      hadInjury: false,
+      contractType: 'KBL_MAX',
+      salary: 45000,
+    };
+
     // 동일 dedupeKey로 season_completed 이중 호출 시 1회만 전송
-    trackGameEvent(
-      'season_completed',
-      {
-        seasonNumber: 4,
-        seasonYear: 2029,
-        league: 'KBL',
-        teamName: 'SK',
-        overall: 76,
-        seasonOvr: 75,
-        age: 20,
-        gamesPlayed: 54,
-        ppg: 17.5,
-        rpg: 4.8,
-        apg: 5.2,
-        wonChampionship: false,
-        wonMvp: false,
-        wonFinalsMvp: false,
-        allStarSelected: true,
-      },
-      { careerRunId: 'run-1', dedupeKey: 'season_completed:run-1:4' }
-    );
-    trackGameEvent(
-      'season_completed',
-      {
-        seasonNumber: 4,
-        seasonYear: 2029,
-        league: 'KBL',
-        teamName: 'SK',
-        overall: 76,
-        seasonOvr: 75,
-        age: 20,
-        gamesPlayed: 54,
-        ppg: 17.5,
-        rpg: 4.8,
-        apg: 5.2,
-        wonChampionship: false,
-        wonMvp: false,
-        wonFinalsMvp: false,
-        allStarSelected: true,
-      },
-      { careerRunId: 'run-1', dedupeKey: 'season_completed:run-1:4' }
-    );
+    trackGameEvent('season_completed', sampleSeasonPayload, {
+      careerRunId: 'run-1',
+      dedupeKey: 'season_completed:run-1:4',
+      dedupeScope: 'persistent',
+    });
+    trackGameEvent('season_completed', sampleSeasonPayload, {
+      careerRunId: 'run-1',
+      dedupeKey: 'season_completed:run-1:4',
+      dedupeScope: 'persistent',
+    });
 
     assert.equal(fetchCalls.length, 2);
+
+    // 새 탭 / 페이지 새로고침 시뮬레이션 (sessionStorage & 메모리 초기화, localStorage 유지)
+    sessionStorageMock.clear();
+    __resetAnalyticsClientMemoryForTest();
+    trackGameEvent('season_completed', sampleSeasonPayload, {
+      careerRunId: 'run-1',
+      dedupeKey: 'season_completed:run-1:4',
+      dedupeScope: 'persistent',
+    });
+    // persistent dedupe 덕분에 새 탭/새로고침에서도 중복 전송되지 않아야 함
+    assert.equal(fetchCalls.length, 2);
+
+    // 반면 새 세션의 session_start는 정상적으로 1회 전송되어야 함
+    trackGameEvent(
+      'session_start',
+      {
+        hasExistingSave: true,
+        currentLeague: 'KBL',
+        currentSeason: 4,
+        seasonYear: 2029,
+        hofCount: 0,
+      },
+      { careerRunId: 'run-1', dedupeKey: 'session_start', dedupeScope: 'session' }
+    );
+    assert.equal(fetchCalls.length, 3);
+
     unsub2();
     void hydrationCb;
   } finally {
@@ -694,4 +840,246 @@ test('insertAnalyticsEventToSupabase treats HTTP 404 as table_not_ready with coo
     __resetAnalyticsSupabaseCooldownForTest();
   }
 });
+
+test('normalizers map role, playoffResult, awards, peakLeague, and leagueHonors accurately', () => {
+  assert.equal(normalizePlayerRole('프랜차이즈 1옵션 에이스'), 'franchise_ace');
+  assert.equal(isStarterRole('franchise_ace'), true);
+  assert.equal(normalizePlayerRole('주전 스타터'), 'starter');
+  assert.equal(isStarterRole('starter'), true);
+  assert.equal(normalizePlayerRole('핵심 식스맨'), 'sixth_man');
+  assert.equal(isStarterRole('sixth_man'), false);
+  assert.equal(normalizePlayerRole('투웨이 콜업 로테이션'), 'two_way');
+  assert.equal(normalizePlayerRole('가비지 타임 (벤치 끝자리)'), 'garbage_time');
+  assert.equal(normalizePlayerRole('벤치 로테이션'), 'bench');
+
+  assert.equal(normalizePlayoffResult('PO 탈락', false), 'missed');
+  assert.equal(normalizePlayoffResult('플레이인 탈락', false), 'play_in');
+  assert.equal(normalizePlayoffResult('플레이오프 1R 탈락', false), 'round1');
+  assert.equal(normalizePlayoffResult('8강 탈락', false), 'quarterfinals');
+  assert.equal(normalizePlayoffResult('컨퍼런스 파이널 탈락', false), 'semifinals');
+  assert.equal(normalizePlayoffResult('파이널 준우승', false), 'finals_loss');
+  assert.equal(normalizePlayoffResult('NBA 파이널 우승 🏆', true), 'champion');
+
+  const awards = extractSeasonAwards(
+    makeMockSeasonLog({
+      wonRookieOfYear: true,
+      wonDpoy: true,
+      wonSixthMan: false,
+      wonMip: true,
+      allStarSelected: true,
+      allLeagueTeam: 2,
+    })
+  );
+  assert.deepEqual(awards, ['ROY', 'DPOY', 'MIP', 'ALL_STAR', 'ALL_LEAGUE_2ND']);
+
+  const career = makeMockCareer({
+    league: 'KBL',
+    seasonLogs: [
+      makeMockSeasonLog({ league: 'HIGH_SCHOOL', wonChampionship: true, wonMvp: false, wonFinalsMvp: false }),
+      makeMockSeasonLog({ league: 'NBA', wonChampionship: true, wonMvp: true, wonFinalsMvp: true }),
+      makeMockSeasonLog({ league: 'NBA', wonChampionship: false, wonMvp: false, wonFinalsMvp: false }),
+    ],
+  });
+  assert.equal(resolvePeakLeague(career), 'NBA');
+  assert.deepEqual(buildLeagueHonorsSummary(career.seasonLogs), {
+    HIGH_SCHOOL: { seasons: 1, championships: 1, mvp: 0, fmvp: 0 },
+    NBA: { seasons: 2, championships: 1, mvp: 1, fmvp: 1 },
+  });
+});
+
+test('validateAnalyticsEventPayload accepts upgraded arrays and nested leagueHonors while rejecting oversized arrays', () => {
+  const validSeason = validateAnalyticsEventPayload({
+    event_name: 'season_completed',
+    anonymous_id: 'anon-up-1',
+    session_id: 'sess-up-1',
+    career_run_id: 'run-up-1',
+    payload: {
+      league: 'NBA',
+      position: 'PG',
+      seasonNumber: 5,
+      seasonYear: 2030,
+      age: 22,
+      teamName: 'LAL',
+      wonChampionship: true,
+      wonMvp: true,
+      wonFmvp: true,
+      wonFinalsMvp: true,
+      allStarSelected: true,
+      awards: ['DPOY', 'ALL_STAR', 'ALL_LEAGUE_1ST'],
+      madePlayoffs: true,
+      playoffResult: 'champion',
+      teamWins: 62,
+      teamLosses: 20,
+      teamRank: 1,
+      overall: 94,
+      seasonOvr: 92,
+      overallDelta: 3,
+      role: 'franchise_ace',
+      isStarter: true,
+      mpg: 36.4,
+      gamesPlayed: 79,
+      ppg: 29.3,
+      rpg: 5.8,
+      apg: 9.1,
+      spg: 2.1,
+      bpg: 0.5,
+      fgPct: 50.2,
+      threePtPct: 40.8,
+      trainingFocus: 'BALANCED',
+      injuredGames: 3,
+      hadInjury: true,
+      contractType: 'NBA_MAX',
+      salary: 45000000,
+    },
+  });
+  assert.equal(validSeason.ok, true);
+  if (validSeason.ok) {
+    assert.deepEqual(validSeason.data.payload.awards, [
+      'DPOY',
+      'ALL_STAR',
+      'ALL_LEAGUE_1ST',
+    ]);
+  }
+
+  const validCareerEnded = validateAnalyticsEventPayload({
+    event_name: 'career_ended',
+    anonymous_id: 'anon-up-1',
+    session_id: 'sess-up-1',
+    career_run_id: 'run-up-1',
+    payload: {
+      position: 'PG',
+      totalSeasons: 16,
+      finalLeague: 'NBA',
+      peakLeague: 'NBA',
+      finalAge: 36,
+      peakOverall: 96,
+      finalOverall: 80,
+      totalGames: 1120,
+      totalChampionships: 5,
+      totalMvp: 4,
+      totalFmvp: 4,
+      totalAllStar: 12,
+      totalAllLeague: 11,
+      totalDpoy: 2,
+      totalSixthMan: 0,
+      totalMip: 1,
+      mvpCount: 4,
+      championshipCount: 5,
+      nbaChampionshipCount: 4,
+      finalsMvpCount: 4,
+      allStarCount: 12,
+      leagueHonors: {
+        HIGH_SCHOOL: { seasons: 1, championships: 1, mvp: 1, fmvp: 1 },
+        NCAA: { seasons: 1, championships: 0, mvp: 0, fmvp: 0 },
+        KBL: { seasons: 2, championships: 1, mvp: 1, fmvp: 1 },
+        EUROLEAGUE: { seasons: 2, championships: 0, mvp: 0, fmvp: 0 },
+        NBA: { seasons: 10, championships: 3, mvp: 2, fmvp: 2 },
+      },
+      endingType: 'GOAT',
+      retirementReason: 'VOLUNTARY_HONOR',
+      legacyTier: 'GOAT',
+      hallOfFame: true,
+      jerseyRetired: true,
+      careerPoints: 28000,
+      careerPpg: 25,
+      careerRpg: 5.5,
+      careerApg: 8.8,
+    },
+  });
+  assert.equal(validCareerEnded.ok, true);
+
+  // 배열 길이 20 초과 시 즉시 400 거부
+  const tooManyAwards = Array.from(
+    { length: MAX_ANALYTICS_ARRAY_LENGTH + 1 },
+    (_, i) => `AWARD_${i}`
+  );
+  const badArray = validateAnalyticsEventPayload({
+    event_name: 'season_completed',
+    anonymous_id: 'anon-up-1',
+    session_id: 'sess-up-1',
+    payload: {
+      awards: tooManyAwards,
+    },
+  });
+  assert.equal(badArray.ok, false);
+});
+
+test('aggregateAnalyticsEvents remains fully compatible with mixed legacy and upgraded rows', () => {
+  const now = new Date('2026-11-24T12:00:00.000Z');
+  const dashboard = aggregateAnalyticsEvents(
+    [
+      // 기존 레거시 season_completed (wonFmvp, awards 없음)
+      {
+        id: '1',
+        event_name: 'season_completed',
+        anonymous_id: 'anon-legacy',
+        session_id: 'sess-legacy',
+        career_run_id: 'run-legacy',
+        game_version: '1.0.0',
+        device_type: 'desktop',
+        payload: {
+          league: 'KBL',
+          seasonNumber: 1,
+          ppg: 15.2,
+          wonChampionship: true,
+          wonMvp: true,
+          wonFinalsMvp: true,
+        },
+        created_at: '2026-11-23T10:00:00.000Z',
+      },
+      // 고도화 season_completed (wonFmvp + awards + 신규 밸런스 지표)
+      {
+        id: '2',
+        event_name: 'season_completed',
+        anonymous_id: 'anon-new',
+        session_id: 'sess-new',
+        career_run_id: 'run-new',
+        game_version: '1.0.0',
+        device_type: 'mobile',
+        payload: {
+          league: 'NBA',
+          position: 'PG',
+          seasonNumber: 4,
+          ppg: 28.4,
+          wonChampionship: true,
+          wonMvp: true,
+          wonFmvp: true,
+          wonFinalsMvp: true,
+          awards: ['DPOY', 'ALL_STAR', 'ALL_LEAGUE_1ST'],
+        },
+        created_at: '2026-11-24T10:00:00.000Z',
+      },
+      // 고도화 career_ended
+      {
+        id: '3',
+        event_name: 'career_ended',
+        anonymous_id: 'anon-new',
+        session_id: 'sess-new',
+        career_run_id: 'run-new',
+        game_version: '1.0.0',
+        device_type: 'mobile',
+        payload: {
+          totalSeasons: 14,
+          finalLeague: 'NBA',
+          peakLeague: 'NBA',
+          totalChampionships: 3,
+          totalMvp: 2,
+          totalFmvp: 2,
+          legacyTier: 'FIRST_BALLOT_HOF',
+        },
+        created_at: '2026-11-24T11:00:00.000Z',
+      },
+    ],
+    { range: '7d', version: 'all', nowMs: now.getTime() }
+  );
+
+  assert.equal(dashboard.kpi.seasonsCompleted, 2);
+  assert.equal(dashboard.kpi.careersEnded, 1);
+  assert.equal(dashboard.recentLogs.length, 3);
+  assert.ok(dashboard.recentLogs.some((m) => m.summary.includes('FMVP')));
+  assert.ok(
+    dashboard.recentLogs.some((m) => m.summary.includes('우승 3 · MVP 2 · FMVP 2'))
+  );
+});
+
 

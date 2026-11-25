@@ -7,6 +7,7 @@ import type {
   PlaystyleArchetype,
   Position,
   RetirementReason,
+  TrainingFocus,
 } from '../types/game';
 
 /**
@@ -27,11 +28,56 @@ export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
 export const ANALYTICS_DEVICE_TYPES = ['mobile', 'tablet', 'desktop'] as const;
 export type AnalyticsDeviceType = (typeof ANALYTICS_DEVICE_TYPES)[number];
 
+export type NormalizedPlayoffResult =
+  | 'missed'
+  | 'play_in'
+  | 'round1'
+  | 'quarterfinals'
+  | 'semifinals'
+  | 'finals_loss'
+  | 'champion';
+
+export type NormalizedPlayerRole =
+  | 'garbage_time'
+  | 'two_way'
+  | 'bench'
+  | 'sixth_man'
+  | 'starter'
+  | 'franchise_ace';
+
+export type SeasonAwardCode =
+  | 'ROY'
+  | 'DPOY'
+  | '6MOY'
+  | 'MIP'
+  | 'ALL_STAR'
+  | 'ALL_LEAGUE_1ST'
+  | 'ALL_LEAGUE_2ND'
+  | 'ALL_LEAGUE_3RD';
+
+export type LeagueChangeReason =
+  | 'draft'
+  | 'military_enlist'
+  | 'military_discharge'
+  | 'summer_league'
+  | 'two_way'
+  | 'promotion'
+  | 'relegation'
+  | 'free_agency';
+
+export interface LeagueHonorSummary {
+  seasons: number;
+  championships: number;
+  mvp: number;
+  fmvp: number;
+}
+
 export const MAX_ANALYTICS_ID_LENGTH = 64;
 export const MAX_ANALYTICS_VERSION_LENGTH = 32;
 export const MAX_ANALYTICS_PAYLOAD_BYTES = 4096;
 export const MAX_ANALYTICS_PAYLOAD_DEPTH = 3;
-export const MAX_ANALYTICS_PAYLOAD_KEYS = 40;
+export const MAX_ANALYTICS_PAYLOAD_KEYS = 80;
+export const MAX_ANALYTICS_ARRAY_LENGTH = 20;
 export const MAX_ANALYTICS_STRING_VALUE_LENGTH = 120;
 
 export interface SessionStartPayload {
@@ -48,63 +94,129 @@ export interface CareerCreatedPayload {
   heightCm: number;
   startingLeague: LeagueId;
   startingTeamId: string;
+  startingAge: number;
   growthDna: GrowthDna | null;
   playstyle: PlaystyleArchetype | null;
   innateTrait: PlayerTraitId | null;
+  trainingFocus: TrainingFocus;
   initialOvr: number;
+  initialOverall: number;
 }
 
 export interface SeasonCompletedPayload {
+  // 기본 교차 분석 키
+  league: LeagueId;
+  position: Position;
   seasonNumber: number;
   seasonYear: number;
-  league: LeagueId;
+  age: number;
   teamName: string;
+
+  // 우승 및 주요 수상 내역
+  wonChampionship: boolean;
+  wonMvp: boolean;
+  wonFmvp: boolean;
+  wonFinalsMvp: boolean; // 기존 하위 호환 유지
+  allStarSelected: boolean;
+  awards: SeasonAwardCode[];
+
+  // 플레이오프 & 팀 성적
+  madePlayoffs: boolean;
+  playoffResult: NormalizedPlayoffResult;
+  teamWins: number;
+  teamLosses: number;
+  teamRank: number | null;
+
+  // 선수 성장 & 벤치 → 주전 도약 지표
   overall: number;
   seasonOvr: number;
-  age: number;
+  overallDelta: number;
+  role: NormalizedPlayerRole;
+  isStarter: boolean;
+  mpg: number;
+
+  // 시즌 개인 성적 요약 (소수점 1자리 반올림)
   gamesPlayed: number;
   ppg: number;
   rpg: number;
   apg: number;
-  wonChampionship: boolean;
-  wonMvp: boolean;
-  wonFinalsMvp: boolean;
-  allStarSelected: boolean;
+  spg: number;
+  bpg: number;
+  fgPct: number;
+  threePtPct: number;
+
+  // 메타 지표 (육성, 부상, 계약)
+  trainingFocus: TrainingFocus;
+  injuredGames: number;
+  hadInjury: boolean;
+  contractType: ContractType;
+  salary: number;
 }
 
 export interface LeagueChangedPayload {
   fromLeague: LeagueId;
   toLeague: LeagueId;
+  position: Position;
   seasonNumber: number;
   seasonYear: number;
   overall: number;
   age: number;
   contractType: ContractType;
+  changeReason: LeagueChangeReason;
+  draftPick: number | null;
+  draftRound: 1 | 2 | null;
 }
 
 export interface CareerEndedPayload {
+  position: Position;
   totalSeasons: number;
   finalLeague: LeagueId;
+  peakLeague: LeagueId;
   finalAge: number;
   peakOverall: number;
   finalOverall: number;
   totalGames: number;
+
+  // 통산 영예 누적치 (기존 필드 하위 호환 + 표준 키 병행)
+  totalChampionships: number;
+  totalMvp: number;
+  totalFmvp: number;
+  totalAllStar: number;
+  totalAllLeague: number;
+  totalDpoy: number;
+  totalSixthMan: number;
+  totalMip: number;
   mvpCount: number;
   championshipCount: number;
   nbaChampionshipCount: number;
   finalsMvpCount: number;
   allStarCount: number;
+  leagueHonors: Partial<Record<LeagueId, LeagueHonorSummary>>;
+
+  // 엔딩 & 통산 성적
+  endingType: LegacyTierId | RetirementReason;
   retirementReason: RetirementReason;
   legacyTier: LegacyTierId | null;
+  hallOfFame: boolean;
   jerseyRetired: boolean;
+  careerPoints: number;
+  careerPpg: number;
+  careerRpg: number;
+  careerApg: number;
 }
 
 export interface CareerResetPayload {
+  position: Position;
   abandonedLeague: LeagueId;
   abandonedSeason: number;
   abandonedSeasonYear: number;
   abandonedAge: number;
   abandonedOverall: number;
+  abandonedRole: NormalizedPlayerRole;
+  wasStarter: boolean;
+  hadWonChampionship: boolean;
+  hadWonMvp: boolean;
+  hadWonFmvp: boolean;
 }
 
 export interface AnalyticsEventPayloadMap {
@@ -223,8 +335,14 @@ function sanitizePayloadNode(
     if (depth >= MAX_ANALYTICS_PAYLOAD_DEPTH) {
       return { ok: false, error: 'payload 중첩 깊이가 허용 범위를 초과했습니다.' };
     }
+    if (node.length > MAX_ANALYTICS_ARRAY_LENGTH) {
+      return {
+        ok: false,
+        error: `payload 배열 길이가 최대 허용치(${MAX_ANALYTICS_ARRAY_LENGTH}개)를 초과했습니다.`,
+      };
+    }
     const items: unknown[] = [];
-    for (const item of node.slice(0, 20)) {
+    for (const item of node) {
       const sanitizedItem = sanitizePayloadNode(item, depth + 1, keyCounter);
       if (!sanitizedItem.ok) return sanitizedItem;
       items.push(sanitizedItem.value);
