@@ -3,7 +3,6 @@
  * (useCareerStore.ts에서 동작 변경 없이 그대로 옮긴 코드입니다.)
  */
 import {
-  DRAFT_SCOUTING_CONFIG,
   ECONOMY_CONFIG,
   ROLE_MPG_CONFIG,
   canUseProTradeSystem,
@@ -15,6 +14,9 @@ import {
 } from '../../data/teams';
 import {
   determineTeamRolePromise,
+  getBaseTradeAcceptProb,
+  getTradeRejectedRelationships,
+  preferPositionFitTeams,
 } from '../../engine/draftEngine';
 import {
   syncCareerRelationships,
@@ -580,26 +582,14 @@ export function createGrowthActions(
       if (pool.length === 0) return;
 
       // 연속 승인 확률 산출 (역할 약속 위반/높은 OVR 레버리지/낮은 신뢰도 반영)
-      const trCfg = DRAFT_SCOUTING_CONFIG.trade;
       const acceptProb = clampNum(
-        trCfg.baseAcceptanceProb +
-          (career.brokenRolePromise ? trCfg.brokenPromiseBonus : 0) +
-          (career.ovr - career.team.rating) * trCfg.highOvrLeverageSlope +
-          (career.coachTrust < 45 ? trCfg.lowTrustBonus : 0),
+        getBaseTradeAcceptProb(career, false),
         0.18,
         0.95
       );
 
       if (Math.random() >= acceptProb) {
-        const nextRejectedTrust = Math.max(
-          15,
-          career.coachTrust + trCfg.rejectedTrustPenalty
-        );
-        const syncedRejected = syncCareerRelationships(
-          career,
-          { frontOffice: -6 },
-          nextRejectedTrust - career.coachTrust
-        );
+        const syncedRejected = getTradeRejectedRelationships(career);
         set({
           career: {
             ...career,
@@ -618,15 +608,7 @@ export function createGrowthActions(
         return;
       }
 
-      const posFitCandidates = pool.filter(
-        (t) =>
-          t.neededPositions?.includes(career.primaryPos) ||
-          (career.secondaryPos
-            ? t.neededPositions?.includes(career.secondaryPos)
-            : false)
-      );
-      const candidatePool =
-        posFitCandidates.length > 0 ? posFitCandidates : pool;
+      const candidatePool = preferPositionFitTeams(pool, career);
       const target =
         candidatePool[Math.floor(Math.random() * candidatePool.length)];
 

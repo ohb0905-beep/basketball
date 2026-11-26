@@ -11,6 +11,8 @@
  * --check: NBA_PATH_TARGETS 범위를 벗어나면 exit code 1 (bun run balance:check 에 포함)
  * 시즌 중반 분기점 이벤트는 실제 화면처럼 매 시즌 발생시킵니다.
  */
+import { mulberry32 } from './seededRandom';
+
 export {};
 
 const rawArgs = process.argv.slice(2);
@@ -33,16 +35,6 @@ const NATIONALITY = (rawArgs.find((a) => a.startsWith('--nationality='))?.split(
   (START === 'us' ? 'USA' : 'KOR')) as import('../src/types/game').NationalityCode;
 const CHECK = rawArgs.includes('--check');
 
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 const mem: Record<string, string> = {};
 (globalThis as any).localStorage = {
   getItem: (k: string) => mem[k] ?? null,

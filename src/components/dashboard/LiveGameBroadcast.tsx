@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
-import { isInternationalLiveGame } from '../../engine/playoffEngine';
+import { isInternationalLiveGame } from '../../engine/internationalEngine';
 import { useCareerStore } from '../../store/useCareerStore';
 import {
   LiveCourtPlay,

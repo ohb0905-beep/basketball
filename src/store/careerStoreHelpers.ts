@@ -30,8 +30,8 @@ import {
 import {
   getLiveGameTournamentType,
   isInternationalLiveGame,
-  resolveConfFinalsGame7InBracket,
-} from '../engine/playoffEngine';
+} from '../engine/internationalEngine';
+import { resolveConfFinalsGame7InBracket } from '../engine/playoffEngine';
 import {
   getEffectiveRelationships,
   getEffectiveStoryArcs,

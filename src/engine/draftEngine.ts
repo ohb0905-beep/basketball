@@ -23,6 +23,7 @@ import {
   RolePromiseType,
   TeamInfo,
 } from '../types/game';
+import { syncCareerRelationships } from './progressionEngine';
 import { checkRetirementEligibility } from './retirementEngine';
 import {
   calculateTeamContractOfferSalary,
@@ -876,28 +877,75 @@ export function evaluateTwoWaySurvival(
   };
 }
 
+type TradeLeverageCareer = Pick<
+  CareerState,
+  'ovr' | 'team' | 'coachTrust' | 'brokenRolePromise' | 'contractYearsLeft'
+>;
+
+/**
+ * 트레이드 승인 확률의 공통 항 (클램프 전).
+ * 호출처마다 확률 범위와 계약 만료 보너스 적용 여부가 달라 클램프는 호출처에서 합니다.
+ */
+export function getBaseTradeAcceptProb(
+  career: TradeLeverageCareer,
+  includeExpiringBonus: boolean
+): number {
+  const trCfg = DRAFT_SCOUTING_CONFIG.trade;
+  return (
+    trCfg.baseAcceptanceProb +
+    (career.brokenRolePromise ? trCfg.brokenPromiseBonus : 0) +
+    (career.ovr - career.team.rating) * trCfg.highOvrLeverageSlope +
+    (career.coachTrust < 45 ? trCfg.lowTrustBonus : 0) +
+    (includeExpiringBonus && career.contractYearsLeft <= 1
+      ? trCfg.expiringContractBonus
+      : 0)
+  );
+}
+
+/** 내 주/부 포지션을 필요로 하는 팀이 있으면 그 팀들만, 없으면 전체를 돌려줍니다. */
+export function preferPositionFitTeams(
+  teams: TeamInfo[],
+  career: Pick<CareerState, 'primaryPos' | 'secondaryPos'>
+): TeamInfo[] {
+  const fit = teams.filter(
+    (t) =>
+      t.neededPositions?.includes(career.primaryPos) ||
+      (career.secondaryPos
+        ? t.neededPositions?.includes(career.secondaryPos)
+        : false)
+  );
+  return fit.length > 0 ? fit : teams;
+}
+
+/** 트레이드 요청이 반려됐을 때의 감독 신뢰도·프런트 관계 변화 */
+export function getTradeRejectedRelationships(
+  career: Pick<CareerState, 'relationships' | 'coachTrust' | 'fanPopularity'>
+) {
+  const nextRejectedTrust = Math.max(
+    15,
+    career.coachTrust + DRAFT_SCOUTING_CONFIG.trade.rejectedTrustPenalty
+  );
+  return syncCareerRelationships(
+    career,
+    { frontOffice: -6 },
+    nextRejectedTrust - career.coachTrust
+  );
+}
+
 /**
  * 오프시즌 계약 중 트레이드 승인 확률 계산
  * (draftEngine UI 표시 & useCareerStore 협상 판정 단일 진실 소스)
  */
 export function calculateOffseasonTradeAcceptProb(
-  career: Pick<
-    CareerState,
-    'ovr' | 'team' | 'coachTrust' | 'brokenRolePromise' | 'contractYearsLeft'
-  >,
+  career: TradeLeverageCareer,
   targetTeam: TeamInfo,
   scoutingScore: number = 70
 ): number {
-  const trCfg = DRAFT_SCOUTING_CONFIG.trade;
   const scoutingInterestBonus = clampNum((scoutingScore - 68) * 0.0045, -0.08, 0.1);
   const contenderDifficulty = targetTeam.direction === 'CONTENDER' ? -0.05 : 0.02;
 
   const prob =
-    trCfg.baseAcceptanceProb +
-    (career.brokenRolePromise ? trCfg.brokenPromiseBonus : 0) +
-    (career.ovr - career.team.rating) * trCfg.highOvrLeverageSlope +
-    (career.coachTrust < 45 ? trCfg.lowTrustBonus : 0) +
-    (career.contractYearsLeft <= 1 ? trCfg.expiringContractBonus : 0) +
+    getBaseTradeAcceptProb(career, true) +
     scoutingInterestBonus +
     contenderDifficulty;
   return Number(clampNum(prob, 0.18, 0.94).toFixed(3));

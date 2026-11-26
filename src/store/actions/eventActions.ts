@@ -18,15 +18,15 @@ import {
 } from '../../data/teams';
 import {
   generateOffseasonOptions,
+  getBaseTradeAcceptProb,
+  preferPositionFitTeams,
   ROLE_PROMISE_LABELS,
 } from '../../engine/draftEngine';
 import {
   resolveEncounterChoiceOutcome,
 } from '../../engine/encounterEngine';
-import {
-  createLiveFinalGame,
-  simulateInternationalTournament,
-} from '../../engine/playoffEngine';
+import { createLiveFinalGame } from '../../engine/liveGameEngine';
+import { simulateInternationalTournament } from '../../engine/internationalEngine';
 import {
   applyRelationshipDelta,
   getEffectiveRelationships,
@@ -291,11 +291,7 @@ export function createEventActions(
       if (isMidSeasonTradeAttempt) {
         const trCfg = DRAFT_SCOUTING_CONFIG.trade;
         const acceptProb = clampNum(
-          trCfg.baseAcceptanceProb +
-            (career.brokenRolePromise ? trCfg.brokenPromiseBonus : 0) +
-            (career.ovr - career.team.rating) * trCfg.highOvrLeverageSlope +
-            (career.coachTrust < 45 ? trCfg.lowTrustBonus : 0) +
-            (career.contractYearsLeft <= 1 ? trCfg.expiringContractBonus : 0),
+          getBaseTradeAcceptProb(career, true),
           0.22,
           0.9
         );
@@ -310,18 +306,9 @@ export function createEventActions(
             (t) =>
               t.direction === 'CONTENDER' || t.direction === 'PLAYOFF_HUNT'
           );
-          const matchingContenders = contenders.filter(
-            (t) =>
-              t.neededPositions?.includes(career.primaryPos) ||
-              (career.secondaryPos
-                ? t.neededPositions?.includes(career.secondaryPos)
-                : false)
-          );
           const tradePool =
-            matchingContenders.length > 0
-              ? matchingContenders
-              : contenders.length > 0
-              ? contenders
+            contenders.length > 0
+              ? preferPositionFitTeams(contenders, career)
               : sameLeagueTeams;
           const pickedContender =
             tradePool[Math.floor(Math.random() * tradePool.length)];

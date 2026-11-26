@@ -58,6 +58,10 @@ import {
   buildSymmetricLeaguePlayerPool,
   calcUnifiedAllStarScore,
   calcUnifiedDpoyScore,
+  evaluateUnifiedLeagueAwards,
+  selectPositionBalancedAllStars,
+} from './leagueAwardsEngine';
+import {
   calculateRoleAndMpg,
   calculatePpg,
   calculateSeasonStatGrowth,
@@ -67,14 +71,12 @@ import {
   checkPotentialBreakthrough,
   computeCareerMinutes,
   evaluateFluidSeasonAwards,
-  evaluateUnifiedLeagueAwards,
   generateDraftRivals,
   getAwardsByLeague,
   getLeagueBaselineTeamRating,
   getScheduleAdjustedTeamMeanRating,
   getSangmuDischargeContractType,
   isEligibleForLeagueRookieAward,
-  selectPositionBalancedAllStars,
   simulateRivalsSeason,
   simulateSeason,
 } from './seasonSimulator';
@@ -88,6 +90,8 @@ import {
   evaluateTwoWaySurvival,
   executeDraftResolution,
   generateOffseasonOptions,
+  getBaseTradeAcceptProb,
+  preferPositionFitTeams,
 } from './draftEngine';
 import {
   formatCashDelta,
@@ -139,26 +143,33 @@ import {
 import {
   advancePlayoffRound,
   batchAdvanceEarlyPlayoffRounds,
-  calculateKoreaTeamEffectiveRating,
-  createLiveFinalGame,
   createPlayoffBracket,
   evaluateRealisticFinalsMvp,
+  resolveConfFinalsGame7InBracket,
+  skipEntirePlayoffs,
+} from './playoffEngine';
+import {
+  calculateKoreaTeamEffectiveRating,
+  isInternationalLiveGame,
+  simulateAsianGamesTournament,
+  simulateInternationalTournament,
+} from './internationalEngine';
+import {
+  createLiveFinalGame,
+  resolveClutchPossession,
+  simulateLiveQuarter,
+  skipLiveGameToEnd,
+} from './liveGameEngine';
+import {
   generateLeagueStandings,
   getFinalsSeriesBestOf,
   getHigherSeedHomeAdvantage,
-  isInternationalLiveGame,
-  resolveClutchPossession,
-  resolveConfFinalsGame7InBracket,
-  simulateAsianGamesTournament,
-  simulateInternationalTournament,
-  simulateLiveQuarter,
-  skipEntirePlayoffs,
-  skipLiveGameToEnd,
-} from './playoffEngine';
+} from './standingsEngine';
 import {
   AWARD_VOTING_CONFIG,
   INTERNATIONAL_TOURNAMENT_CONFIG,
   LEAGUE_AWARD_QUOTAS,
+  DRAFT_SCOUTING_CONFIG,
   LEAGUE_BALANCE_META,
   LIVE_GAME_CONFIG,
   PLAYOFF_SERIES_CONFIG,
@@ -3643,6 +3654,21 @@ test('42. Multi-Year Contract Blocks Cross-League Offers & Generates Stay + Mult
     brokenPromiseProb > normalProb + 0.15,
     `Broken role promise must boost trade approval odds (${normalProb} -> ${brokenPromiseProb})`
   );
+
+  // 공통 확률 항: 계약 만료 보너스는 includeExpiringBonus일 때만 붙는다
+  const expiring = { ...kblUnderContract, contractYearsLeft: 1 };
+  assert.equal(
+    getBaseTradeAcceptProb(expiring, true) - getBaseTradeAcceptProb(expiring, false),
+    DRAFT_SCOUTING_CONFIG.trade.expiringContractBonus
+  );
+
+  // 포지션이 맞는 팀이 있으면 그 팀만, 없으면 전체 후보
+  const [teamA, teamB] = KBL_TEAMS;
+  const posCareer = { primaryPos: 'C' as const, secondaryPos: null };
+  const fitTeam = { ...teamA, neededPositions: ['C' as const] };
+  const otherTeam = { ...teamB, neededPositions: ['PG' as const] };
+  assert.deepEqual(preferPositionFitTeams([fitTeam, otherTeam], posCareer), [fitTeam]);
+  assert.deepEqual(preferPositionFitTeams([otherTeam], posCareer), [otherTeam]);
 });
 
 test('43. Sangmu Discharge Contract Integrity & NBA Age-28 Military Deferral', () => {

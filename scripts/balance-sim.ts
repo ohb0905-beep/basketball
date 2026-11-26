@@ -10,6 +10,8 @@
  * --check 를 주면 BALANCE_TARGETS 범위를 벗어난 지표가 있을 때 exit code 1 로 종료합니다.
  * 자동 플레이는 이벤트 첫 선택지·기본 훈련만 사용하므로 '평범한 유저' 기준 수치입니다.
  */
+import { mulberry32 } from './seededRandom';
+
 export {};
 
 const rawArgs = process.argv.slice(2);
@@ -24,17 +26,6 @@ const SEEDS: number[] = seedsFlag
       .map((s) => Number(s.trim()))
       .filter((n) => Number.isFinite(n) && n > 0)
   : [Number(args[1] ?? 20261121)];
-
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const mem: Record<string, string> = {};
 (globalThis as any).localStorage = {
@@ -55,6 +46,8 @@ console.warn = (...a: unknown[]) => {
 
 const { useCareerStore } = await import('../src/store/useCareerStore');
 const PE = await import('../src/engine/playoffEngine');
+const LIVE = await import('../src/engine/liveGameEngine');
+const STANDINGS = await import('../src/engine/standingsEngine');
 const SIM = await import('../src/engine/seasonSimulator');
 const STAT = await import('../src/engine/statCalculator');
 const TEAMS = await import('../src/data/teams');
@@ -352,8 +345,8 @@ function playOut(live: any, career: any, tactic: string) {
   let lg = structuredClone(live);
   for (let g = 0; g < 24 && !lg.isFinished; g++) {
     lg = lg.pendingClutchPossession
-      ? PE.resolveClutchPossession(lg, career, 'ISO_WINNER')
-      : PE.simulateLiveQuarter(lg, career, tactic as any);
+      ? LIVE.resolveClutchPossession(lg, career, 'ISO_WINNER')
+      : LIVE.simulateLiveQuarter(lg, career, tactic as any);
   }
   return lg;
 }
@@ -498,7 +491,7 @@ for (const lg of ALL_LEAGUES) {
         offseasonOptions: [],
         pendingEvent: null,
       };
-      const rawStandings = PE.generateLeagueStandings(ghostCareer, 1, totalG - 1, parityRng);
+      const rawStandings = STANDINGS.generateLeagueStandings(ghostCareer, 1, totalG - 1, parityRng);
       const realStandings = rawStandings.filter((s) => s.team.id !== 'GHOST_OBSERVER');
       const carrierTeam = realStandings[0].team;
       const neutralCareer = { ...ghostCareer, team: carrierTeam };
@@ -632,8 +625,8 @@ for (const lg of ['KBL', 'EUROLEAGUE', 'NBA'] as const) {
       if (sim.boxScore.wonMvp) mvp++;
       const cLog = { ...c, seasonLogs: [sim.boxScore] };
       if (PE.evaluateRealisticFinalsMvp(cLog, true)) simFmvp++;
-      const live = PE.createLiveFinalGame(cLog, oppTeam, 'LEAGUE_FINALS');
-      const done = PE.skipLiveGameToEnd(live, cLog, fmvpRng);
+      const live = LIVE.createLiveFinalGame(cLog, oppTeam, 'LEAGUE_FINALS');
+      const done = LIVE.skipLiveGameToEnd(live, cLog, fmvpRng);
       ptsSum += done.playerStats.pts;
       if (done.finalOutcome?.won) {
         liveWins++;
