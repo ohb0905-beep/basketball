@@ -10,7 +10,7 @@
  * --check 를 주면 BALANCE_TARGETS 범위를 벗어난 지표가 있을 때 exit code 1 로 종료합니다.
  * 자동 플레이는 이벤트 첫 선택지·기본 훈련만 사용하므로 '평범한 유저' 기준 수치입니다.
  */
-import { mulberry32 } from './seededRandom';
+import { mulberry32, withRandom } from './seededRandom';
 
 export {};
 
@@ -90,6 +90,8 @@ function runSeedSimulation(SEED: number, verbose: boolean): {
   targetRanges: Record<string, [number, number]>;
 } {
 Math.random = mulberry32(SEED);
+// 결승 시리즈 라이브는 별도 난수로 진행합니다. 공용 난수를 쓰면 결승 경기 수만큼 이후 난수 흐름이 밀려 결승과 상관없는 커리어 결과까지 바뀌기 때문입니다.
+const finalsRng = mulberry32(SEED ^ 0xf1a15);
 
 // ───────────────────── 1) 커리어 루프 ─────────────────────
 const initOvr: Record<string, number[]> = {};
@@ -179,7 +181,8 @@ for (let run = 0; run < CAREERS; run++) {
         if (c.liveGame && c.liveGame.quarter === 0 && !c.liveGame.isFinished && snaps.length < 500) {
           snaps.push(structuredClone({ career: c, live: c.liveGame }));
         }
-        if (!c.liveGame?.isFinished) st.skipLiveGame();
+        if (c.liveGame?.gameType === 'LEAGUE_FINALS' && !c.liveGame.isFinished) withRandom(finalsRng, () => st.skipLiveGame());
+        else if (!c.liveGame?.isFinished) st.skipLiveGame();
         else st.closeLiveGameAndReturn();
         continue;
       }
@@ -187,7 +190,7 @@ for (let run = 0; run < CAREERS; run++) {
         const b = c.playoffBracket;
         // [P0 경로 통일] 플레이어가 조기 탈락했더라도 championTeamId가 확정될 때까지 대진표를 완결한 뒤 오프시즌 진입
         if (b.championTeamId) st.enterOffseasonFromPlayoffs();
-        else if (b.playerReachedFinals && !b.pendingFinalsLiveGame) st.advanceFinalsToDecisiveGame();
+        else if (b.playerReachedFinals && !b.pendingFinalsLiveGame) withRandom(finalsRng, () => st.advanceFinalsToDecisiveGame());
         else if (b.playerReachedFinals || b.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;
