@@ -9,3 +9,14 @@ export function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/** fn을 실행하는 동안만 Math.random을 rng로 바꾸고, 예외가 나도 원래대로 되돌립니다. */
+export function withRandom<T>(rng: () => number, fn: () => T): T {
+  const prev = Math.random;
+  Math.random = rng;
+  try {
+    return fn();
+  } finally {
+    Math.random = prev;
+  }
+}

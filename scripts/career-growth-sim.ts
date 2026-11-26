@@ -14,7 +14,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-import { mulberry32 } from './seededRandom';
+import { mulberry32, withRandom } from './seededRandom';
 
 export {};
 
@@ -23,6 +23,8 @@ const CAREERS = Math.max(1, Math.floor(Number(args[0] ?? 1000)));
 const SEED = Number(args[1] ?? 20261122);
 
 Math.random = mulberry32(SEED);
+// 결승 시리즈 라이브는 별도 난수로 진행합니다. 공용 난수를 쓰면 결승 경기 수만큼 이후 난수 흐름이 밀려 결승과 상관없는 커리어 결과까지 바뀌기 때문입니다.
+const finalsRng = mulberry32(SEED ^ 0xf1a15);
 
 const mem: Record<string, string> = {};
 (globalThis as any).localStorage = {
@@ -181,7 +183,8 @@ for (let run = 0; run < CAREERS; run++) {
         continue;
       }
       if (c.seasonPhase === 'LIVE_FINAL_BROADCAST') {
-        if (!c.liveGame?.isFinished) st.skipLiveGame();
+        if (c.liveGame?.gameType === 'LEAGUE_FINALS' && !c.liveGame.isFinished) withRandom(finalsRng, () => st.skipLiveGame());
+        else if (!c.liveGame?.isFinished) st.skipLiveGame();
         else st.closeLiveGameAndReturn();
         continue;
       }
@@ -193,6 +196,7 @@ for (let run = 0; run < CAREERS; run++) {
         // championTeamId가 확정될 때까지 먼저 라운드를 한 번 더 진행합니다.
         if (bracket?.championTeamId) st.enterOffseasonFromPlayoffs();
         else if (bracket?.playerEliminated) st.advancePlayoffBracketRound();
+        else if (bracket?.playerReachedFinals && !bracket.pendingFinalsLiveGame) withRandom(finalsRng, () => st.advanceFinalsToDecisiveGame());
         else if (bracket?.playerReachedFinals || bracket?.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;

@@ -208,6 +208,7 @@ test('1.2.0-6 미국 고교 시즌은 미국 학교끼리만 치르고, 커리�
       if (c.seasonPhase === 'POSTSEASON_BRACKET') {
         const b = c.playoffBracket!;
         if (b.championTeamId) st.enterOffseasonFromPlayoffs();
+        else if (b.playerReachedFinals && !b.pendingFinalsLiveGame) st.advanceFinalsToDecisiveGame();
         else if (b.playerReachedFinals || b.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;

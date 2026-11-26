@@ -1074,6 +1074,10 @@ export function LiveGameBroadcast() {
                   ? '대진표 결과 확인'
                   : isInternationalLiveGame(liveGame.gameType)
                   ? '오프시즌 복귀'
+                  : liveGame.gameType === 'LEAGUE_FINALS' &&
+                    career.playoffBracket &&
+                    !career.playoffBracket.championTeamId
+                  ? '대진표로 돌아가기'
                   : userWon
                   ? '우승 확정 · 오프시즌으로'
                   : '경기 종료 · 오프시즌으로'}

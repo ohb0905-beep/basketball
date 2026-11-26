@@ -42,6 +42,7 @@ export function createLiveFinalGame(
     tournamentType?: InternationalTournamentType;
     tournamentYear?: number;
     preMatches?: AsianGamesMatchLog[];
+    finalsContext?: LiveGameState['finalsContext'];
   }
 ): LiveGameState {
   const isInternational = isInternationalLiveGame(gameType);
@@ -89,6 +90,9 @@ export function createLiveFinalGame(
   const finalsBestOf = getFinalsSeriesBestOf(career.league);
   const tiedSeriesWins = Math.floor(finalsBestOf / 2);
   const leagueShort = LEAGUE_CONFIG[career.league].shortName;
+  // 단판 결승(BO1)은 결정전 문맥이 있어도 기존 결승전 문구를 씁니다.
+  const finalsCtx =
+    gameType === 'LEAGUE_FINALS' && finalsBestOf > 1 ? options?.finalsContext : undefined;
 
   const title = isInternational
     ? isBronzeMatch
@@ -100,6 +104,14 @@ export function createLiveFinalGame(
         }`
     : gameType === 'CONF_FINALS_GAME7'
     ? `${leagueShort} 컨퍼런스 파이널 7차전`
+    : finalsCtx
+    ? `${leagueShort} 파이널 ${finalsCtx.gameNo}차전 ${
+        finalsCtx.kind === 'CLINCH'
+          ? '(우승 매치포인트)'
+          : finalsCtx.kind === 'ELIMINATION'
+          ? '(벼랑 끝 승부)'
+          : '(최종전)'
+      }`
     : finalsBestOf > 1
     ? `${leagueShort} 파이널 ${finalsBestOf}차전 (최종 매치포인트)`
     : `${leagueShort} 챔피언십 파이널 결승전`;
@@ -108,6 +120,8 @@ export function createLiveFinalGame(
     ? `${playerTeam.name} vs ${opponentTeam.name}`
     : gameType === 'CONF_FINALS_GAME7'
     ? `${playerTeam.name} vs ${opponentTeam.name} · 시리즈 3승 3패 동률 최종전`
+    : finalsCtx
+    ? `${playerTeam.name} vs ${opponentTeam.name} · 시리즈 ${finalsCtx.playerWins}승 ${finalsCtx.oppWins}패`
     : finalsBestOf > 1
     ? `${playerTeam.name} vs ${opponentTeam.name} · 시리즈 ${tiedSeriesWins}승 ${tiedSeriesWins}패 동률 최종전`
     : `${playerTeam.name} vs ${opponentTeam.name} · 단판 우승 결정전`;
@@ -129,6 +143,7 @@ export function createLiveFinalGame(
     internationalPreMatches: options?.preMatches,
     title,
     subtitle,
+    finalsContext: finalsCtx,
     playerTeam,
     opponentTeam,
     quarter: 0,
@@ -223,12 +238,32 @@ function buildFinalOutcome(
     baseHeadline = won
       ? `컨퍼런스 파이널 7차전 승리 — ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name}에 ${teamScore}-${oppScore} 승리로 파이널 진출`
       : `컨퍼런스 파이널 7차전 패배 — ${liveGame.playerTeam.name}, ${teamScore}-${oppScore} 석패로 시즌 마감`;
+  } else if (
+    liveGame.finalsContext &&
+    (won ? liveGame.finalsContext.kind === 'ELIMINATION' : liveGame.finalsContext.kind === 'CLINCH')
+  ) {
+    // 시리즈가 이어지는 결정전은 우승/준우승 대신 경기 후 시리즈 상황을 알립니다.
+    const { gameNo, playerWins, oppWins } = liveGame.finalsContext;
+    // 패배 후 양쪽이 모두 매치포인트면 최종전, 아니면 다음 결정전입니다.
+    const lossNext =
+      playerWins === (getFinalsSeriesBestOf(career.league) + 1) / 2 - 1 &&
+      oppWins + 1 === playerWins
+        ? '최종전으로'
+        : '다음 결정전으로';
+    baseHeadline = won
+      ? `파이널 ${gameNo}차전 승리 — 시리즈 ${playerWins + 1}승 ${oppWins}패, 결정전이 이어집니다`
+      : `파이널 ${gameNo}차전 패배 — 시리즈 ${playerWins}승 ${oppWins + 1}패, ${lossNext}`;
   } else {
     baseHeadline = won
       ? `챔피언십 우승 — ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name} 제압 (${career.name} ${playerStats.pts}점${
           wonFinalsMvp ? ' · 파이널 MVP' : ''
         })`
-      : `파이널 준우승 — ${liveGame.playerTeam.name}, 최종전 ${teamScore}-${oppScore} 석패`;
+      : `파이널 준우승 — ${liveGame.playerTeam.name}, ${
+          !liveGame.finalsContext ||
+          liveGame.finalsContext.gameNo === getFinalsSeriesBestOf(career.league)
+            ? '최종전 '
+            : ''
+        }${teamScore}-${oppScore} 석패`;
   }
 
   return {

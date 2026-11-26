@@ -32,6 +32,7 @@ import {
   isInternationalLiveGame,
 } from '../engine/internationalEngine';
 import { resolveConfFinalsGame7InBracket } from '../engine/playoffEngine';
+import { resolveFinalsLiveGameInBracket } from '../engine/finalsSeries';
 import {
   getEffectiveRelationships,
   getEffectiveStoryArcs,
@@ -645,6 +646,18 @@ export function applyCompletedLiveGameOutcome(
   }
 
   // LEAGUE_FINALS 결과 반영
+  const finalsScoreLine = `${finishedLive.playerTeam.shortName} ${finishedLive.teamScore}:${finishedLive.oppScore} ${finishedLive.opponentTeam.shortName}`;
+  const resolvedFinals = career.playoffBracket
+    ? resolveFinalsLiveGameInBracket(
+        career.playoffBracket,
+        career,
+        career.currentStandings || [],
+        outcome.won,
+        finalsScoreLine
+      )
+    : null;
+  // 시리즈가 끝난 경기만 우승·준우승을 확정하고, 이어지면 기록과 기사만 남깁니다.
+  const seriesFinished = !resolvedFinals || resolvedFinals.seriesFinished;
   const logs = [...career.seasonLogs];
   const nextTotals = { ...career.totals };
   const nextMilestones = [...career.milestones];
@@ -654,7 +667,7 @@ export function applyCompletedLiveGameOutcome(
     const wasChampBefore = prevLog.wonChampionship;
     const wasFmvpBefore = prevLog.wonFinalsMvp;
 
-    if (outcome.won && !wasChampBefore) {
+    if (seriesFinished && outcome.won && !wasChampBefore) {
       nextTotals.championships += 1;
       if (prevLog.league === 'NBA') nextTotals.nbaChampionships += 1;
       nextMilestones.push({
@@ -668,68 +681,45 @@ export function applyCompletedLiveGameOutcome(
         type: 'CHAMPIONSHIP',
         teamName: prevLog.teamName,
       });
-    } else if (!outcome.won && wasChampBefore) {
+    } else if (seriesFinished && !outcome.won && wasChampBefore) {
       nextTotals.championships = Math.max(0, nextTotals.championships - 1);
       if (prevLog.league === 'NBA') {
         nextTotals.nbaChampionships = Math.max(0, nextTotals.nbaChampionships - 1);
       }
     }
 
-    if (outcome.wonFinalsMvp && !wasFmvpBefore) {
+    if (seriesFinished && outcome.wonFinalsMvp && !wasFmvpBefore) {
       nextTotals.finalsMvps = (nextTotals.finalsMvps || 0) + 1;
     }
 
-    const updatedLog = {
+    const baseLog = {
       ...prevLog,
       singleGameHighPts: Math.max(prevLog.singleGameHighPts, ps.pts),
-      wonChampionship: outcome.won,
-      wonFinalsMvp: outcome.wonFinalsMvp,
-      playoffResult: outcome.won ? '리그 우승' : '파이널 준우승',
       narrativeLog: [outcome.headline, ...prevLog.narrativeLog],
     };
-    logs[lastIdx] = outcome.won
+    const updatedLog = seriesFinished
       ? {
-          ...updatedLog,
-          headline: refreshChampionSeasonHeadline(career, updatedLog),
+          ...baseLog,
+          wonChampionship: outcome.won,
+          wonFinalsMvp: outcome.wonFinalsMvp,
+          playoffResult: outcome.won ? '리그 우승' : '파이널 준우승',
         }
-      : updatedLog;
+      : baseLog;
+    logs[lastIdx] =
+      seriesFinished && outcome.won
+        ? {
+            ...updatedLog,
+            headline: refreshChampionSeasonHeadline(career, updatedLog),
+          }
+        : updatedLog;
   }
-
-  const updatedBracket = career.playoffBracket
-    ? (() => {
-        const champTeamId = outcome.won
-          ? career.team.id
-          : finishedLive.opponentTeam.id;
-        const nextRounds = career.playoffBracket.rounds.map((roundList, rIdx) => {
-          if (rIdx !== career.playoffBracket!.rounds.length - 1) return roundList;
-          return roundList.map((s) => {
-            if (!s.involvesPlayer) return s;
-            const tiedWins = Math.max(0, s.winsNeeded - 1);
-            const hiWon = s.higherSeed.team.id === champTeamId;
-            return {
-              ...s,
-              higherSeedWins: hiWon ? s.winsNeeded : tiedWins,
-              lowerSeedWins: hiWon ? tiedWins : s.winsNeeded,
-              winnerId: champTeamId,
-            };
-          });
-        });
-        return {
-          ...career.playoffBracket,
-          rounds: nextRounds,
-          championTeamId: champTeamId,
-          playerEliminated: !outcome.won,
-          playoffResultLabel: outcome.won ? '리그 우승' : '파이널 준우승',
-        };
-      })()
-    : null;
 
   return {
     ...nextCareer,
     seasonLogs: logs,
     totals: nextTotals,
     milestones: nextMilestones,
-    playoffBracket: updatedBracket,
+    playoffBracket: resolvedFinals ? resolvedFinals.bracket : null,
   };
 }
 

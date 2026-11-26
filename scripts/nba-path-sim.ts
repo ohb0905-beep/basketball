@@ -11,7 +11,7 @@
  * --check: NBA_PATH_TARGETS 범위를 벗어나면 exit code 1 (bun run balance:check 에 포함)
  * 시즌 중반 분기점 이벤트는 실제 화면처럼 매 시즌 발생시킵니다.
  */
-import { mulberry32 } from './seededRandom';
+import { mulberry32, withRandom } from './seededRandom';
 
 export {};
 
@@ -48,6 +48,8 @@ console.warn = (...a: unknown[]) => { if (String(a[0]).includes('[zustand')) ret
 const { useCareerStore } = await import('../src/store/useCareerStore');
 const S = () => useCareerStore.getState();
 Math.random = mulberry32(SEED);
+// 결승 시리즈 라이브는 별도 난수로 진행합니다. 공용 난수를 쓰면 결승 경기 수만큼 이후 난수 흐름이 밀려 결승과 상관없는 커리어 결과까지 바뀌기 때문입니다.
+const finalsRng = mulberry32(SEED ^ 0xf1a15);
 
 const POS = ['PG', 'SG', 'SF', 'PF', 'C'] as const;
 const HEIGHT: Record<string, number> = { PG: 185, SG: 192, SF: 199, PF: 204, C: 211 };
@@ -132,10 +134,11 @@ for (let run = 0; run < CAREERS; run++) {
       }
       if (c.pendingEvent) { if (String(c.pendingEvent.id).startsWith('EVT_MID_HS_COACH_CHANCE')) hsCoachChance++; st.resolveEventChoice(c.pendingEvent.choices[0]); st.dismissEncounterOutcome(); continue; }
       if (c.lastInternationalSummary) st.dismissInternationalSummary();
-      if (c.seasonPhase === 'LIVE_FINAL_BROADCAST') { if (!c.liveGame?.isFinished) st.skipLiveGame(); else st.closeLiveGameAndReturn(); continue; }
+      if (c.seasonPhase === 'LIVE_FINAL_BROADCAST') { if (c.liveGame?.gameType === 'LEAGUE_FINALS' && !c.liveGame.isFinished) withRandom(finalsRng, () => st.skipLiveGame()); else if (!c.liveGame?.isFinished) st.skipLiveGame(); else st.closeLiveGameAndReturn(); continue; }
       if (c.seasonPhase === 'POSTSEASON_BRACKET') {
         const b = c.playoffBracket;
         if (b.championTeamId) st.enterOffseasonFromPlayoffs();
+        else if (b.playerReachedFinals && !b.pendingFinalsLiveGame) withRandom(finalsRng, () => st.advanceFinalsToDecisiveGame());
         else if (b.playerReachedFinals || b.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;

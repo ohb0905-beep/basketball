@@ -1,3 +1,5 @@
+import type { DecisiveGameKind } from '../engine/finalsSeries';
+
 export type LeagueId =
   | 'HIGH_SCHOOL'
   | 'US_HIGH_SCHOOL'
@@ -319,6 +321,7 @@ export interface PlayoffBracketState {
   playerEliminated: boolean;
   playerReachedFinals: boolean;
   pendingConfFinalsGame7?: boolean; // 컨퍼런스 파이널이 실제로 3승 3패 7차전에 돌입했을 때만 true
+  pendingFinalsLiveGame?: boolean; // 결승이 결정전(클린치/탈락/단판) 직전에 멈춰 라이브 중계를 기다리는 중일 때만 true
   championTeamId: string | null;
   playoffResultLabel: string;
   stageType?: 'PLAY_IN_ROUND_1' | 'PLAY_IN_DECIDER' | 'MAIN_PLAYOFF';
@@ -486,6 +489,13 @@ export interface LiveGameState {
   internationalPreMatches?: AsianGamesMatchLog[];
   title: string;
   subtitle: string;
+  /** 결승 시리즈 결정전 문맥 (1.4.0+, 없으면 예전 단판 결승) */
+  finalsContext?: {
+    gameNo: number;
+    playerWins: number;
+    oppWins: number;
+    kind: DecisiveGameKind;
+  };
   playerTeam: TeamInfo;
   opponentTeam: TeamInfo;
   quarter: number; // 현재 진행 완료된 쿼터 (0 = 시작 전, 1~4, 5=OT)

@@ -171,8 +171,8 @@ export const REGULAR_SEASON_WIN_CONFIG = {
   rebuildingDirectionMod: -0.025,
   teamRatingSlope: 0.021,
   playerRandomHalfSpread: 0.055, // ±5.5%p
-  aiMinHalfSpread: 0.042,        // 압축 리그(고교·G리그·NCAA) 과잉 로또화 방지
-  aiMaxHalfSpread: 0.062,        // NBA·유로리그 등 ±6.2%p
+  aiMinHalfSpread: 0.032,        // 압축 리그(고교·G리그·NCAA) 과잉 로또화 방지
+  aiMaxHalfSpread: 0.040,        // NBA·유로리그 등 ±4.0%p
   conferenceScheduleWeight: 0.63, // 컨퍼런스 리그 동일 컨퍼런스 경기 비중
   zeroSumMaxShift: 0.045,        // AI 팀 제로섬 평균 보정 상한
   minWinPct: 0.16,
@@ -183,18 +183,33 @@ export const REGULAR_SEASON_WIN_CONFIG = {
   negativeMarginFloor: -0.015,
 };
 
+/** PO 시드 구조 보정: 앞 라운드 추가 경기 피로와 하위 시드 뎁스 부담 (표에 없는 리그는 뎁스 보정 없음) */
+export const PLAYOFF_SEED_CONFIG = {
+  fatiguePerExtraGame: 0.35,
+  fatigueCap: 2.5,
+  lowSeedDepthPerRound: 0.9, // 2라운드부터 (roundNumber - 1) × 값
+  lowSeedDepthStartByLeague: {
+    NBA: 6,
+    EUROLEAGUE: 6,
+    B_LEAGUE: 6,
+    GLEAGUE: 5,
+    KBL: 5,
+    NBL: 5,
+  } as Partial<Record<LeagueId, number>>,
+};
+
 /**
  * 플레이오프 시리즈 승률 파라미터 (출전 비중·부상 감쇠·경기별 홈/원정 교대·왕조 수확체감)
  */
 export const PLAYOFF_SERIES_CONFIG = {
-  gameWinProbSlope: 0.020,
+  gameWinProbSlope: 0.036,
   minGameWinProb: 0.24,
-  maxGameWinProb: 0.75,
-  homeCourtRatingEdge: 1.2,      // 실제 홈 경기 개최 팀 가산 (+1.2 / 원정 -1.2)
+  maxGameWinProb: 0.78,
+  homeCourtRatingEdge: 2.4,      // 실제 홈 경기 개최 팀 가산 (+2.4 / 원정 -2.4)
   singleElimHigherSeedEdge: 0.5, // 단판 토너먼트 상위 시드 소폭 이점
-  playerOvrSlope: 0.30,
+  playerOvrSlope: 0.35,
   clutchBonus: 1.0,
-  maxPositivePlayerBonus: 5.5,
+  maxPositivePlayerBonus: 8.0,
   minNegativePlayerBonus: -0.9,
   bioStrainWeight: 4.2,
   minMpgWeight: 0.15,
