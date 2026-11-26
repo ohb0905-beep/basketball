@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { PwaRegistrar } from '../src/components/pwa/PwaRegistrar';
 import { LegacyDomainMove } from '../src/components/domain/LegacyDomainMove';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 export const metadata: Metadata = {
   title: '로드 투 MVP',
@@ -96,6 +97,7 @@ export default function RootLayout({
         {children}
         <PwaRegistrar />
         <LegacyDomainMove />
+        <SpeedInsights />
       </body>
     </html>
   );
