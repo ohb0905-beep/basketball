@@ -29,13 +29,13 @@ export function Header({
   onRequestFeedbackModal,
   wide = false,
 }: HeaderProps = {}) {
-  const {
-    view,
-    career,
-    setView,
-    resetActiveCareer,
-    setEspnLogos,
-  } = useCareerStore();
+  // 스토어 전체를 구독하면 커리어가 바뀔 때마다 헤더가 다시 그려지므로 필요한 값만 고릅니다.
+  const view = useCareerStore((s) => s.view);
+  const hasCareer = useCareerStore((s) => s.career !== null);
+  const isRetired = useCareerStore((s) => Boolean(s.career?.retirementReason));
+  const setView = useCareerStore((s) => s.setView);
+  const resetActiveCareer = useCareerStore((s) => s.resetActiveCareer);
+  const setEspnLogos = useCareerStore((s) => s.setEspnLogos);
   const { theme, mounted, toggleTheme } = useTheme();
 
   useEffect(() => {
@@ -159,7 +159,7 @@ export function Header({
         </button>
 
         <div className="flex items-center gap-0.5 shrink-0">
-          {career && view !== 'DASHBOARD' && !career.retirementReason && (
+          {hasCareer && view !== 'DASHBOARD' && !isRetired && (
             <button
               type="button"
               onClick={() => setView('DASHBOARD')}
@@ -212,7 +212,7 @@ export function Header({
             </button>
           )}
 
-          {career && (
+          {hasCareer && (
             <button
               type="button"
               data-testid="header-reset-career-btn"
