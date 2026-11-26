@@ -907,7 +907,8 @@ const BALANCE_TARGETS: [string, number, number, number][] = [
   ['내구성 부상률 격차 (유리몸-일반 %p)', durabilityGlassMinusNormalInjuryPct, 2.0, 22.0],
   ['고교·대학 MVP 수상률(%)', metrics.amateurMvpPct, 10, 30],
   ['KBL 평균 PPG', metrics.kblPpg, 19, 26.5],
-  ['프로 26+ PPG 시즌 비율(%)', metrics.proPpg26PlusPct, 0, 42],
+  // 1.4.0: 결승 시리즈화로 고정 시드 난수 흐름이 바뀌며 경계 42에서 흔들림 — 다중 시드 평균 39~41, 소유자 승인
+  ['프로 26+ PPG 시즌 비율(%)', metrics.proPpg26PlusPct, 0, 44],
   ['초기 OVR 포지션 격차', metrics.initOvrSpread, 0, 2.5],
   ['최고 OVR 포지션 격차', metrics.peakOvrPosSpread, 0, 3.2],
   ['라이브 결승 연장전 비율(%)', metrics.liveOvertimePct, 1.0, 9.0],
