@@ -84,6 +84,14 @@ Supabase 값이 없으면 피드백·통계 API가 설정 누락 오류를 돌�
 - `public/sw.js`: 오프라인 캐시. 화면은 네트워크 우선, 빌드 파일·아이콘·로고·글꼴은 저장본 우선, `/api`·`/admin`은 캐시하지 않습니다. 캐시 이름에 `GAME_VERSION`이 들어가 새 버전 배포 시 예전 캐시가 지워집니다. 개발 서버(`bun run dev`)에서는 등록하지 않습니다.
 - 홈 화면 추가 안내는 휴대폰 브라우저 첫 화면에만 나오고, 닫으면 다시 안 보입니다. `session_start` 통계의 `displayMode`로 앱 실행 비율을 볼 수 있습니다.
 
+## 주소 이전 (roadtomvp.com, 1.3.1)
+
+- 정식 주소는 `https://www.roadtomvp.com`입니다 (Vercel에서 `roadtomvp.com`은 `www`로 넘겨줌). 예전 주소 `roadtomvp.vercel.app`도 지우지 않고 그대로 둡니다.
+- 세이브는 주소별로 따로 저장되므로, 예전 주소로 들어오면 `LegacyDomainMove`(`src/components/domain/`)가 세이브를 압축해 새 주소의 `/move` 주소 `#` 뒤에 실어 보냅니다 (`#` 뒤는 서버로 전송되지 않음). `/move`(`MoveReceiver`)가 받아 저장하고, 새 주소에 다른 세이브가 있으면 어느 쪽을 쓸지 묻습니다.
+- 예전 주소의 `/admin`, `/api`는 옮기지 않습니다. 예전 주소에서 계속하려면 `?stay=1`로 열면 그 탭에서는 이동하지 않습니다.
+- 옮기는 저장 값 목록과 주소 상수는 `src/lib/domainMove.ts`에 있습니다. 새 localStorage 값을 추가할 때 옮겨야 하는 값이면 `CARRIED_STORAGE_KEYS`에도 넣습니다.
+- 정식 주소를 `www` 없는 주소로 바꾸려면 Vercel 도메인 설정과 `NEW_SITE_ORIGIN`을 함께 바꿉니다.
+
 ## 명령어
 
 | 명령 | 설명 |
