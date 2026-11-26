@@ -192,9 +192,9 @@ export const PLAYOFF_SERIES_CONFIG = {
   maxGameWinProb: 0.75,
   homeCourtRatingEdge: 1.2,      // 실제 홈 경기 개최 팀 가산 (+1.2 / 원정 -1.2)
   singleElimHigherSeedEdge: 0.5, // 단판 토너먼트 상위 시드 소폭 이점
-  playerOvrSlope: 0.30,
+  playerOvrSlope: 0.62,
   clutchBonus: 1.0,
-  maxPositivePlayerBonus: 5.5,
+  maxPositivePlayerBonus: 8.0,
   minNegativePlayerBonus: -0.9,
   bioStrainWeight: 4.2,
   minMpgWeight: 0.15,
