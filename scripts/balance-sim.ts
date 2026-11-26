@@ -55,6 +55,8 @@ console.warn = (...a: unknown[]) => {
 
 const { useCareerStore } = await import('../src/store/useCareerStore');
 const PE = await import('../src/engine/playoffEngine');
+const LIVE = await import('../src/engine/liveGameEngine');
+const STANDINGS = await import('../src/engine/standingsEngine');
 const SIM = await import('../src/engine/seasonSimulator');
 const STAT = await import('../src/engine/statCalculator');
 const TEAMS = await import('../src/data/teams');
@@ -352,8 +354,8 @@ function playOut(live: any, career: any, tactic: string) {
   let lg = structuredClone(live);
   for (let g = 0; g < 24 && !lg.isFinished; g++) {
     lg = lg.pendingClutchPossession
-      ? PE.resolveClutchPossession(lg, career, 'ISO_WINNER')
-      : PE.simulateLiveQuarter(lg, career, tactic as any);
+      ? LIVE.resolveClutchPossession(lg, career, 'ISO_WINNER')
+      : LIVE.simulateLiveQuarter(lg, career, tactic as any);
   }
   return lg;
 }
@@ -498,7 +500,7 @@ for (const lg of ALL_LEAGUES) {
         offseasonOptions: [],
         pendingEvent: null,
       };
-      const rawStandings = PE.generateLeagueStandings(ghostCareer, 1, totalG - 1, parityRng);
+      const rawStandings = STANDINGS.generateLeagueStandings(ghostCareer, 1, totalG - 1, parityRng);
       const realStandings = rawStandings.filter((s) => s.team.id !== 'GHOST_OBSERVER');
       const carrierTeam = realStandings[0].team;
       const neutralCareer = { ...ghostCareer, team: carrierTeam };
@@ -632,8 +634,8 @@ for (const lg of ['KBL', 'EUROLEAGUE', 'NBA'] as const) {
       if (sim.boxScore.wonMvp) mvp++;
       const cLog = { ...c, seasonLogs: [sim.boxScore] };
       if (PE.evaluateRealisticFinalsMvp(cLog, true)) simFmvp++;
-      const live = PE.createLiveFinalGame(cLog, oppTeam, 'LEAGUE_FINALS');
-      const done = PE.skipLiveGameToEnd(live, cLog, fmvpRng);
+      const live = LIVE.createLiveFinalGame(cLog, oppTeam, 'LEAGUE_FINALS');
+      const done = LIVE.skipLiveGameToEnd(live, cLog, fmvpRng);
       ptsSum += done.playerStats.pts;
       if (done.finalOutcome?.won) {
         liveWins++;

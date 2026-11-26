@@ -25,10 +25,8 @@ import {
 import {
   resolveEncounterChoiceOutcome,
 } from '../../engine/encounterEngine';
-import {
-  createLiveFinalGame,
-  simulateInternationalTournament,
-} from '../../engine/playoffEngine';
+import { createLiveFinalGame } from '../../engine/liveGameEngine';
+import { simulateInternationalTournament } from '../../engine/internationalEngine';
 import {
   applyRelationshipDelta,
   getEffectiveRelationships,
