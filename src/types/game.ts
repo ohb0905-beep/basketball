@@ -319,6 +319,7 @@ export interface PlayoffBracketState {
   playerEliminated: boolean;
   playerReachedFinals: boolean;
   pendingConfFinalsGame7?: boolean; // 컨퍼런스 파이널이 실제로 3승 3패 7차전에 돌입했을 때만 true
+  pendingFinalsLiveGame?: boolean; // 결승이 결정전(클린치/탈락/단판) 직전에 멈춰 라이브 중계를 기다리는 중일 때만 true
   championTeamId: string | null;
   playoffResultLabel: string;
   stageType?: 'PLAY_IN_ROUND_1' | 'PLAY_IN_DECIDER' | 'MAIN_PLAYOFF';

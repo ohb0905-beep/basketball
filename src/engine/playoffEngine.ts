@@ -18,6 +18,7 @@ import {
   calculatePlayoffPlayerBonus,
   getSeriesSeedModifiers,
 } from './playoffStrength';
+import { getDecisiveGameContext } from './finalsSeries';
 import {
   getHigherSeedHomeAdvantage,
   getPlayoffCutoffByLeague,
@@ -1010,6 +1011,24 @@ export function simulateSingleSeries(
     }
 
     // 실제 홈/원정 경기 번호 기반 홈코트 이점 교대 적용 (BO7 1·2·5·7 상위 홈 vs 3·4·6 하위 홈)
+    // 결정전(클린치/탈락/단판) 직전에 멈춰 라이브 중계로 넘깁니다.
+    if (
+      pauseMode === 'DECISIVE_GAME' &&
+      series.involvesPlayer &&
+      getDecisiveGameContext(
+        { ...series, higherSeedWins: hiWins, lowerSeedWins: loWins },
+        career.team.id
+      )
+    ) {
+      return {
+        ...series,
+        higherSeedWins: hiWins,
+        lowerSeedWins: loWins,
+        winnerId: null,
+        summaryLog: logs,
+      };
+    }
+
     const homeAdv = getHigherSeedHomeAdvantage(series.bestOf, gameNo);
     const hiWinProb = clampNum(
       0.5 +
