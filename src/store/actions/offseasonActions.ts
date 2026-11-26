@@ -3,7 +3,6 @@
  * (useCareerStore.ts에서 동작 변경 없이 그대로 옮긴 코드입니다.)
  */
 import {
-  DRAFT_SCOUTING_CONFIG,
   clampNum,
 } from '../../config/balanceConfig';
 import {
@@ -20,6 +19,7 @@ import {
   determineTeamRolePromise,
   executeDraftResolution,
   generateOffseasonOptions,
+  getTradeRejectedRelationships,
   ROLE_PROMISE_LABELS,
 } from '../../engine/draftEngine';
 import {
@@ -226,16 +226,7 @@ export function createOffseasonActions(
                 option.scoutingScore ?? 70
               );
         if (Math.random() >= acceptProb) {
-          const trCfg = DRAFT_SCOUTING_CONFIG.trade;
-          const nextRejectedTrust = Math.max(
-            15,
-            career.coachTrust + trCfg.rejectedTrustPenalty
-          );
-          const syncedOffseasonReject = syncCareerRelationships(
-            career,
-            { frontOffice: -6 },
-            nextRejectedTrust - career.coachTrust
-          );
+          const syncedOffseasonReject = getTradeRejectedRelationships(career);
           const lockedOptions = career.offseasonOptions.map((opt) =>
             opt.actionType === 'REQUEST_TRADE'
               ? {
