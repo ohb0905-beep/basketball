@@ -30,13 +30,15 @@ const ovrOf = (c: CareerState) => calculateOvr(c.stats, c.primaryPos, c.heightCm
 test('PO 선수 보너스: 정규시즌 기여 수준', () => {
   const nba = careerOf('NBA', 98, 34.5);
   assert.equal(ovrOf(nba), 93);
-  const nbaBonus = calculatePlayoffPlayerBonus(nba);
-  assert.ok(nbaBonus >= 5.4 && nbaBonus <= 7.0, `NBA ${nbaBonus}`);
+  // 경기당 승률 환산(보너스 × 기울기)으로 비교해 기울기와 무관하게 정규시즌 기여 수준을 유지
+  const slope = PLAYOFF_SERIES_CONFIG.gameWinProbSlope;
+  const nbaBonus = calculatePlayoffPlayerBonus(nba) * slope;
+  assert.ok(nbaBonus >= 0.108 && nbaBonus <= 0.14, `NBA ${nbaBonus}`);
 
   const kbl = careerOf('KBL', 80, 32.5);
   assert.equal(ovrOf(kbl), 80);
-  const kblBonus = calculatePlayoffPlayerBonus(kbl);
-  assert.ok(kblBonus >= 5.4 && kblBonus <= 8.0, `KBL ${kblBonus}`);
+  const kblBonus = calculatePlayoffPlayerBonus(kbl) * slope;
+  assert.ok(kblBonus >= 0.108 && kblBonus <= 0.16, `KBL ${kblBonus}`);
 
   // 기준선 OVR이면 보너스는 사실상 0
   const base = careerOf('NBA', 84, 34.5);

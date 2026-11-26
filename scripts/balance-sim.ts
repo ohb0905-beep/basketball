@@ -449,7 +449,8 @@ for (const lg of ALL_LEAGUES) {
   let bottomHalfChamps = 0;
   let totalSeasons = 0;
 
-  for (let run = 0; run < 5; run++) {
+  const parityRuns = lg === 'NBA' ? 10 : 5; // NBA는 시드 분포 지표 안정화를 위해 표본 확대
+  for (let run = 0; run < parityRuns; run++) {
     let ratingsMap = TEAMS.createInitialTeamRatingsMap();
     let prevPair = '';
     seedAgg.prevChamp = '';
@@ -597,7 +598,7 @@ for (const lg of ALL_LEAGUES) {
     maxChampPct: pct(topChampEntry[1], totalSeasons),
     maxFinalsPct: pct(topFinalsEntry[1], totalSeasons),
     bottomHalfChampPct: pct(bottomHalfChamps, totalSeasons),
-    consecFinalsPct: pct(consecFinals, Math.max(1, totalSeasons - 5)),
+    consecFinalsPct: pct(consecFinals, Math.max(1, totalSeasons - parityRuns)),
     topChamp: `${topChampEntry[0]}(${topChampEntry[1]}%)`,
     topPair: `${topPairEntry[0]}(${topPairEntry[1]}%)`,
   };
@@ -825,7 +826,7 @@ const metrics = {
   nbaSeed1FirstRoundExitPct: pct(seedAgg.seed1R1Exit, seedAgg.seed1R1),
   nbaSeed45SecondRoundPassPct: pct(seedAgg.seed45R2Pass, seedAgg.seed45R2),
   nbaRankRatingRho: +(seedAgg.rhoSum / Math.max(1, seedAgg.seasons)).toFixed(3),
-  nbaDefendingChampRepeatPct: pct(seedAgg.repeatChamp, seedAgg.seasons - 5), // 보고용
+  nbaDefendingChampRepeatPct: pct(seedAgg.repeatChamp, seedAgg.seasons - 10), // 보고용
   kblParityMaxChampPct: parityMetrics.KBL.maxChampPct,
   nbaAvgLiveFmvpPct: fmvpCheckMetrics.NBA.avgLiveFmvp,
   nbaStarLiveFmvpPct: fmvpCheckMetrics.NBA.starLiveFmvp,
