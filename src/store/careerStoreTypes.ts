@@ -82,6 +82,7 @@ export interface CareerStoreState {
   batchAdvanceEarlyPlayoffs: () => void;
   skipPlayoffsToEnd: () => void;
   enterOffseasonFromPlayoffs: () => void;
+  advanceFinalsToDecisiveGame: () => void;
   startFinalsLiveBroadcast: () => void;
   setLiveGameTactic: (tactic: LiveTacticId) => void;
   playNextLiveQuarter: () => void;

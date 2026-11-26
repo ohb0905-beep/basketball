@@ -30,6 +30,7 @@ import {
   getLiveGameTournamentType,
 } from './internationalEngine';
 import { evaluateRealisticFinalsMvp } from './playoffEngine';
+import type { DecisiveGameKind } from './finalsSeries';
 
 /**
  * 결승전(리그 파이널, 컨퍼런스 파이널 7차전, 국제대회 결승전/3·4위전) 실시간 쿼터별 중계 상태를 생성합니다.
@@ -42,6 +43,12 @@ export function createLiveFinalGame(
     tournamentType?: InternationalTournamentType;
     tournamentYear?: number;
     preMatches?: AsianGamesMatchLog[];
+    finalsContext?: {
+      gameNo: number;
+      playerWins: number;
+      oppWins: number;
+      kind: DecisiveGameKind;
+    };
   }
 ): LiveGameState {
   const isInternational = isInternationalLiveGame(gameType);
@@ -89,6 +96,9 @@ export function createLiveFinalGame(
   const finalsBestOf = getFinalsSeriesBestOf(career.league);
   const tiedSeriesWins = Math.floor(finalsBestOf / 2);
   const leagueShort = LEAGUE_CONFIG[career.league].shortName;
+  // 단판 결승(BO1)은 결정전 문맥이 있어도 기존 결승전 문구를 씁니다.
+  const finalsCtx =
+    gameType === 'LEAGUE_FINALS' && finalsBestOf > 1 ? options?.finalsContext : undefined;
 
   const title = isInternational
     ? isBronzeMatch
@@ -100,6 +110,14 @@ export function createLiveFinalGame(
         }`
     : gameType === 'CONF_FINALS_GAME7'
     ? `${leagueShort} 컨퍼런스 파이널 7차전`
+    : finalsCtx
+    ? `${leagueShort} 파이널 ${finalsCtx.gameNo}차전 ${
+        finalsCtx.kind === 'CLINCH'
+          ? '(우승 매치포인트)'
+          : finalsCtx.kind === 'ELIMINATION'
+          ? '(벼랑 끝 승부)'
+          : '(최종전)'
+      }`
     : finalsBestOf > 1
     ? `${leagueShort} 파이널 ${finalsBestOf}차전 (최종 매치포인트)`
     : `${leagueShort} 챔피언십 파이널 결승전`;
@@ -108,6 +126,8 @@ export function createLiveFinalGame(
     ? `${playerTeam.name} vs ${opponentTeam.name}`
     : gameType === 'CONF_FINALS_GAME7'
     ? `${playerTeam.name} vs ${opponentTeam.name} · 시리즈 3승 3패 동률 최종전`
+    : finalsCtx
+    ? `${playerTeam.name} vs ${opponentTeam.name} · 시리즈 ${finalsCtx.playerWins}승 ${finalsCtx.oppWins}패`
     : finalsBestOf > 1
     ? `${playerTeam.name} vs ${opponentTeam.name} · 시리즈 ${tiedSeriesWins}승 ${tiedSeriesWins}패 동률 최종전`
     : `${playerTeam.name} vs ${opponentTeam.name} · 단판 우승 결정전`;

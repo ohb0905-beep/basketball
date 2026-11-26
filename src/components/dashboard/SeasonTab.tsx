@@ -8,6 +8,10 @@ import {
 import { LEAGUE_CONFIG } from '../../data/leagues';
 import { getLeagueRecordChases } from '../../engine/recordBookEngine';
 import {
+  getDecisiveGameContext,
+  getPlayerFinalsSeries,
+} from '../../engine/finalsSeries';
+import {
   FRESHMAN_ADAPTATION_CONFIG,
   describeFreshmanAdaptationGoals,
   isNcaaFreshmanSeason,
@@ -43,6 +47,9 @@ export function SeasonTab() {
   );
   const startFinalsLiveBroadcast = useCareerStore(
     (s) => s.startFinalsLiveBroadcast
+  );
+  const advanceFinalsToDecisiveGame = useCareerStore(
+    (s) => s.advanceFinalsToDecisiveGame
   );
 
   const hasEncounterOutcome = useCareerStore(
@@ -151,11 +158,20 @@ export function SeasonTab() {
 
   const bracket = career.playoffBracket;
 
+  const finalsOpen =
+    bracket && !bracket.championTeamId && !bracket.playerEliminated;
+  // 결승 진출 직후에는 시리즈 시작, 결정전 대기 중이면 라이브 중계 입장
+  const canStartFinalsSeries =
+    finalsOpen && bracket.playerReachedFinals && !bracket.pendingFinalsLiveGame;
   const canEnterHighStakesLive =
-    bracket &&
-    !bracket.championTeamId &&
-    !bracket.playerEliminated &&
-    (bracket.playerReachedFinals || Boolean(bracket.pendingConfFinalsGame7));
+    finalsOpen &&
+    (bracket.playerReachedFinals
+      ? Boolean(bracket.pendingFinalsLiveGame)
+      : Boolean(bracket.pendingConfFinalsGame7));
+  const finalsSeries = bracket ? getPlayerFinalsSeries(bracket) : null;
+  const finalsGameNo = finalsSeries
+    ? getDecisiveGameContext(finalsSeries, career.team.id)?.gameNo
+    : undefined;
 
   const leagueChases = getLeagueRecordChases(recordBook, career, career.league);
   const featuredChase =
@@ -441,6 +457,15 @@ export function SeasonTab() {
               >
                 {isBracketClimbing ? '우승팀 집계 중...' : '오프시즌으로 이동'}
               </button>
+            ) : canStartFinalsSeries ? (
+              <button
+                type="button"
+                data-testid="start-finals-series-btn"
+                onClick={advanceFinalsToDecisiveGame}
+                className="t-cta"
+              >
+                파이널 시리즈 시작
+              </button>
             ) : canEnterHighStakesLive ? (
               <button
                 type="button"
@@ -449,7 +474,7 @@ export function SeasonTab() {
                 className="t-cta"
               >
                 {bracket?.playerReachedFinals
-                  ? '파이널 실시간 중계 입장'
+                  ? `파이널 ${finalsGameNo}차전 실시간 중계 입장`
                   : '컨퍼런스 파이널 7차전 입장'}
               </button>
             ) : (

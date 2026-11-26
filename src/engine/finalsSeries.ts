@@ -69,7 +69,8 @@ export function resolveFinalsLiveGameInBracket(
   rng: () => number = Math.random
 ): { bracket: PlayoffBracketState; seriesFinished: boolean } {
   const series = getPlayerFinalsSeries(bracket);
-  if (!series) return { bracket, seriesFinished: false };
+  // 이미 끝난 시리즈에 같은 경기가 다시 들어오면 그대로 둡니다.
+  if (!series || series.winnerId) return { bracket, seriesFinished: false };
 
   const playerId = career.team.id;
   const playerIsHigher = series.higherSeed.team.id === playerId;

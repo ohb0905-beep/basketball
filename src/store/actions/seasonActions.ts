@@ -30,6 +30,11 @@ import {
 } from '../../engine/liveGameEngine';
 import { isInternationalLiveGame } from '../../engine/internationalEngine';
 import {
+  getDecisiveGameContext,
+  getPlayerFinalsSeries,
+  simulateFinalsToDecisiveGame,
+} from '../../engine/finalsSeries';
+import {
   computeCareerMinutes,
   simulateSeason,
 } from '../../engine/seasonSimulator';
@@ -55,7 +60,7 @@ import type {
   ToastMessage,
 } from '../careerStoreTypes';
 
-export type SeasonActions = Pick<CareerStoreState, 'triggerMidSeasonCrossroads' | 'playSeason' | 'advancePlayoffBracketRound' | 'batchAdvanceEarlyPlayoffs' | 'enterOffseasonFromPlayoffs' | 'skipPlayoffsToEnd' | 'startFinalsLiveBroadcast' | 'setLiveGameTactic' | 'playNextLiveQuarter' | 'resolveLiveClutchChoice' | 'skipLiveGame' | 'closeLiveGameAndReturn'>;
+export type SeasonActions = Pick<CareerStoreState, 'triggerMidSeasonCrossroads' | 'playSeason' | 'advancePlayoffBracketRound' | 'batchAdvanceEarlyPlayoffs' | 'enterOffseasonFromPlayoffs' | 'skipPlayoffsToEnd' | 'advanceFinalsToDecisiveGame' | 'startFinalsLiveBroadcast' | 'setLiveGameTactic' | 'playNextLiveQuarter' | 'resolveLiveClutchChoice' | 'skipLiveGame' | 'closeLiveGameAndReturn'>;
 
 export function createSeasonActions(
   set: CareerStoreSet,
@@ -597,11 +602,10 @@ export function createSeasonActions(
       if (!career || !career.playoffBracket) return;
 
       const standings = career.currentStandings || [];
-      const finishedBracket = skipEntirePlayoffs(
-        career.playoffBracket,
-        career,
-        standings
-      );
+      const finishedBracket = {
+        ...skipEntirePlayoffs(career.playoffBracket, career, standings),
+        pendingFinalsLiveGame: false,
+      };
 
       const logs = [...career.seasonLogs];
       const nextTotals = { ...career.totals };
@@ -694,6 +698,26 @@ export function createSeasonActions(
       });
     },
 
+    advanceFinalsToDecisiveGame: () => {
+      const { career } = get();
+      const bracket = career?.playoffBracket;
+      if (
+        !career ||
+        !bracket ||
+        !bracket.playerReachedFinals ||
+        bracket.pendingFinalsLiveGame ||
+        bracket.championTeamId
+      ) {
+        return;
+      }
+      set({
+        career: {
+          ...career,
+          playoffBracket: simulateFinalsToDecisiveGame(bracket, career),
+        },
+      });
+    },
+
     startFinalsLiveBroadcast: () => {
       const { career } = get();
       if (!career || !career.playoffBracket) return;
@@ -713,10 +737,17 @@ export function createSeasonActions(
       const isConfFinalsGame7 =
         Boolean(bracket.pendingConfFinalsGame7) && !bracket.playerReachedFinals;
 
+      const finalsSeries = bracket.pendingFinalsLiveGame
+        ? getPlayerFinalsSeries(bracket)
+        : null;
+      const finalsContext = finalsSeries
+        ? getDecisiveGameContext(finalsSeries, career.team.id) ?? undefined
+        : undefined;
       const liveGame = createLiveFinalGame(
         career,
         oppTeam,
-        isConfFinalsGame7 ? 'CONF_FINALS_GAME7' : 'LEAGUE_FINALS'
+        isConfFinalsGame7 ? 'CONF_FINALS_GAME7' : 'LEAGUE_FINALS',
+        { finalsContext }
       );
       set({
         career: {
@@ -743,7 +774,8 @@ export function createSeasonActions(
 
     playNextLiveQuarter: () => {
       const { career } = get();
-      if (!career || !career.liveGame) return;
+      // 끝난 경기에 다시 반영하면 결승 시리즈 다음 결정전까지 같은 결과가 들어갑니다.
+      if (!career || !career.liveGame || career.liveGame.isFinished) return;
 
       const nextLive = simulateLiveQuarter(
         career.liveGame,
@@ -904,6 +936,35 @@ export function createSeasonActions(
             playoffBracket: resolvedBracket,
             liveGame: null,
             seasonPhase: 'POSTSEASON_BRACKET',
+          },
+        });
+        return;
+      }
+
+      // 2-c) 파이널 결정전이 끝났지만 시리즈가 계속되면 대진표로 복귀
+      if (
+        finishedType === 'LEAGUE_FINALS' &&
+        career.liveGame?.isFinished &&
+        career.playoffBracket &&
+        !career.playoffBracket.championTeamId
+      ) {
+        const finalsSeries = getPlayerFinalsSeries(career.playoffBracket);
+        const next = finalsSeries
+          ? getDecisiveGameContext(finalsSeries, career.team.id)
+          : null;
+        set({
+          career: {
+            ...career,
+            liveGame: null,
+            seasonPhase: 'POSTSEASON_BRACKET',
+          },
+          toast: {
+            id: `TOAST_${Date.now()}`,
+            title: '파이널 시리즈 계속',
+            description: next
+              ? `시리즈 ${next.playerWins}승 ${next.oppWins}패 — ${next.gameNo}차전 결정전이 기다리고 있습니다.`
+              : undefined,
+            tone: 'orange',
           },
         });
         return;

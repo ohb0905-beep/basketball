@@ -4,7 +4,15 @@ import { LEAGUE_BALANCE_META, PLAYOFF_SERIES_CONFIG } from '../config/balanceCon
 import { LEAGUE_CONFIG } from '../data/leagues';
 import type { CareerState, LeagueId, PlayerStats } from '../types/game';
 import { calculateOvr } from './statCalculator';
-import type { PlayoffBracketState, PlayoffSeriesMatchup, StandingEntry } from '../types/game';
+import type {
+  PlayoffBracketState,
+  PlayoffSeriesMatchup,
+  SeasonBoxScore,
+  StandingEntry,
+  TeamInfo,
+} from '../types/game';
+import { HIGH_SCHOOL_TEAMS, NBA_TEAMS } from '../data/teams';
+import { createLiveFinalGame } from './liveGameEngine';
 import { resolveConfFinalsGame7InBracket } from './playoffEngine';
 import {
   getDecisiveGameContext,
@@ -226,6 +234,14 @@ test('라이브로 우승 확정', () => {
   assert.match(out.bracket.rounds[0][0].summaryLog.at(-1)!, /^6차전 실시간 중계: /);
 });
 
+test('끝난 시리즈는 다시 반영하지 않음', () => {
+  const { bracket, career } = finalsOf('NBA', 3, 2);
+  const done = resolveFinalsLiveGameInBracket({ ...bracket, pendingFinalsLiveGame: true }, career, [], true, '100-90');
+  const again = resolveFinalsLiveGameInBracket(done.bracket, career, [], false, '90-100');
+  assert.equal(again.seriesFinished, false);
+  assert.equal(again.bracket, done.bracket);
+});
+
 test('라이브 패배로 탈락', () => {
   const { bracket, career } = finalsOf('NBA', 2, 3);
   const out = resolveFinalsLiveGameInBracket({ ...bracket, pendingFinalsLiveGame: true }, career, [], false, '90-100');
@@ -253,4 +269,128 @@ test('단판 결승', () => {
   assert.equal(s.higherSeedWins, 0);
   assert.equal(s.lowerSeedWins, 0);
   assert.equal(s.winnerId, null);
+});
+
+test('createLiveFinalGame 결정전 제목', () => {
+  const { career } = finalsOf('NBA', 3, 2);
+  const live = createLiveFinalGame(career, finalsTeam('Q') as unknown as TeamInfo, 'LEAGUE_FINALS', {
+    finalsContext: { gameNo: 6, playerWins: 3, oppWins: 2, kind: 'CLINCH' },
+  });
+  assert.ok(live.title.includes('파이널 6차전'), live.title);
+  assert.ok(live.title.includes('우승 매치포인트'), live.title);
+  assert.ok(live.subtitle.includes('시리즈 3승 2패'), live.subtitle);
+});
+
+async function loadStore() {
+  if (!(globalThis as Record<string, unknown>).localStorage) {
+    const mem: Record<string, string> = {};
+    (globalThis as Record<string, unknown>).localStorage = {
+      getItem: (k: string) => mem[k] ?? null,
+      setItem: (k: string, v: string) => {
+        mem[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete mem[k];
+      },
+    };
+  }
+  return (await import('../store/useCareerStore')).useCareerStore;
+}
+
+/** 결승(7전 4선승, 0-0)에 오른 NBA 커리어를 스토어에 넣습니다. */
+async function storeAtFinals() {
+  const useCareerStore = await loadStore();
+  const S = () => useCareerStore.getState();
+  S().resetAllGameData();
+  S().startNewCareer({ name: '결승테스트', jerseyNumber: '7', heightCm: 198, primaryPos: 'SF', highSchoolTeamId: HIGH_SCHOOL_TEAMS[0].id });
+  const base = S().career!;
+  const [me, opp] = NBA_TEAMS;
+  const entry = (team: TeamInfo, rank: number, isPlayerTeam: boolean) =>
+    ({ rank, conferenceRank: 1, team, wins: 58, losses: 24, winPct: 0.7, gb: 0, isPlayerTeam, qualifiedPlayoffs: true }) as StandingEntry;
+  const finals: PlayoffSeriesMatchup = {
+    id: 'R4_S1',
+    roundNumber: 4,
+    roundLabel: 'NBA 파이널',
+    conference: 'FINALS',
+    bestOf: 7,
+    winsNeeded: 4,
+    higherSeed: entry(me, 1, true),
+    lowerSeed: entry(opp, 2, false),
+    higherSeedWins: 0,
+    lowerSeedWins: 0,
+    winnerId: null,
+    involvesPlayer: true,
+    summaryLog: [],
+  };
+  const seasonLog = {
+    seasonNumber: 1, year: base.seasonYear, age: 25, league: 'NBA', leagueName: 'NBA',
+    teamId: me.id, teamName: me.name, teamShortName: me.shortName, contractType: 'NBA_STANDARD',
+    role: '주전', ovr: 88, gp: 80, injuredGamesMissed: 2, mpg: 34, ppg: 25, rpg: 6, apg: 5,
+    spg: 1, bpg: 0.5, fgPct: 48, tpPct: 37, wins: 58, losses: 24, teamRank: 1, totalLeagueTeams: 30,
+    playoffResult: '파이널 진출', wonChampionship: false, wonMvp: false, wonFinalsMvp: false,
+    wonDpoy: false, wonSixthMan: false, wonMip: false, wonRookieOfYear: false, allStarSelected: true,
+    allLeagueTeam: null, singleGameHighPts: 30, salaryEarned: 10000, headline: '테스트', narrativeLog: [],
+  } as unknown as SeasonBoxScore;
+  useCareerStore.setState({
+    career: {
+      ...base,
+      league: 'NBA',
+      team: me,
+      contractType: 'NBA_STANDARD',
+      contractYearsLeft: 2,
+      seasonLogs: [seasonLog],
+      currentStandings: [finals.higherSeed, finals.lowerSeed],
+      seasonPhase: 'POSTSEASON_BRACKET',
+      playoffBracket: {
+        league: 'NBA',
+        year: base.seasonYear,
+        totalRounds: 4,
+        currentRound: 4,
+        rounds: [[], [], [], [finals]],
+        playerEliminated: false,
+        playerReachedFinals: true,
+        championTeamId: null,
+        playoffResultLabel: '파이널 진출',
+      },
+    },
+  });
+  return S;
+}
+
+test('스토어: 결승 시리즈 흐름', async () => {
+  const S = await storeAtFinals();
+  const startChamps = S().career!.totals.championships;
+  S().advanceFinalsToDecisiveGame();
+  assert.equal(S().career!.playoffBracket!.pendingFinalsLiveGame, true);
+
+  for (let i = 0; i < 4 && !S().career!.playoffBracket?.championTeamId; i++) {
+    S().startFinalsLiveBroadcast();
+    assert.equal(S().career!.seasonPhase, 'LIVE_FINAL_BROADCAST');
+    S().skipLiveGame();
+    // 끝난 경기에 쿼터 진행을 다시 눌러도 결과가 두 번 반영되면 안 됩니다.
+    const afterSkip = S().career!.playoffBracket;
+    S().playNextLiveQuarter();
+    assert.deepEqual(S().career!.playoffBracket, afterSkip);
+    S().closeLiveGameAndReturn();
+    if (!S().career!.playoffBracket?.championTeamId) {
+      assert.equal(S().career!.seasonPhase, 'POSTSEASON_BRACKET');
+      assert.equal(S().career!.playoffBracket!.pendingFinalsLiveGame, true);
+    }
+  }
+
+  const career = S().career!;
+  const won = career.seasonLogs.at(-1)!.wonChampionship;
+  assert.notEqual(career.seasonPhase, 'POSTSEASON_BRACKET');
+  assert.equal(career.totals.championships, startChamps + (won ? 1 : 0));
+});
+
+test('스토어: 결정전 대기 중 끝까지 시뮬', async () => {
+  const S = await storeAtFinals();
+  S().advanceFinalsToDecisiveGame();
+  assert.equal(S().career!.playoffBracket!.pendingFinalsLiveGame, true);
+  S().skipPlayoffsToEnd();
+  // 시즌 정산 후에도 대진표는 남아 있습니다.
+  const bracket = S().career!.playoffBracket!;
+  assert.ok(bracket.championTeamId);
+  assert.equal(bracket.pendingFinalsLiveGame, false);
 });
