@@ -193,6 +193,7 @@ for (let run = 0; run < CAREERS; run++) {
         // championTeamId가 확정될 때까지 먼저 라운드를 한 번 더 진행합니다.
         if (bracket?.championTeamId) st.enterOffseasonFromPlayoffs();
         else if (bracket?.playerEliminated) st.advancePlayoffBracketRound();
+        else if (bracket?.playerReachedFinals && !bracket.pendingFinalsLiveGame) st.advanceFinalsToDecisiveGame();
         else if (bracket?.playerReachedFinals || bracket?.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;

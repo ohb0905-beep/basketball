@@ -187,6 +187,7 @@ for (let run = 0; run < CAREERS; run++) {
         const b = c.playoffBracket;
         // [P0 경로 통일] 플레이어가 조기 탈락했더라도 championTeamId가 확정될 때까지 대진표를 완결한 뒤 오프시즌 진입
         if (b.championTeamId) st.enterOffseasonFromPlayoffs();
+        else if (b.playerReachedFinals && !b.pendingFinalsLiveGame) st.advanceFinalsToDecisiveGame();
         else if (b.playerReachedFinals || b.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;

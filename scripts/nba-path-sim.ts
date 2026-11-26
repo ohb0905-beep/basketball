@@ -136,6 +136,7 @@ for (let run = 0; run < CAREERS; run++) {
       if (c.seasonPhase === 'POSTSEASON_BRACKET') {
         const b = c.playoffBracket;
         if (b.championTeamId) st.enterOffseasonFromPlayoffs();
+        else if (b.playerReachedFinals && !b.pendingFinalsLiveGame) st.advanceFinalsToDecisiveGame();
         else if (b.playerReachedFinals || b.pendingConfFinalsGame7) st.startFinalsLiveBroadcast();
         else st.advancePlayoffBracketRound();
         continue;
