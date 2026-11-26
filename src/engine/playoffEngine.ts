@@ -14,7 +14,10 @@ import {
   calculateBiomechanicalProfile,
   calculateOvr,
 } from './statCalculator';
-import { calculatePlayoffPlayerBonus } from './playoffStrength';
+import {
+  calculatePlayoffPlayerBonus,
+  getSeriesSeedModifiers,
+} from './playoffStrength';
 import {
   getHigherSeedHomeAdvantage,
   getPlayoffCutoffByLeague,
@@ -436,8 +439,8 @@ export function createPlayoffBracket(
     }
 
     // 1~6위 직행 시에는 7~10위 플레이인을 백그라운드로 시뮬레이션하여 실제 7·8시드를 채운 뒤 본선 1R 시작
-    const resE78 = simulateSingleSeries(piEast78, career, rng, false);
-    const resE910 = simulateSingleSeries(piEast910, career, rng, false);
+    const resE78 = simulateSingleSeries(piEast78, career, rng);
+    const resE910 = simulateSingleSeries(piEast910, career, rng);
     const resEDec = simulateSingleSeries(
       createMatchup(
         'PI2_E8',
@@ -452,11 +455,10 @@ export function createPlayoffBracket(
         { isPlayIn: true, playInSlot: 'DECIDER' }
       ),
       career,
-      rng,
-      false
+      rng
     );
-    const resW78 = simulateSingleSeries(piWest78, career, rng, false);
-    const resW910 = simulateSingleSeries(piWest910, career, rng, false);
+    const resW78 = simulateSingleSeries(piWest78, career, rng);
+    const resW910 = simulateSingleSeries(piWest910, career, rng);
     const resWDec = simulateSingleSeries(
       createMatchup(
         'PI2_W8',
@@ -471,8 +473,7 @@ export function createPlayoffBracket(
         { isPlayIn: true, playInSlot: 'DECIDER' }
       ),
       career,
-      rng,
-      false
+      rng
     );
 
     const east7 = getWinnerEntry(resE78);
@@ -563,8 +564,8 @@ export function createPlayoffBracket(
       };
     }
 
-    const res78 = simulateSingleSeries(pi78, career, rng, false);
-    const res910 = simulateSingleSeries(pi910, career, rng, false);
+    const res78 = simulateSingleSeries(pi78, career, rng);
+    const res910 = simulateSingleSeries(pi910, career, rng);
     const resDec = simulateSingleSeries(
       createMatchup(
         'PI2_EL8',
@@ -579,8 +580,7 @@ export function createPlayoffBracket(
         { isPlayIn: true, playInSlot: 'DECIDER' }
       ),
       career,
-      rng,
-      false
+      rng
     );
     const seed7 = getWinnerEntry(res78);
     const seed8 = getWinnerEntry(resDec);
@@ -665,8 +665,8 @@ export function createPlayoffBracket(
       };
     }
 
-    const res34 = simulateSingleSeries(pi34, career, rng, false);
-    const res56 = simulateSingleSeries(pi56, career, rng, false);
+    const res34 = simulateSingleSeries(pi34, career, rng);
+    const res56 = simulateSingleSeries(pi56, career, rng);
     const resDec = simulateSingleSeries(
       createMatchup(
         'PI2_NBL4',
@@ -681,8 +681,7 @@ export function createPlayoffBracket(
         { isPlayIn: true, playInSlot: 'DECIDER' }
       ),
       career,
-      rng,
-      false
+      rng
     );
     const seed3 = getWinnerEntry(res34);
     const seed4 = getWinnerEntry(resDec);
@@ -962,11 +961,14 @@ export function createPlayoffBracket(
   };
 }
 
-function simulateSingleSeries(
+export type SeriesPauseMode = 'NONE' | 'CONF_FINALS_GAME7' | 'DECISIVE_GAME';
+
+export function simulateSingleSeries(
   series: PlayoffSeriesMatchup,
   career: CareerState,
   rng: () => number,
-  pauseAtGame7: boolean = false
+  pauseMode: SeriesPauseMode = 'NONE',
+  mods: { hi: number; lo: number } = { hi: 0, lo: 0 }
 ): PlayoffSeriesMatchup {
   if (series.winnerId) return series;
 
@@ -974,10 +976,12 @@ function simulateSingleSeries(
 
   const hiEffective =
     series.higherSeed.team.rating +
-    (series.higherSeed.team.id === career.team.id ? playerBonus : 0);
+    (series.higherSeed.team.id === career.team.id ? playerBonus : 0) +
+    mods.hi;
   const loEffective =
     series.lowerSeed.team.rating +
-    (series.lowerSeed.team.id === career.team.id ? playerBonus : 0);
+    (series.lowerSeed.team.id === career.team.id ? playerBonus : 0) +
+    mods.lo;
 
   let hiWins = series.higherSeedWins;
   let loWins = series.lowerSeedWins;
@@ -987,7 +991,7 @@ function simulateSingleSeries(
   while (hiWins < series.winsNeeded && loWins < series.winsNeeded) {
     // 7전 4선승제 시리즈에서 실제로 3승 3패가 성사된 경우, 7차전 라이브 중계 진입을 위해 일시 정지
     if (
-      pauseAtGame7 &&
+      pauseMode === 'CONF_FINALS_GAME7' &&
       series.involvesPlayer &&
       series.bestOf === 7 &&
       hiWins === 3 &&
@@ -1156,7 +1160,7 @@ function advancePlayInStage(
   const rIdx = bracket.currentRound - 1;
   const currentSeriesList = bracket.rounds[rIdx] || [];
   const resolved = currentSeriesList.map((s) =>
-    simulateSingleSeries(s, career, rng, false)
+    simulateSingleSeries(s, career, rng)
   );
   const updatedRounds = [...bracket.rounds];
   updatedRounds[rIdx] = resolved;
@@ -1214,8 +1218,8 @@ function advancePlayInStage(
         playerMatch.winnerId === career.team.id
       ) {
         // 플레이어가 7·8위전 승리로 7시드 직행 확정 -> 최종전 자동 해결 후 본선 1R 즉시 진입
-        const resEDec = simulateSingleSeries(eDecider, career, rng, false);
-        const resWDec = simulateSingleSeries(wDecider, career, rng, false);
+        const resEDec = simulateSingleSeries(eDecider, career, rng);
+        const resWDec = simulateSingleSeries(wDecider, career, rng);
         const east8 = getWinnerEntry(resEDec);
         const west8 = getWinnerEntry(resWDec);
         const eastTop6 = standings
@@ -1291,7 +1295,7 @@ function advancePlayInStage(
         playerMatch.playInSlot === '7v8' &&
         playerMatch.winnerId === career.team.id
       ) {
-        const resDec = simulateSingleSeries(decider, career, rng, false);
+        const resDec = simulateSingleSeries(decider, career, rng);
         const seed8 = getWinnerEntry(resDec);
         return {
           ...bracket,
@@ -1355,7 +1359,7 @@ function advancePlayInStage(
       playerMatch.playInSlot === '3v4' &&
       playerMatch.winnerId === career.team.id
     ) {
-      const resDec = simulateSingleSeries(decider, career, rng, false);
+      const resDec = simulateSingleSeries(decider, career, rng);
       const seed4 = getWinnerEntry(resDec);
       return {
         ...bracket,
@@ -1540,7 +1544,13 @@ export function advancePlayoffRound(
     !bracket.pendingConfFinalsGame7;
 
   const resolvedSeries = currentSeriesList.map((s) =>
-    simulateSingleSeries(s, career, rng, isNbaConfFinals && s.involvesPlayer)
+    simulateSingleSeries(
+      s,
+      career,
+      rng,
+      isNbaConfFinals && s.involvesPlayer ? 'CONF_FINALS_GAME7' : 'NONE',
+      getSeriesSeedModifiers(bracket, s)
+    )
   );
   const updatedRounds = [...bracket.rounds];
   updatedRounds[currentRoundIdx - 1] = resolvedSeries;
@@ -1813,7 +1823,7 @@ export function resolveConfFinalsGame7InBracket(
 
   const updatedSeriesList = currentSeriesList.map((s) => {
     if (!s.involvesPlayer) {
-      return s.winnerId ? s : simulateSingleSeries(s, career, rng, false);
+      return s.winnerId ? s : simulateSingleSeries(s, career, rng);
     }
     const playerIsHigher = s.higherSeed.team.id === career.team.id;
     const winnerId = playerWon

@@ -1,7 +1,14 @@
-import { CareerState } from '../types/game';
+import {
+  CareerState,
+  LeagueId,
+  PlayoffBracketState,
+  PlayoffSeriesMatchup,
+  StandingEntry,
+} from '../types/game';
 import { LEAGUE_CONFIG } from '../data/leagues';
 import {
   LEAGUE_BALANCE_META,
+  PLAYOFF_SEED_CONFIG,
   PLAYOFF_SERIES_CONFIG,
   clampNum,
 } from '../config/balanceConfig';
@@ -63,4 +70,49 @@ export function calculatePlayoffPlayerBonus(career: CareerState): number {
       PLAYOFF_SERIES_CONFIG.bioStrainWeight *
       availabilityWeight
   );
+}
+
+export function getPlayoffSeed(entry: StandingEntry, league: LeagueId): number {
+  return league === 'NBA' || league === 'GLEAGUE'
+    ? entry.conferenceRank ?? entry.rank
+    : entry.rank;
+}
+
+/** 앞 라운드 본선 시리즈에서 필요 승수를 넘겨 더 치른 경기 수 */
+export function countExtraSeriesGames(
+  bracket: PlayoffBracketState,
+  teamId: string,
+  beforeRound: number
+): number {
+  let extra = 0;
+  for (const s of bracket.rounds.flat()) {
+    if (s.roundNumber >= beforeRound || s.isPlayIn) continue;
+    if (s.higherSeed.team.id !== teamId && s.lowerSeed.team.id !== teamId) continue;
+    extra += s.higherSeedWins + s.lowerSeedWins - s.winsNeeded;
+  }
+  return extra;
+}
+
+/** 시리즈 양 팀의 레이팅 단위 보정값 (0 이하). 플레이어·AI 팀에 똑같이 적용 */
+export function getSeriesSeedModifiers(
+  bracket: PlayoffBracketState,
+  series: PlayoffSeriesMatchup
+): { hi: number; lo: number } {
+  const cfg = PLAYOFF_SEED_CONFIG;
+  const modOf = (entry: StandingEntry) => {
+    const fatigue = Math.min(
+      cfg.fatigueCap,
+      countExtraSeriesGames(bracket, entry.team.id, series.roundNumber) *
+        cfg.fatiguePerExtraGame
+    );
+    const depthStart = cfg.lowSeedDepthStartByLeague[bracket.league];
+    const depth =
+      depthStart !== undefined &&
+      series.roundNumber >= 2 &&
+      getPlayoffSeed(entry, bracket.league) >= depthStart
+        ? (series.roundNumber - 1) * cfg.lowSeedDepthPerRound
+        : 0;
+    return 0 - fatigue - depth; // -0 방지
+  };
+  return { hi: modOf(series.higherSeed), lo: modOf(series.lowerSeed) };
 }

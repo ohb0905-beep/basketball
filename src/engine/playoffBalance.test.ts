@@ -4,7 +4,13 @@ import { LEAGUE_BALANCE_META, PLAYOFF_SERIES_CONFIG } from '../config/balanceCon
 import { LEAGUE_CONFIG } from '../data/leagues';
 import type { CareerState, LeagueId, PlayerStats } from '../types/game';
 import { calculateOvr } from './statCalculator';
-import { calculatePlayoffPlayerBonus } from './playoffStrength';
+import type { PlayoffBracketState, PlayoffSeriesMatchup, StandingEntry } from '../types/game';
+import {
+  calculatePlayoffPlayerBonus,
+  countExtraSeriesGames,
+  getPlayoffSeed,
+  getSeriesSeedModifiers,
+} from './playoffStrength';
 
 function careerOf(league: LeagueId, stat: number, mpg: number): CareerState {
   const stats: PlayerStats = { ins: stat, out: stat, ply: stat, def: stat, reb: stat, phy: stat };
@@ -43,4 +49,80 @@ test('PO 선수 보너스: 정규시즌 기여 수준', () => {
     calculatePlayoffPlayerBonus(careerOf('NBA', 98, 34)) >
       calculatePlayoffPlayerBonus(careerOf('NBA', 98, 10))
   );
+});
+
+function entryOf(id: string, rank: number, conferenceRank?: number): StandingEntry {
+  return { rank, conferenceRank, team: { id } } as unknown as StandingEntry;
+}
+
+function seriesOf(
+  roundNumber: number,
+  hi: StandingEntry,
+  lo: StandingEntry,
+  hiWins = 0,
+  loWins = 0,
+  winsNeeded = 4
+): PlayoffSeriesMatchup {
+  return {
+    roundNumber,
+    winsNeeded,
+    higherSeed: hi,
+    lowerSeed: lo,
+    higherSeedWins: hiWins,
+    lowerSeedWins: loWins,
+  } as unknown as PlayoffSeriesMatchup;
+}
+
+function bracketOf(league: LeagueId, ...rounds: PlayoffSeriesMatchup[][]): PlayoffBracketState {
+  return { league, rounds } as unknown as PlayoffBracketState;
+}
+
+test('시드 판정', () => {
+  assert.equal(getPlayoffSeed(entryOf('a', 9, 3), 'NBA'), 3);
+  assert.equal(getPlayoffSeed(entryOf('a', 7), 'EUROLEAGUE'), 7);
+  assert.equal(getPlayoffSeed(entryOf('a', 12, 10), 'NBA'), 10);
+});
+
+test('누적 체력', () => {
+  const a = entryOf('A', 1, 1);
+  const b = entryOf('B', 2, 2);
+  const bracket = bracketOf(
+    'NBA',
+    [seriesOf(1, a, entryOf('X', 8, 8), 4, 3), seriesOf(1, b, entryOf('Y', 7, 7), 4, 0)],
+    [seriesOf(2, a, b)]
+  );
+  assert.equal(countExtraSeriesGames(bracket, 'A', 2), 3);
+  assert.equal(countExtraSeriesGames(bracket, 'B', 2), 0);
+  const mods = getSeriesSeedModifiers(bracket, bracket.rounds[1][0]);
+  assert.ok(Math.abs(mods.hi - -1.05) < 1e-9, `hi ${mods.hi}`);
+  assert.equal(mods.lo, 0);
+});
+
+test('체력 상한', () => {
+  const a = entryOf('A', 1, 1);
+  const bracket = bracketOf('NBA', [seriesOf(1, a, entryOf('X', 8, 8), 4, 10)], [seriesOf(2, a, entryOf('B', 2, 2))]);
+  // 4-10은 비현실적이지만 추가 경기 10(14 - 4)을 만들기 위한 값
+  assert.equal(countExtraSeriesGames(bracket, 'A', 2), 10);
+  assert.equal(getSeriesSeedModifiers(bracket, bracket.rounds[1][0]).hi, -2.5);
+});
+
+test('하위 시드 뎁스', () => {
+  const top = entryOf('T', 1, 1);
+  const six = entryOf('S6', 11, 6);
+  const nba = (round: number, hi: StandingEntry, lo: StandingEntry) => {
+    const s = seriesOf(round, hi, lo);
+    return getSeriesSeedModifiers(bracketOf('NBA', [s]), s);
+  };
+  assert.equal(nba(2, top, six).lo, -0.9);
+  assert.equal(nba(3, top, six).lo, -1.8);
+  assert.equal(nba(1, entryOf('S5', 9, 5), six).lo, 0);
+  assert.equal(nba(1, entryOf('S5', 9, 5), six).hi, 0);
+  const ncaa = seriesOf(2, entryOf('N2', 2), entryOf('N7', 7));
+  assert.equal(getSeriesSeedModifiers(bracketOf('NCAA', [ncaa]), ncaa).lo, 0);
+});
+
+test('보정은 AI에도 똑같이', () => {
+  const s = seriesOf(2, entryOf('AI1', 1, 1), entryOf('AI2', 11, 6));
+  const bracket = bracketOf('NBA', [s]);
+  assert.deepEqual(getSeriesSeedModifiers(bracket, s), { hi: 0, lo: -0.9 });
 });
