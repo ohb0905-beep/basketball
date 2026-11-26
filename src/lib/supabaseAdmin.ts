@@ -414,6 +414,7 @@ export async function insertAnalyticsEventToSupabase(
 }
 
 export const ADMIN_ANALYTICS_RPC_NAME = 'admin_analytics_report';
+export const ADMIN_ANALYTICS_SOURCES_RPC_NAME = 'admin_analytics_sources';
 export const ADMIN_ANALYTICS_RECENT_LIMIT = 30;
 const ADMIN_ANALYTICS_RPC_TIMEOUT_MS = 20_000;
 
@@ -430,6 +431,8 @@ export interface FetchAdminAnalyticsResult {
   /** admin_analytics_report 함수가 반환한 집계 JSON (미설치/미생성 시 null) */
   aggregate: unknown;
   recentRows: AdminAnalyticsRecentRow[];
+  /** 1.3.2 유입 경로 집계 (admin_analytics_sources 미설치·실패 시 null) */
+  sources: unknown;
   /** Supabase에 집계 함수가 아직 설치되지 않음 (SQL 실행 필요) */
   setupRequired: boolean;
   /** analytics_events 테이블 자체가 아직 없음 */
@@ -524,7 +527,7 @@ export async function fetchAdminAnalyticsFromSupabase(
     });
 
   try {
-    let [rpcRes, recentRes] = await Promise.all([
+    let [rpcRes, recentRes, sourcesRes] = await Promise.all([
       callRpc(versionFilter),
       fetch(recentUrl.toString(), {
         method: 'GET',
@@ -532,7 +535,16 @@ export async function fetchAdminAnalyticsFromSupabase(
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
         cache: 'no-store',
       }),
+      // 경로 표는 덤이라 실패해도 대시보드 전체를 막지 않습니다.
+      fetch(`${origin}/rest/v1/rpc/${ADMIN_ANALYTICS_SOURCES_RPC_NAME}`, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(serviceRoleKey),
+        body: JSON.stringify({ p_since: params.sinceIso }),
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        cache: 'no-store',
+      }).catch(() => null),
     ]);
+    const sources: unknown = sourcesRes?.ok ? await sourcesRes.json().catch(() => null) : null;
 
     let tableNotReady = recentRes.status === 404;
     let recentRows: AdminAnalyticsRecentRow[] = [];
@@ -577,7 +589,7 @@ export async function fetchAdminAnalyticsFromSupabase(
 
     return {
       ok: true,
-      data: { aggregate, recentRows, setupRequired, tableNotReady },
+      data: { aggregate, recentRows, sources, setupRequired, tableNotReady },
     };
   } catch (err) {
     const isTimeout =

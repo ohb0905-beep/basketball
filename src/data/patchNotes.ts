@@ -34,6 +34,15 @@ export interface PatchNote {
 
 export const PATCH_NOTES: PatchNote[] = [
   {
+    version: '1.3.2',
+    date: '2026-11-26',
+    title: '익명 통계 정비',
+    summary: '게임 내용은 그대로이고, 플레이어 여러분이 어떤 경로로 게임을 알게 되셨는지 익명 통계에 함께 남기도록 정비했습니다.',
+    highlights: [
+      '처음 접속한 경로(링크의 출처 표시 또는 이전 사이트 주소)를 익명 통계에 한 번만 기록합니다. 개인을 알아볼 수 있는 정보는 모으지 않습니다.',
+    ],
+  },
+  {
     version: '1.3.1',
     date: '2026-11-26',
     title: '새 주소 roadtomvp.com으로 이사했습니다',

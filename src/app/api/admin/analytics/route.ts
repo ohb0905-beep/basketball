@@ -79,6 +79,7 @@ export async function GET(request: NextRequest) {
       nowMs,
       setupRequired: result.data.setupRequired,
       tableNotReady: result.data.tableNotReady,
+      sources: result.data.sources,
     }
   );
 
