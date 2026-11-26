@@ -142,7 +142,7 @@ export function Header({
   }, [setEspnLogos]);
 
   return (
-    <header className="sticky top-0 z-40 bg-[var(--t-bg)]/90 backdrop-blur-md">
+    <header className="sticky top-0 z-40 bg-[var(--t-bg)]/90 backdrop-blur-md pt-safe">
       <div
         className={`mx-auto px-4 h-[52px] flex items-center justify-between gap-2 transition-[max-width] duration-200 ${
           wide ? 'max-w-[760px]' : 'max-w-[560px]'
