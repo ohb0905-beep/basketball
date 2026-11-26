@@ -48,6 +48,7 @@ bun run typecheck && bun run lint && bun run test && bun run balance:check
 - `src/config/`: `appMeta.ts`(버전), `balanceConfig.ts`(밸런스·경제 값).
 - `src/lib/`: 서버 유틸 (분석 이벤트 스키마, 피드백, 설문, 관리자 인증, Supabase 접근).
 - `src/data/patchNotes.ts`: 플레이어용 패치노트 (최신이 맨 앞).
+- `src/lib/domainMove.ts`: 예전 주소(roadtomvp.vercel.app) → 새 주소(www.roadtomvp.com) 세이브 이사. 새 localStorage 값을 만들면 옮길 값인지 보고 `CARRIED_STORAGE_KEYS`에 넣습니다.
 - 루트 `app/`은 `src/app/` 페이지를 다시 내보내기만 합니다. 실제 페이지는 `src/app/`에 작성합니다.
 - `supabase/migrations/`: DB 마이그레이션 SQL.
 

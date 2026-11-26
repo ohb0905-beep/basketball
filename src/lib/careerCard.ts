@@ -7,7 +7,7 @@ import { ALL_INTERNATIONAL_TEAMS, ALL_TEAMS } from '../data/teams';
 import type { CareerRetrospective, LeagueId, TeamInfo } from '../types/game';
 
 /** 카드 맨 아래에 적는 게임 주소 (홍보 문구 없이 주소만) */
-export const CAREER_CARD_SITE_LABEL = 'roadtomvp.vercel.app';
+export const CAREER_CARD_SITE_LABEL = 'roadtomvp.com';
 export const CAREER_CARD_WIDTH = 1080;
 export const CAREER_CARD_HEIGHT = 1350;
 
