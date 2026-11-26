@@ -1823,7 +1823,9 @@ export function resolveConfFinalsGame7InBracket(
 
   const updatedSeriesList = currentSeriesList.map((s) => {
     if (!s.involvesPlayer) {
-      return s.winnerId ? s : simulateSingleSeries(s, career, rng);
+      return s.winnerId
+        ? s
+        : simulateSingleSeries(s, career, rng, 'NONE', getSeriesSeedModifiers(bracket, s));
     }
     const playerIsHigher = s.higherSeed.team.id === career.team.id;
     const winnerId = playerWon

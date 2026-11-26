@@ -5,6 +5,7 @@ import { LEAGUE_CONFIG } from '../data/leagues';
 import type { CareerState, LeagueId, PlayerStats } from '../types/game';
 import { calculateOvr } from './statCalculator';
 import type { PlayoffBracketState, PlayoffSeriesMatchup, StandingEntry } from '../types/game';
+import { resolveConfFinalsGame7InBracket } from './playoffEngine';
 import {
   calculatePlayoffPlayerBonus,
   countExtraSeriesGames,
@@ -125,4 +126,28 @@ test('보정은 AI에도 똑같이', () => {
   const s = seriesOf(2, entryOf('AI1', 1, 1), entryOf('AI2', 11, 6));
   const bracket = bracketOf('NBA', [s]);
   assert.deepEqual(getSeriesSeedModifiers(bracket, s), { hi: 0, lo: -0.9 });
+});
+
+test('컨퍼런스 파이널 7차전 해결 시 AI 시리즈에도 보정 적용', () => {
+  const team = (id: string) => ({ id, name: id, shortName: id, rating: 80 });
+  const ent = (id: string, seed: number) =>
+    ({ rank: seed, conferenceRank: seed, team: team(id) }) as unknown as StandingEntry;
+  const a = ent('A', 1);
+  const round1 = seriesOf(1, a, ent('X', 8), 4, 14); // A 추가 경기 10 -> -2.5
+  const ai = { ...seriesOf(2, a, ent('B', 2)), involvesPlayer: false, winnerId: null, summaryLog: [] };
+  const player = {
+    ...seriesOf(2, ent('P', 3), ent('Q', 4), 3, 3),
+    involvesPlayer: true,
+    winnerId: null,
+    summaryLog: [],
+  };
+  const bracket = {
+    ...bracketOf('NBA', [round1], [ai, player]),
+    currentRound: 2,
+    totalRounds: 3,
+  } as unknown as PlayoffBracketState;
+  const career = { ...careerOf('NBA', 84, 30), team: team('P') } as unknown as CareerState;
+  // 동률 레이팅, rng 0.5: 홈 1차전 상위 시드 확률 0.54(무보정) vs 0.49(보정) -> 보정 시 하위 시드가 1차전 승리
+  const out = resolveConfFinalsGame7InBracket(bracket, career, [], true, '', () => 0.5);
+  assert.match(out.rounds[1][0].summaryLog[0], /^1차전: B 승리/);
 });
