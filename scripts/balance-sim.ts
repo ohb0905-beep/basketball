@@ -453,6 +453,7 @@ for (const lg of ALL_LEAGUES) {
   let bottomHalfChamps = 0;
   let totalSeasons = 0;
 
+  // NBA는 10×20 판도 표본 (1.4.0, 소유자 승인: 흔들림 완화)
   const parityRuns = lg === 'NBA' ? 10 : 5; // NBA는 시드 분포 지표 안정화를 위해 표본 확대
   for (let run = 0; run < parityRuns; run++) {
     let ratingsMap = TEAMS.createInitialTeamRatingsMap();

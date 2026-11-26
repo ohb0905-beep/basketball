@@ -244,15 +244,26 @@ function buildFinalOutcome(
   ) {
     // 시리즈가 이어지는 결정전은 우승/준우승 대신 경기 후 시리즈 상황을 알립니다.
     const { gameNo, playerWins, oppWins } = liveGame.finalsContext;
+    // 패배 후 양쪽이 모두 매치포인트면 최종전, 아니면 다음 결정전입니다.
+    const lossNext =
+      playerWins === (getFinalsSeriesBestOf(career.league) + 1) / 2 - 1 &&
+      oppWins + 1 === playerWins
+        ? '최종전으로'
+        : '다음 결정전으로';
     baseHeadline = won
       ? `파이널 ${gameNo}차전 승리 — 시리즈 ${playerWins + 1}승 ${oppWins}패, 결정전이 이어집니다`
-      : `파이널 ${gameNo}차전 패배 — 시리즈 ${playerWins}승 ${oppWins + 1}패, 최종 결정전으로`;
+      : `파이널 ${gameNo}차전 패배 — 시리즈 ${playerWins}승 ${oppWins + 1}패, ${lossNext}`;
   } else {
     baseHeadline = won
       ? `챔피언십 우승 — ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name} 제압 (${career.name} ${playerStats.pts}점${
           wonFinalsMvp ? ' · 파이널 MVP' : ''
         })`
-      : `파이널 준우승 — ${liveGame.playerTeam.name}, 최종전 ${teamScore}-${oppScore} 석패`;
+      : `파이널 준우승 — ${liveGame.playerTeam.name}, ${
+          !liveGame.finalsContext ||
+          liveGame.finalsContext.gameNo === getFinalsSeriesBestOf(career.league)
+            ? '최종전 '
+            : ''
+        }${teamScore}-${oppScore} 석패`;
   }
 
   return {

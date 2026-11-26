@@ -12,7 +12,7 @@ import type {
   TeamInfo,
 } from '../types/game';
 import { HIGH_SCHOOL_TEAMS, NBA_TEAMS } from '../data/teams';
-import { createLiveFinalGame } from './liveGameEngine';
+import { createLiveFinalGame, skipLiveGameToEnd } from './liveGameEngine';
 import { resolveConfFinalsGame7InBracket } from './playoffEngine';
 import {
   getDecisiveGameContext,
@@ -149,7 +149,7 @@ test('컨퍼런스 파이널 7차전 해결 시 AI 시리즈에도 보정 적용
   const ent = (id: string, seed: number) =>
     ({ rank: seed, conferenceRank: seed, team: team(id) }) as unknown as StandingEntry;
   const a = ent('A', 1);
-  const round1 = seriesOf(1, a, ent('X', 8), 4, 14); // A 추가 경기 10 -> -2.5
+  const round1 = seriesOf(1, a, ent('X', 8), 4, 14); // A 추가 경기 14 -> -2.5
   const ai = { ...seriesOf(2, a, ent('B', 2)), involvesPlayer: false, winnerId: null, summaryLog: [] };
   const player = {
     ...seriesOf(2, ent('P', 3), ent('Q', 4), 3, 3),
@@ -281,6 +281,28 @@ test('createLiveFinalGame 결정전 제목', () => {
   assert.ok(live.subtitle.includes('시리즈 3승 2패'), live.subtitle);
 });
 
+/** 결정전 문맥으로 끝까지 돌려 패배한 경기의 헤드라인을 구합니다. */
+function lossHeadline(gameNo: number, playerWins: number, oppWins: number, kind: 'CLINCH' | 'ELIMINATION') {
+  const { career } = finalsOf('NBA', playerWins, oppWins);
+  for (let seed = 1; seed < 300; seed++) {
+    const rng = mulberry32(seed);
+    const live = createLiveFinalGame(career, finalsTeam('Q') as unknown as TeamInfo, 'LEAGUE_FINALS', {
+      finalsContext: { gameNo, playerWins, oppWins, kind },
+    });
+    const out = skipLiveGameToEnd(live, career, rng).finalOutcome!;
+    if (!out.won) return out.headline;
+  }
+  throw new Error('패배 시드를 찾지 못했습니다');
+}
+
+test('결정전 패배 헤드라인', () => {
+  assert.match(lossHeadline(5, 3, 1, 'CLINCH'), /시리즈 3승 2패, 다음 결정전으로/);
+  assert.match(lossHeadline(6, 3, 2, 'CLINCH'), /시리즈 3승 3패, 최종전으로/);
+  const runnerUp = lossHeadline(5, 1, 3, 'ELIMINATION');
+  assert.match(runnerUp, /^파이널 준우승/);
+  assert.doesNotMatch(runnerUp, /최종전/);
+});
+
 async function loadStore() {
   if (!(globalThis as Record<string, unknown>).localStorage) {
     const mem: Record<string, string> = {};
@@ -375,7 +397,7 @@ test('스토어: 결승 시리즈 흐름', async () => {
     const headline = S().career!.liveGame!.finalOutcome!.headline;
     assert.equal(S().career!.seasonLogs.at(-1)!.narrativeLog[0], headline);
     if (afterSkip?.championTeamId) assert.match(headline, /^(챔피언십 우승|파이널 준우승)/);
-    else assert.match(headline, /^파이널 \d차전 (승리 — .*결정전이 이어집니다|패배 — .*최종 결정전으로)/);
+    else assert.match(headline, /^파이널 \d차전 (승리 — .*결정전이 이어집니다|패배 — .*(다음 결정전|최종전)으로)/);
     S().closeLiveGameAndReturn();
     if (!S().career!.playoffBracket?.championTeamId) {
       assert.equal(S().career!.seasonPhase, 'POSTSEASON_BRACKET');
@@ -391,6 +413,7 @@ test('스토어: 결승 시리즈 흐름', async () => {
 
 test('스토어: 결정전 대기 중 끝까지 시뮬', async () => {
   const S = await storeAtFinals();
+  const startChamps = S().career!.totals.championships;
   S().advanceFinalsToDecisiveGame();
   assert.equal(S().career!.playoffBracket!.pendingFinalsLiveGame, true);
   S().skipPlayoffsToEnd();
@@ -398,4 +421,8 @@ test('스토어: 결정전 대기 중 끝까지 시뮬', async () => {
   const bracket = S().career!.playoffBracket!;
   assert.ok(bracket.championTeamId);
   assert.equal(bracket.pendingFinalsLiveGame, false);
+  const career = S().career!;
+  const won = bracket.championTeamId === career.team.id;
+  assert.equal(career.seasonLogs.at(-1)!.wonChampionship, won);
+  assert.equal(career.totals.championships, startChamps + (won ? 1 : 0));
 });

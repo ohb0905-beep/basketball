@@ -183,9 +183,6 @@ export const REGULAR_SEASON_WIN_CONFIG = {
   negativeMarginFloor: -0.015,
 };
 
-/**
- * 플레이오프 시리즈 승률 파라미터 (출전 비중·부상 감쇠·경기별 홈/원정 교대·왕조 수확체감)
- */
 /** PO 시드 구조 보정: 앞 라운드 추가 경기 피로와 하위 시드 뎁스 부담 (표에 없는 리그는 뎁스 보정 없음) */
 export const PLAYOFF_SEED_CONFIG = {
   fatiguePerExtraGame: 0.35,
@@ -201,6 +198,9 @@ export const PLAYOFF_SEED_CONFIG = {
   } as Partial<Record<LeagueId, number>>,
 };
 
+/**
+ * 플레이오프 시리즈 승률 파라미터 (출전 비중·부상 감쇠·경기별 홈/원정 교대·왕조 수확체감)
+ */
 export const PLAYOFF_SERIES_CONFIG = {
   gameWinProbSlope: 0.036,
   minGameWinProb: 0.24,

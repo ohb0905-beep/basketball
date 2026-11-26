@@ -170,8 +170,14 @@ export function SeasonTab() {
       : Boolean(bracket.pendingConfFinalsGame7));
   const finalsSeries = bracket ? getPlayerFinalsSeries(bracket) : null;
   const finalsGameNo = finalsSeries
-    ? getDecisiveGameContext(finalsSeries, career.team.id)?.gameNo
-    : undefined;
+    ? getDecisiveGameContext(finalsSeries, career.team.id)?.gameNo ?? 1
+    : 1;
+  // 단판 결승은 결정전 대기 없이 바로 라이브 중계로 들어갑니다.
+  const isSingleGameFinals = finalsSeries?.bestOf === 1;
+  const enterSingleGameFinals = () => {
+    advanceFinalsToDecisiveGame();
+    startFinalsLiveBroadcast();
+  };
 
   const leagueChases = getLeagueRecordChases(recordBook, career, career.league);
   const featuredChase =
@@ -461,10 +467,10 @@ export function SeasonTab() {
               <button
                 type="button"
                 data-testid="start-finals-series-btn"
-                onClick={advanceFinalsToDecisiveGame}
+                onClick={isSingleGameFinals ? enterSingleGameFinals : advanceFinalsToDecisiveGame}
                 className="t-cta"
               >
-                파이널 시리즈 시작
+                {isSingleGameFinals ? '파이널 실시간 중계 입장' : '파이널 시리즈 시작'}
               </button>
             ) : canEnterHighStakesLive ? (
               <button
