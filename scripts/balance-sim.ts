@@ -10,6 +10,8 @@
  * --check 를 주면 BALANCE_TARGETS 범위를 벗어난 지표가 있을 때 exit code 1 로 종료합니다.
  * 자동 플레이는 이벤트 첫 선택지·기본 훈련만 사용하므로 '평범한 유저' 기준 수치입니다.
  */
+import { mulberry32 } from './seededRandom';
+
 export {};
 
 const rawArgs = process.argv.slice(2);
@@ -24,17 +26,6 @@ const SEEDS: number[] = seedsFlag
       .map((s) => Number(s.trim()))
       .filter((n) => Number.isFinite(n) && n > 0)
   : [Number(args[1] ?? 20261121)];
-
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const mem: Record<string, string> = {};
 (globalThis as any).localStorage = {

@@ -14,22 +14,14 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 
+import { mulberry32 } from './seededRandom';
+
 export {};
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const CAREERS = Math.max(1, Math.floor(Number(args[0] ?? 1000)));
 const SEED = Number(args[1] ?? 20261122);
 
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 Math.random = mulberry32(SEED);
 
 const mem: Record<string, string> = {};
