@@ -23,7 +23,7 @@ export function LegalDocumentLayout({
 }: LegalDocumentLayoutProps) {
   return (
     <div className="min-h-screen bg-[var(--t-bg)] text-[var(--t-g900)] flex flex-col">
-      <header className="sticky top-0 z-30 bg-[var(--t-bg)]/92 backdrop-blur-md border-b border-[var(--t-g200)]">
+      <header className="sticky top-0 z-30 bg-[var(--t-bg)]/92 backdrop-blur-md border-b border-[var(--t-g200)] pt-safe">
         <div className="max-w-[680px] mx-auto px-4 h-[52px] flex items-center justify-between gap-3">
           <Link
             href="/"

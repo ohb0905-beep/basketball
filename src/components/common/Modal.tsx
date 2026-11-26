@@ -1005,7 +1005,7 @@ export function ToastBanner() {
       aria-live="polite"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
-      className="fixed top-[60px] left-1/2 -translate-x-1/2 z-50 w-[calc(100%-32px)] max-w-[440px] bg-[var(--t-g900)] text-[var(--t-card)] pl-3.5 pr-2 py-2.5 rounded-2xl shadow-lg flex items-center gap-3"
+      className="fixed top-safe-toast left-1/2 -translate-x-1/2 z-50 w-[calc(100%-32px)] max-w-[440px] bg-[var(--t-g900)] text-[var(--t-card)] pl-3.5 pr-2 py-2.5 rounded-2xl shadow-lg flex items-center gap-3"
     >
       <span className={`w-1 h-7 rounded-full shrink-0 ${accentBar}`} />
       <div className="flex-1 min-w-0">
