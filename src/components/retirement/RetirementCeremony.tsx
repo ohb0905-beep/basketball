@@ -1135,7 +1135,7 @@ export function RetirementCeremony({
               type="button"
               data-testid="open-career-card"
               onClick={() => setShareCardOpen(true)}
-              className="t-cta-sub"
+              className="t-cta-sub t-cta-sub--accent"
             >
               커리어 카드
             </button>
@@ -1163,7 +1163,7 @@ export function RetirementCeremony({
                     completeRetirementAndReturnHome();
                     resetActiveCareer();
                   }}
-                  className="t-cta-sub"
+                  className="t-cta-sub t-cta-sub--card"
                 >
                   새 유망주 바로 시작
                 </button>
