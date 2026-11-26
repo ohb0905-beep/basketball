@@ -48,6 +48,7 @@ const { useCareerStore } = await import('../src/store/useCareerStore');
 const PE = await import('../src/engine/playoffEngine');
 const LIVE = await import('../src/engine/liveGameEngine');
 const STANDINGS = await import('../src/engine/standingsEngine');
+const PS = await import('../src/engine/playoffStrength');
 const SIM = await import('../src/engine/seasonSimulator');
 const STAT = await import('../src/engine/statCalculator');
 const TEAMS = await import('../src/data/teams');
@@ -395,6 +396,33 @@ for (const sn of leagueSnaps) {
 // ───────────────────── 4) 9개 리그 자체 20년 판도 시뮬레이션 (리그당 100시즌) ─────────────────────
 const parityRng = mulberry32(SEED ^ 0x51a7b3);
 const parityTable: Record<string, any> = {};
+// 시드별 PO 성적 (NBA만, 동·서부 1번 시드는 모두 1번으로 셈)
+const seedAgg = {
+  seasons: 0,
+  champBySeed: { s1: 0, s23: 0, s45: 0, s6p: 0 },
+  seed1R1: 0,
+  seed1R1Exit: 0,
+  seed45R2: 0,
+  seed45R2Pass: 0,
+  repeatChamp: 0,
+  rhoSum: 0,
+  prevChamp: '',
+};
+const spearman = (a: number[], b: number[]) => {
+  const rank = (x: number[]) => {
+    const r = new Array<number>(x.length);
+    x.map((v, i) => [v, i] as const)
+      .sort((p, q) => p[0] - q[0])
+      .forEach(([, i], k) => (r[i] = k));
+    return r;
+  };
+  const ra = rank(a);
+  const rb = rank(b);
+  const n = a.length;
+  let d = 0;
+  for (let i = 0; i < n; i++) d += (ra[i] - rb[i]) ** 2;
+  return 1 - (6 * d) / (n * (n * n - 1));
+};
 const parityMetrics: Record<
   string,
   {
@@ -424,6 +452,7 @@ for (const lg of ALL_LEAGUES) {
   for (let run = 0; run < 5; run++) {
     let ratingsMap = TEAMS.createInitialTeamRatingsMap();
     let prevPair = '';
+    seedAgg.prevChamp = '';
     for (let yr = 0; yr < 20; yr++) {
       if (yr > 0) ratingsMap = TEAMS.evolveLeagueTeamRatings(ratingsMap, parityRng);
       const totalG = LEAGUE_CONFIG[lg].games;
@@ -507,6 +536,39 @@ for (const lg of ALL_LEAGUES) {
       const finished = PE.skipEntirePlayoffs(bracket, neutralCareer, standingsWithCarrier, parityRng);
       if (!finished.championTeamId) continue;
       totalSeasons++;
+      if (lg === 'NBA') {
+        const seedOf = (id: string) => {
+          const e = realStandings.find((x) => x.team.id === id);
+          return e ? PS.getPlayoffSeed(e, lg) : 99;
+        };
+        seedAgg.seasons++;
+        seedAgg.rhoSum += spearman(
+          realStandings.map((x) => x.team.rating),
+          realStandings.map((x) => x.winPct)
+        );
+        const cs = seedOf(finished.championTeamId);
+        if (cs === 1) seedAgg.champBySeed.s1++;
+        else if (cs <= 3) seedAgg.champBySeed.s23++;
+        else if (cs <= 5) seedAgg.champBySeed.s45++;
+        else seedAgg.champBySeed.s6p++;
+        if (finished.championTeamId === seedAgg.prevChamp) seedAgg.repeatChamp++;
+        seedAgg.prevChamp = finished.championTeamId;
+        const main = finished.rounds.flat().filter((x) => !x.isPlayIn);
+        for (const ser of main) {
+          for (const e of [ser.higherSeed, ser.lowerSeed]) {
+            const sd = seedOf(e.team.id);
+            const won = ser.winnerId === e.team.id;
+            if (ser.roundNumber === 1 && sd === 1) {
+              seedAgg.seed1R1++;
+              if (!won) seedAgg.seed1R1Exit++;
+            }
+            if (ser.roundNumber === 2 && (sd === 4 || sd === 5)) {
+              seedAgg.seed45R2++;
+              if (won) seedAgg.seed45R2Pass++;
+            }
+          }
+        }
+      }
       const champTeam = teams.find((t) => t.id === finished.championTeamId);
       const champName = champTeam?.shortName || finished.championTeamId;
       champCounts[champName] = (champCounts[champName] || 0) + 1;
@@ -756,6 +818,14 @@ const metrics = {
   nbaParityMaxFinalsPct: parityMetrics.NBA.maxFinalsPct,
   nbaParityBottomHalfChampPct: parityMetrics.NBA.bottomHalfChampPct,
   nbaParityConsecFinalsPct: parityMetrics.NBA.consecFinalsPct,
+  nbaSeed1ChampPct: pct(seedAgg.champBySeed.s1, seedAgg.seasons),
+  nbaSeed23ChampPct: pct(seedAgg.champBySeed.s23, seedAgg.seasons),
+  nbaSeed45ChampPct: pct(seedAgg.champBySeed.s45, seedAgg.seasons),
+  nbaSeed6PlusChampPct: pct(seedAgg.champBySeed.s6p, seedAgg.seasons),
+  nbaSeed1FirstRoundExitPct: pct(seedAgg.seed1R1Exit, seedAgg.seed1R1),
+  nbaSeed45SecondRoundPassPct: pct(seedAgg.seed45R2Pass, seedAgg.seed45R2),
+  nbaRankRatingRho: +(seedAgg.rhoSum / Math.max(1, seedAgg.seasons)).toFixed(3),
+  nbaDefendingChampRepeatPct: pct(seedAgg.repeatChamp, seedAgg.seasons - 5), // 보고용
   kblParityMaxChampPct: parityMetrics.KBL.maxChampPct,
   nbaAvgLiveFmvpPct: fmvpCheckMetrics.NBA.avgLiveFmvp,
   nbaStarLiveFmvpPct: fmvpCheckMetrics.NBA.starLiveFmvp,
@@ -845,6 +915,12 @@ const BALANCE_TARGETS: [string, number, number, number][] = [
   ['NBA 최다 결승 진출팀 점유율(%)', metrics.nbaParityMaxFinalsPct, 0, 26],
   ['NBA 초기 하위50% 팀 우승 비율(%)', metrics.nbaParityBottomHalfChampPct, 20, 55],
   ['NBA 연속 동일 결승 비율(%)', metrics.nbaParityConsecFinalsPct, 0, 8],
+  ['NBA 1번 시드 우승 점유(%)', metrics.nbaSeed1ChampPct, 50, 68],
+  ['NBA 2~3번 시드 우승 점유(%)', metrics.nbaSeed23ChampPct, 20, 40],
+  ['NBA 6번 이하 시드 우승 점유(%)', metrics.nbaSeed6PlusChampPct, 0, 4],
+  ['NBA 1번 시드 1라운드 탈락(%)', metrics.nbaSeed1FirstRoundExitPct, 0, 12],
+  ['NBA 4~5번 시드 2라운드 통과(%)', metrics.nbaSeed45SecondRoundPassPct, 15, 35],
+  ['NBA 순위-전력 상관', metrics.nbaRankRatingRho, 0.92, 1],
   ['KBL 최다 우승팀 점유율(%)', metrics.kblParityMaxChampPct, 0, 24],
   ['NBA 평균 주전 라이브 FMVP(%)', metrics.nbaAvgLiveFmvpPct, 10, 55],
   ['NBA 스타급 라이브 FMVP(%)', metrics.nbaStarLiveFmvpPct, 65, 100],
