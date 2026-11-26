@@ -625,7 +625,7 @@ export function evaluateCareerLegacy(career: CareerState): LegacyEvaluation {
     tierId = 'FIRST_BALLOT_HOF';
     tierTitle = '명예의 전당 퍼스트 발롯';
     summaryComment =
-      'NBA 무대에서 MVP·파이널 MVP, All-NBA 퍼스트 팀 다수 선정, 올스타 10회 또는 통산 25,000득점의 반열에 오르며 첫 투표 만에 명예의 전당 헌액 자격을 확보했습니다.';
+      '한 시대를 대표한 NBA 스타로 인정받아 첫 투표 만에 명예의 전당 헌액이 확정됐습니다.';
   } else if (
     career.totals.nbaAllStars >= 1 ||
     career.totals.nbaChampionships >= 1 ||

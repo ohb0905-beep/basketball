@@ -784,28 +784,29 @@ export function RetirementCeremony({
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 py-4 border-y border-[var(--t-g100)] text-center tabular-nums">
+                  {/* 통산 평균은 리바운드·어시스트가 두 자리면 길어지므로 가운데 칸을 넓히고, 좁은 화면에서는 숫자를 함께 줄입니다. */}
+                  <div className="grid grid-cols-[1fr_1.7fr_1fr] gap-2 py-4 border-y border-[var(--t-g100)] text-center tabular-nums">
                     <div>
-                      <span className="block text-[22px] font-bold text-[var(--t-accent)]">
+                      <span className="block whitespace-nowrap text-[clamp(15px,5vw,22px)] font-bold text-[var(--t-accent)]">
                         {retro.legacyScore.toLocaleString()}
                       </span>
-                      <span className="text-[11px] text-[var(--t-g500)]">
+                      <span className="block whitespace-nowrap text-[11px] text-[var(--t-g500)]">
                         레거시 점수
                       </span>
                     </div>
                     <div>
-                      <span className="block text-[22px] font-bold text-[var(--t-g900)]">
+                      <span className="block whitespace-nowrap text-[clamp(15px,5vw,22px)] font-bold text-[var(--t-g900)]">
                         {retro.averages.ppg}/{retro.averages.rpg}/{retro.averages.apg}
                       </span>
-                      <span className="text-[11px] text-[var(--t-g500)]">
+                      <span className="block whitespace-nowrap text-[11px] text-[var(--t-g500)]">
                         통산 평균
                       </span>
                     </div>
                     <div>
-                      <span className="block text-[22px] font-bold text-[var(--t-gold)]">
+                      <span className="block whitespace-nowrap text-[clamp(15px,5vw,22px)] font-bold text-[var(--t-gold)]">
                         {retro.totals.championships}/{retro.totals.mvps}
                       </span>
-                      <span className="text-[11px] text-[var(--t-g500)]">
+                      <span className="block whitespace-nowrap text-[11px] text-[var(--t-g500)]">
                         우승 / MVP
                       </span>
                     </div>
@@ -1135,7 +1136,7 @@ export function RetirementCeremony({
               type="button"
               data-testid="open-career-card"
               onClick={() => setShareCardOpen(true)}
-              className="t-cta-sub"
+              className="t-cta-sub t-cta-sub--accent"
             >
               커리어 카드
             </button>
@@ -1163,7 +1164,7 @@ export function RetirementCeremony({
                     completeRetirementAndReturnHome();
                     resetActiveCareer();
                   }}
-                  className="t-cta-sub"
+                  className="t-cta-sub t-cta-sub--card"
                 >
                   새 유망주 바로 시작
                 </button>
