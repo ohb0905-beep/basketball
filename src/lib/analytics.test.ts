@@ -13,6 +13,7 @@ import {
   normalizePlayerRole,
   normalizePlayoffResult,
   resolvePeakLeague,
+  resolveAcquisitionSource,
   trackGameEvent,
   type SubscribableCareerStore,
   type TrackableCareerStoreSnapshot,
@@ -1186,4 +1187,22 @@ test('1.0.1 funnel events: creation_started once per entry and draft_completed o
   assert.equal(captured.length, 3);
   assert.equal(captured[2].payload.drafted, false);
   assert.equal(captured[2].payload.scoutingGrade, null);
+});
+
+test('1.3.2 처음 들어온 경로: ?src= → 이전 사이트 도메인 → direct, 기존 유저는 unknown', () => {
+  const base = { search: '', referrer: '', ownHostname: 'www.roadtomvp.com', isReturningVisitor: false };
+  assert.equal(resolveAcquisitionSource({ ...base, search: '?src=HoopIn' }), 'hoopin');
+  assert.equal(
+    resolveAcquisitionSource({ ...base, search: '?src=hoopin', referrer: 'https://m.dcinside.com/board/x' }),
+    'hoopin'
+  );
+  // 허용 안 되는 값은 버리고 이전 사이트로 넘어갑니다.
+  assert.equal(
+    resolveAcquisitionSource({ ...base, search: '?src=<script>', referrer: 'https://m.dcinside.com/board/x?id=1' }),
+    'm.dcinside.com'
+  );
+  assert.equal(resolveAcquisitionSource({ ...base, referrer: 'https://www.roadtomvp.com/patch-notes' }), 'direct');
+  assert.equal(resolveAcquisitionSource({ ...base, referrer: 'not a url' }), 'direct');
+  assert.equal(resolveAcquisitionSource(base), 'direct');
+  assert.equal(resolveAcquisitionSource({ ...base, search: '?src=insta', isReturningVisitor: true }), 'unknown');
 });

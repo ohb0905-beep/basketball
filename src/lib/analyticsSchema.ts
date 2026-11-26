@@ -96,6 +96,8 @@ export interface SessionStartPayload {
   hofCount: number;
   /** 1.1.4: 홈 화면 앱으로 실행했는지 (standalone) 브라우저인지 */
   displayMode?: 'standalone' | 'browser';
+  /** 1.3.2: 처음 들어온 경로 (?src= 값, 이전 사이트 도메인, 'direct', 1.3.2 이전 유저는 'unknown') */
+  source?: string;
 }
 
 export interface CareerCreatedPayload {

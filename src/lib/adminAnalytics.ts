@@ -570,6 +570,8 @@ export interface AdminAnalyticsReport {
   };
   environment: {
     devices: DistributionItem[];
+    /** 1.3.2: 기간 안에 처음 들어온 유저의 경로. null = 경로 집계 SQL 미설치 */
+    sources: DistributionItem[] | null;
     versions: DistributionItem[];
   };
   insights: string[];
@@ -1375,6 +1377,8 @@ export interface BuildAdminAnalyticsReportOptions {
   nowMs?: number;
   setupRequired?: boolean;
   tableNotReady?: boolean;
+  /** admin_analytics_sources 결과 (미설치면 null/undefined) */
+  sources?: unknown;
 }
 
 /**
@@ -1516,6 +1520,9 @@ export function buildAdminAnalyticsReport(
       draftRounds: toDistribution(keyCounts(changesRaw.byDraftRound), (k) => `${k}라운드`),
     },
     environment: {
+      sources: options.sources
+        ? toDistribution(keyCounts(asRecord(options.sources).items), (k) => (k === 'direct' ? '직접 접속' : k))
+        : null,
       devices: toDistribution(
         keyCounts(raw.devices),
         (k) => ANALYTICS_DEVICE_LABELS[k as AnalyticsDeviceType] ?? '미분류'

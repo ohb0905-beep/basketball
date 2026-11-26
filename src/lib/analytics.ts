@@ -31,6 +31,8 @@ const SESSION_ID_STORAGE_KEY = 'road_to_mvp_analytics_session_id_v1';
 const DEDUPE_STORAGE_KEY = 'road_to_mvp_analytics_dedupe_v1';
 const PERSISTENT_DEDUPE_STORAGE_KEY = 'road_to_mvp_analytics_milestone_dedupe_v1';
 const CAREER_RUN_MAP_STORAGE_KEY = 'road_to_mvp_analytics_career_runs_v1';
+/** 1.3.2: 처음 들어온 경로 (한 번 정해지면 바뀌지 않음). 주소 이사 때 함께 옮깁니다. */
+export const ACQUISITION_SOURCE_STORAGE_KEY = 'road_to_mvp_analytics_source_v1';
 
 const MAX_TRACKED_CAREER_RUNS = 20;
 const MAX_STORED_DEDUPE_KEYS = 120;
@@ -50,6 +52,8 @@ const LEAGUE_TIER_RANK: Record<LeagueId, number> = {
 };
 
 let memoryAnonymousId: string | null = null;
+/** 이번 페이지에서 익명 ID를 새로 만들었는지 (= 처음 온 브라우저) */
+let createdAnonymousIdThisPage = false;
 let memorySessionId: string | null = null;
 const memoryDedupeSet = new Set<string>();
 const memoryPersistentDedupeSet = new Set<string>();
@@ -333,8 +337,57 @@ export function getOrCreateAnonymousId(): string {
 
   const created = generateAnonymousUuid();
   memoryAnonymousId = created;
+  createdAnonymousIdThisPage = true;
   safeStorageSet(window.localStorage, ANONYMOUS_ID_STORAGE_KEY, created);
   return created;
+}
+
+const SOURCE_PARAM_PATTERN = /^[a-z0-9_-]{1,32}$/;
+
+/**
+ * 처음 들어온 경로를 정합니다 (순수 함수).
+ * ?src= 표시 → 이전 사이트 도메인(전체 주소는 남기지 않음) → 'direct' 순서.
+ * 1.3.2 전부터 하던 브라우저는 경로를 알 수 없으므로 'unknown'.
+ */
+export function resolveAcquisitionSource(input: {
+  search: string;
+  referrer: string;
+  ownHostname: string;
+  isReturningVisitor: boolean;
+}): string {
+  if (input.isReturningVisitor) return 'unknown';
+  const src = new URLSearchParams(input.search).get('src')?.trim().toLowerCase() ?? '';
+  if (SOURCE_PARAM_PATTERN.test(src)) return src;
+  try {
+    const host = new URL(input.referrer).hostname.toLowerCase();
+    if (host && host !== input.ownHostname.toLowerCase()) return host.slice(0, 64);
+  } catch {
+    // 이전 사이트 정보가 없거나 형식이 이상하면 직접 접속으로 봅니다.
+  }
+  return 'direct';
+}
+
+/** 처음 들어온 경로를 한 번만 저장하고 이후에는 저장값을 돌려줍니다. */
+export function getOrCreateAcquisitionSource(): string {
+  if (typeof window === 'undefined') return 'unknown';
+  const stored = safeStorageGet(window.localStorage, ACQUISITION_SOURCE_STORAGE_KEY);
+  if (stored) return stored;
+  try {
+    const hadAnonymousId =
+      !createdAnonymousIdThisPage &&
+      Boolean(safeStorageGet(window.localStorage, ANONYMOUS_ID_STORAGE_KEY));
+    const source = resolveAcquisitionSource({
+      search: window.location.search,
+      referrer: document.referrer,
+      ownHostname: window.location.hostname,
+      isReturningVisitor: hadAnonymousId,
+    });
+    safeStorageSet(window.localStorage, ACQUISITION_SOURCE_STORAGE_KEY, source);
+    return source;
+  } catch {
+    // 경로 판별 실패가 session_start 전송을 막으면 안 됩니다. 저장하지 않고 다음 접속에 다시 시도합니다.
+    return 'unknown';
+  }
 }
 
 export function getOrCreateSessionId(): string {
@@ -957,6 +1010,7 @@ export function attachCareerAnalyticsTracker(
           ? initialState.hofList.length
           : 0,
         displayMode: detectDisplayMode(),
+        source: getOrCreateAcquisitionSource(),
       },
       {
         careerRunId: initialCareerRunId,
@@ -1014,6 +1068,7 @@ export function attachCareerAnalyticsTracker(
  * 단위 테스트 전용 메모리 상태 초기화 헬퍼
  */
 export function __resetAnalyticsClientMemoryForTest(): void {
+  createdAnonymousIdThisPage = false;
   memoryAnonymousId = null;
   memorySessionId = null;
   memoryDedupeSet.clear();

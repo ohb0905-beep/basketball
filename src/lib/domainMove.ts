@@ -38,6 +38,7 @@ export const CARRIED_STORAGE_KEYS: readonly string[] = [
   'road_to_mvp_analytics_anon_id_v1',
   'road_to_mvp_analytics_career_runs_v1',
   'road_to_mvp_analytics_milestone_dedupe_v1',
+  'road_to_mvp_analytics_source_v1',
   SURVEY_SEEN_STORAGE_KEY,
 ];
 

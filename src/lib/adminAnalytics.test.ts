@@ -1015,3 +1015,16 @@ test('short ranges: 24h and today start times, hourly trend and version filter v
   assert.equal(v4.trendGranularity, 'hour');
   assert.equal(hasNaNDeep(v4), false);
 });
+
+test('1.3.2 유입 경로 표: 집계 함수 미설치면 null, 결과는 경로별 분포로 바뀜', () => {
+  const base = { range: '7d', version: 'all', league: 'all', nowMs: NOW_MS } as const;
+  assert.equal(buildAdminAnalyticsReport({}, [], base).environment.sources, null);
+  const report = buildAdminAnalyticsReport({}, [], {
+    ...base,
+    sources: { items: [{ key: 'hoopin', count: 3 }, { key: 'direct', count: 1 }] },
+  });
+  assert.deepEqual(
+    report.environment.sources?.map((i) => [i.label, i.count, i.percent]),
+    [['hoopin', 3, 75], ['직접 접속', 1, 25]]
+  );
+});

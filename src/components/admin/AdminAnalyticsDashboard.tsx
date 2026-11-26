@@ -971,6 +971,28 @@ export function AdminAnalyticsDashboard({
           )}
         </section>
 
+        <section aria-label="유입 경로" data-testid="analytics-sources" className={CARD_CLASS}>
+          <SectionHeader
+            title="유입 경로별 신규 유저"
+            description="이 기간에 처음 들어온 유저가 어디서 왔는지 (?src= 링크 표시 또는 이전 사이트). 1.3.2 이전 유저는 빠지고, 버전·리그 필터와 무관합니다."
+            aside={allLeagues(ANALYTICS_RANGE_LABELS[range])}
+          />
+          {showSkeleton ? (
+            <SkeletonRows count={3} />
+          ) : report?.environment.sources === null ? (
+            <p className="text-[13px] text-[var(--t-g500)]">
+              Supabase에서 supabase/migrations/20261129_analytics_acquisition_source.sql을 실행하면 표시됩니다.
+            </p>
+          ) : (
+            <DistributionBarList
+              items={report?.environment.sources ?? []}
+              barColorClass="bg-[var(--t-ok)]"
+              unitLabel="명"
+              emptyText="아직 1.3.2 이후 새로 들어온 유저가 없습니다."
+            />
+          )}
+        </section>
+
         <section aria-label="접속 환경" data-testid="analytics-dist-env" className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <div className={CARD_CLASS}>
             <SectionHeader title="기기별 플레이어" description="기기 유형별 고유 플레이어 수" aside={allLeagues()} />
