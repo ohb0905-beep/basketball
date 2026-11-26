@@ -169,6 +169,17 @@ body {
   padding-bottom: max(10px, env(safe-area-inset-bottom));
 }
 
+/* 1.4.1 아이폰 홈 화면 앱(black-translucent 상태바)에서 위쪽 고정 요소가
+   상태바·다이내믹 아일랜드 밑에 깔려 눌리지 않던 문제: 상태바 높이만큼 내립니다.
+   브라우저에서는 값이 0이라 그대로입니다. */
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+.top-safe-toast {
+  top: calc(60px + env(safe-area-inset-top));
+}
+
 /* Custom slim range slider */
 input[type="range"].t-range {
   -webkit-appearance: none;
