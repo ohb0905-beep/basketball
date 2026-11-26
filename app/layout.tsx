@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { PwaRegistrar } from '../src/components/pwa/PwaRegistrar';
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: '로드 투 MVP',
@@ -75,6 +76,7 @@ export default function RootLayout({
       >
         {children}
         <PwaRegistrar />
+        <Analytics />
       </body>
     </html>
   );
