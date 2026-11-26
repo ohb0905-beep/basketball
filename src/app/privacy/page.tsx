@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { LegalDocumentLayout } from '../../components/legal/LegalDocumentLayout';
-import { GAME_NAME } from '../../config/appMeta';
+import { CONTACT_EMAIL, GAME_NAME } from '../../config/appMeta';
 
 export const metadata: Metadata = {
   title: `개인정보처리방침 · ${GAME_NAME}`,
@@ -11,7 +11,7 @@ export default function PrivacyPolicyPage() {
   return (
     <LegalDocumentLayout
       title="개인정보처리방침"
-      updatedAt="2026.11.25"
+      updatedAt="2026.11.26"
       currentPath="/privacy"
     >
       <p>
@@ -131,7 +131,13 @@ export default function PrivacyPolicyPage() {
         <p>
           서비스 기능 변경 등에 따라 본 방침이 수정될 경우 본 페이지를 통해
           안내합니다. 개인정보 처리 또는 서비스와 관련한 문의는 게임 화면의
-          &lsquo;문의 / 피드백&rsquo; 창구를 통해 접수하실 수 있습니다.
+          &lsquo;문의 / 피드백&rsquo; 창구 또는 문의 메일(
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            className="font-medium text-[var(--t-g900)] underline underline-offset-4 break-all"
+          >
+            {CONTACT_EMAIL}
+          </a>)로 접수하실 수 있습니다.
         </p>
       </section>
     </LegalDocumentLayout>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useSyncExternalStore } from 'react';
-import { GAME_NAME, GAME_VERSION } from '../../config/appMeta';
+import { CONTACT_EMAIL, GAME_NAME, GAME_VERSION } from '../../config/appMeta';
 import {
   hasUnseenPatchNotes,
   markPatchNotesSeen,
@@ -120,14 +120,26 @@ export function Footer({
           </nav>
         </div>
 
-        {/* 2행: 상표권·저작권 면책 문구 */}
+        {/* 2행: 문의 메일 */}
+        <p className="text-[11px] text-[var(--t-g500)] text-center sm:text-left">
+          문의 메일{' '}
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            data-testid="footer-contact-email"
+            className="font-medium text-[var(--t-g600)] hover:text-[var(--t-g900)] hover:underline underline-offset-4 break-all transition-colors"
+          >
+            {CONTACT_EMAIL}
+          </a>
+        </p>
+
+        {/* 3행: 상표권·저작권 면책 문구 */}
         <p className="text-[11px] text-[var(--t-g500)] leading-relaxed text-center sm:text-left">
           본 게임은 비공식 농구 커리어 시뮬레이션 게임이며, 게임 내 언급되는
           리그·구단·대회 명칭 등 관련 상표 및 지식재산권은 각 권리자에게
           있습니다.
         </p>
 
-        {/* 3행: 서비스 저작권 표시 */}
+        {/* 4행: 서비스 저작권 표시 */}
         <p
           suppressHydrationWarning
           className="text-[11px] text-[var(--t-g400)] tabular-nums text-center sm:text-left"

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { LegalDocumentLayout } from '../../components/legal/LegalDocumentLayout';
-import { GAME_NAME } from '../../config/appMeta';
+import { CONTACT_EMAIL, GAME_NAME } from '../../config/appMeta';
 
 export const metadata: Metadata = {
   title: `이용약관 · ${GAME_NAME}`,
@@ -11,7 +11,7 @@ export default function TermsOfServicePage() {
   return (
     <LegalDocumentLayout
       title="이용약관"
-      updatedAt="2026.11.24"
+      updatedAt="2026.11.26"
       currentPath="/terms"
     >
       <p>
@@ -100,8 +100,14 @@ export default function TermsOfServicePage() {
           본 서비스는 무료로 제공되며, 관련 법령이 허용하는 범위 내에서 로컬
           저장 데이터 유실, 브라우저 호환성 문제, 일시적 네트워크 장애 등으로
           발생한 손해에 대해 별도의 책임을 지지 않습니다. 서비스 이용과 관련한
-          문의 및 오류 제보는 게임 내 &lsquo;문의 / 피드백&rsquo; 기능을 통해
-          접수해 주세요.
+          문의 및 오류 제보는 게임 내 &lsquo;문의 / 피드백&rsquo; 기능 또는
+          문의 메일(
+          <a
+            href={`mailto:${CONTACT_EMAIL}`}
+            className="font-medium text-[var(--t-g900)] underline underline-offset-4 break-all"
+          >
+            {CONTACT_EMAIL}
+          </a>)로 접수해 주세요.
         </p>
       </section>
     </LegalDocumentLayout>
