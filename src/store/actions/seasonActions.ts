@@ -494,7 +494,7 @@ export function createSeasonActions(
           ? `포스트시즌 종료 · ${updatedBracket.playoffResultLabel}`
           : '플레이오프 라운드 진행 완료',
         description: updatedBracket.playerReachedFinals
-          ? '파이널 결승전 실시간 중계에 입장해 우승에 도전하세요.'
+          ? '파이널 대진표에서 시리즈를 시작해 우승에 도전하세요.'
           : updatedBracket.pendingConfFinalsGame7
           ? '컨퍼런스 파이널 7차전 실시간 중계에 입장하세요.'
           : champTeam
@@ -911,7 +911,7 @@ export function createSeasonActions(
             id: `TOAST_${Date.now()}`,
             title: 'NBA 파이널 진출 확정',
             description:
-              '파이널 대진표에서 결승전 실시간 중계에 입장해 우승에 도전하세요.',
+              '파이널 대진표에서 시리즈를 시작해 우승에 도전하세요.',
             tone: 'orange',
           },
         });

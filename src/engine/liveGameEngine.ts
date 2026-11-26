@@ -30,7 +30,6 @@ import {
   getLiveGameTournamentType,
 } from './internationalEngine';
 import { evaluateRealisticFinalsMvp } from './playoffEngine';
-import type { DecisiveGameKind } from './finalsSeries';
 
 /**
  * 결승전(리그 파이널, 컨퍼런스 파이널 7차전, 국제대회 결승전/3·4위전) 실시간 쿼터별 중계 상태를 생성합니다.
@@ -43,12 +42,7 @@ export function createLiveFinalGame(
     tournamentType?: InternationalTournamentType;
     tournamentYear?: number;
     preMatches?: AsianGamesMatchLog[];
-    finalsContext?: {
-      gameNo: number;
-      playerWins: number;
-      oppWins: number;
-      kind: DecisiveGameKind;
-    };
+    finalsContext?: LiveGameState['finalsContext'];
   }
 ): LiveGameState {
   const isInternational = isInternationalLiveGame(gameType);
@@ -149,6 +143,7 @@ export function createLiveFinalGame(
     internationalPreMatches: options?.preMatches,
     title,
     subtitle,
+    finalsContext: finalsCtx,
     playerTeam,
     opponentTeam,
     quarter: 0,
@@ -243,6 +238,15 @@ function buildFinalOutcome(
     baseHeadline = won
       ? `컨퍼런스 파이널 7차전 승리 — ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name}에 ${teamScore}-${oppScore} 승리로 파이널 진출`
       : `컨퍼런스 파이널 7차전 패배 — ${liveGame.playerTeam.name}, ${teamScore}-${oppScore} 석패로 시즌 마감`;
+  } else if (
+    liveGame.finalsContext &&
+    (won ? liveGame.finalsContext.kind === 'ELIMINATION' : liveGame.finalsContext.kind === 'CLINCH')
+  ) {
+    // 시리즈가 이어지는 결정전은 우승/준우승 대신 경기 후 시리즈 상황을 알립니다.
+    const { gameNo, playerWins, oppWins } = liveGame.finalsContext;
+    baseHeadline = won
+      ? `파이널 ${gameNo}차전 승리 — 시리즈 ${playerWins + 1}승 ${oppWins}패, 결정전이 이어집니다`
+      : `파이널 ${gameNo}차전 패배 — 시리즈 ${playerWins}승 ${oppWins + 1}패, 최종 결정전으로`;
   } else {
     baseHeadline = won
       ? `챔피언십 우승 — ${liveGame.playerTeam.name}, ${liveGame.opponentTeam.name} 제압 (${career.name} ${playerStats.pts}점${

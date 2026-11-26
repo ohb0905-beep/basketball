@@ -1,3 +1,5 @@
+import type { DecisiveGameKind } from '../engine/finalsSeries';
+
 export type LeagueId =
   | 'HIGH_SCHOOL'
   | 'US_HIGH_SCHOOL'
@@ -487,6 +489,13 @@ export interface LiveGameState {
   internationalPreMatches?: AsianGamesMatchLog[];
   title: string;
   subtitle: string;
+  /** 결승 시리즈 결정전 문맥 (1.4.0+, 없으면 예전 단판 결승) */
+  finalsContext?: {
+    gameNo: number;
+    playerWins: number;
+    oppWins: number;
+    kind: DecisiveGameKind;
+  };
   playerTeam: TeamInfo;
   opponentTeam: TeamInfo;
   quarter: number; // 현재 진행 완료된 쿼터 (0 = 시작 전, 1~4, 5=OT)

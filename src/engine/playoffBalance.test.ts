@@ -371,6 +371,11 @@ test('스토어: 결승 시리즈 흐름', async () => {
     const afterSkip = S().career!.playoffBracket;
     S().playNextLiveQuarter();
     assert.deepEqual(S().career!.playoffBracket, afterSkip);
+    // 시리즈가 이어지면 우승/준우승이 아닌 시리즈 상황 헤드라인이 기사에도 남습니다.
+    const headline = S().career!.liveGame!.finalOutcome!.headline;
+    assert.equal(S().career!.seasonLogs.at(-1)!.narrativeLog[0], headline);
+    if (afterSkip?.championTeamId) assert.match(headline, /^(챔피언십 우승|파이널 준우승)/);
+    else assert.match(headline, /^파이널 \d차전 (승리 — .*결정전이 이어집니다|패배 — .*최종 결정전으로)/);
     S().closeLiveGameAndReturn();
     if (!S().career!.playoffBracket?.championTeamId) {
       assert.equal(S().career!.seasonPhase, 'POSTSEASON_BRACKET');
